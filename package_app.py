@@ -20,6 +20,7 @@ def build_exe():
     # --noconsole: hide the command window for clean desktop experience
     cmd = [
         "pyinstaller",
+        "--clean",
         "--onefile",
         "--name", "MIND-FLOW",
         "--add-data", "static;static",
