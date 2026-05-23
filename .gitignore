@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Packaging / Build outputs
+build/
+dist/
+*.spec
+
+# Local log files
+*.log
+app_stderr.log
+app_stdout.log
+
+# Temporary REPL/Step files
+app_repl_*.txt
+app_step_*.py
+
+# Data/Config files
+mind_flow_data.json
+Workspace_Profiles/
