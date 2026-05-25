@@ -586,6 +586,7 @@ def run_pyside_gui(url):
     """Run a standalone PySide6 QtWebEngineView window."""
     from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
     from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEngineProfile
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QColor
     import psutil
@@ -620,6 +621,7 @@ def run_pyside_gui(url):
     window.resize(1280, 800)
     
     web_view = QWebEngineView()
+    web_view.page().profile().setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
     web_view.setUrl(QUrl(url))
     web_view.page().setBackgroundColor(QColor("#0b0f19"))
     
