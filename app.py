@@ -15,9 +15,11 @@ class Unbuffered:
 
 # Redirect standard logs for PyInstaller executable runs
 if getattr(sys, 'frozen', False):
+    is_gui = "--gui" in sys.argv
+    log_suffix = "_gui" if is_gui else ""
     try:
-        sys.stdout = Unbuffered(open("C:\\MIND\\app_stdout.log", "w", encoding="utf-8"))
-        sys.stderr = Unbuffered(open("C:\\MIND\\app_stderr.log", "w", encoding="utf-8"))
+        sys.stdout = Unbuffered(open(f"C:\\MIND\\app{log_suffix}_stdout.log", "w", encoding="utf-8"))
+        sys.stderr = Unbuffered(open(f"C:\\MIND\\app{log_suffix}_stderr.log", "w", encoding="utf-8"))
     except Exception:
         sys.stdout = io.StringIO()
         sys.stderr = io.StringIO()
@@ -582,12 +584,15 @@ def main_state_machine(gui_process=None):
 
 def run_pyside_gui(url):
     """Run a standalone PySide6 QtWebEngineView window."""
+    import os
+    # Fix GPU flickering / hardware acceleration glitching in QtWebEngine
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu-compositing"
+    
     from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QColor
     import psutil
-    import os
     import sys
     import threading
     
