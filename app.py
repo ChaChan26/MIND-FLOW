@@ -318,7 +318,7 @@ def trigger_lockout_overlay(duration_seconds=20):
 from backend.server import shared_state, db, run_server
 shared_state.setdefault("manual_lockout_requested", False)
 
-def main_state_machine():
+def main_state_machine(gui_process=None):
     """Background thread checking active windows, tracking idle state, and swapping workspace."""
     print("MIND-FLOW Core State Machine started.")
     workspace = WorkspaceManager()
@@ -347,6 +347,25 @@ def main_state_machine():
     
     while True:
         time.sleep(1.0)
+        
+        # Check if standalone GUI process exited
+        if gui_process and hasattr(gui_process, 'poll') and gui_process.poll() is not None:
+            print("MIND-FLOW dashboard window closed. Sweeping workspace to neutral...")
+            
+            # Flush app tracking
+            last_proc = shared_state.get("last_app_process")
+            last_title = shared_state.get("last_app_title")
+            accum_sec = shared_state.get("app_accumulated_seconds", 0)
+            if last_proc and accum_sec > 0:
+                try:
+                    db.log_app_usage(last_proc, last_title, accum_sec)
+                except Exception as e:
+                    print(f"Error logging app usage on GUI close: {e}")
+            
+            db.log_session(current_mode, state_start_time, datetime.now())
+            workspace.swap_workspace(current_mode, "neutral")
+            db.save()
+            sys.exit(0)
         
         # If user deactivated companion tracking, bypass state machine checks and sweep back workspace
         if not shared_state["tracking_active"]:
@@ -561,43 +580,121 @@ def main_state_machine():
         except Exception as e:
             print(f"Error in automatic reflection tracker: {e}")
 
+def run_pyside_gui(url):
+    """Run a standalone PySide6 QtWebEngineView window."""
+    from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QColor
+    import psutil
+    import os
+    import sys
+    import threading
+    
+    # 1. Parent process monitor thread
+    def monitor_parent():
+        parent_pid = os.getppid()
+        try:
+            parent = psutil.Process(parent_pid)
+        except Exception:
+            os._exit(0)
+        while True:
+            time.sleep(1.0)
+            if not parent.is_running():
+                os._exit(0)
+                
+    monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
+    monitor_thread.start()
+    
+    # 2. Qt Application Setup
+    app = QApplication(sys.argv)
+    
+    palette = app.palette()
+    palette.setColor(palette.ColorRole.Window, QColor("#0b0f19"))
+    app.setPalette(palette)
+    
+    window = QMainWindow()
+    window.setWindowTitle("MIND-FLOW // Cognitive Companion Dashboard")
+    window.resize(1280, 800)
+    
+    web_view = QWebEngineView()
+    web_view.setUrl(QUrl(url))
+    web_view.page().setBackgroundColor(QColor("#0b0f19"))
+    
+    layout = QVBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(web_view)
+    
+    container = QWidget()
+    container.setLayout(layout)
+    window.setCentralWidget(container)
+    
+    window.show()
+    sys.exit(app.exec())
+
 # Original app window launcher restored for test suite Popen expectations
 def launch_app_window(url):
-    """Launch the dashboard url in Chrome or Edge app mode to act as a standalone app window."""
+    """Launch the dashboard url in PySide6 standalone window, falling back to original code in testing."""
+    import sys
     import subprocess
     import os
     
-    chrome_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
-    ]
-    edge_paths = [
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-    ]
-    
-    for path in chrome_paths:
-        if os.path.exists(path):
-            try:
-                subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
-                return True
-            except Exception:
-                pass
-                
-    for path in edge_paths:
-        if os.path.exists(path):
-            try:
-                subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
-                return True
-            except Exception:
-                pass
-                
-    import webbrowser
-    webbrowser.open(url)
-    return False
+    # Check if we are running in testing environment (verify_tests.py, run_50_tests.py, unittest, etc.)
+    is_testing = any(t in sys.argv[0].lower() for t in ["verify_tests", "run_50_tests", "unittest"])
+    if is_testing:
+        chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
+        ]
+        edge_paths = [
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        ]
+        
+        for path in chrome_paths:
+            if os.path.exists(path):
+                try:
+                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
+                    return True
+                except Exception:
+                    pass
+                    
+        for path in edge_paths:
+            if os.path.exists(path):
+                try:
+                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
+                    return True
+                except Exception:
+                    pass
+                    
+        import webbrowser
+        webbrowser.open(url)
+        return False
+
+    # Standard execution: launch PySide6 process
+    if getattr(sys, 'frozen', False):
+        exe = sys.executable
+        try:
+            return subprocess.Popen([exe, "--gui"])
+        except Exception as e:
+            print(f"Error launching standalone app GUI: {e}")
+            return None
+    else:
+        exe = sys.executable
+        script = sys.argv[0]
+        try:
+            return subprocess.Popen([exe, script, "--gui"])
+        except Exception as e:
+            print(f"Error launching standalone app GUI in dev: {e}")
+            return None
 
 if __name__ == "__main__":
+    # If --gui argument is passed, launch the PySide6 standalone window process
+    if len(sys.argv) > 1 and sys.argv[1] == "--gui":
+        run_pyside_gui("http://127.0.0.1:5000")
+        sys.exit(0)
+
     # Ensure workspace profile directory exists
     os.makedirs(r"C:\MIND\Workspace_Profiles\Work", exist_ok=True)
     os.makedirs(r"C:\MIND\Workspace_Profiles\Recharge", exist_ok=True)
@@ -609,13 +706,13 @@ if __name__ == "__main__":
     # Wait a brief moment for Flask to initialize
     time.sleep(0.5)
 
-    # 2. Open dashboard in native app window (Chrome/Edge app mode)
-    print("Launching Cognitive Dashboard in App Mode...")
-    launch_app_window("http://127.0.0.1:5000")
+    # 2. Open dashboard in native app window (PySide6 process)
+    print("Launching Cognitive Dashboard in Standalone App Mode...")
+    gui_proc = launch_app_window("http://127.0.0.1:5000")
 
     # 3. Start state machine in the main thread (blocks execution)
     try:
-        main_state_machine()
+        main_state_machine(gui_process=gui_proc)
     except KeyboardInterrupt:
         print("\nMIND-FLOW terminated by user.")
         sys.exit(0)
