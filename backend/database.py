@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 import threading
 from datetime import datetime
 
@@ -27,7 +28,8 @@ class MindFlowDB:
         self.data = {
             "settings": DEFAULT_SETTINGS.copy(),
             "sessions": [],
-            "reflections": []
+            "reflections": [],
+            "app_usage": []
         }
         self.load()
 
@@ -41,6 +43,7 @@ class MindFlowDB:
                         self.data["settings"] = {**DEFAULT_SETTINGS, **loaded.get("settings", {})}
                         self.data["sessions"] = loaded.get("sessions", [])
                         self.data["reflections"] = loaded.get("reflections", [])
+                        self.data["app_usage"] = loaded.get("app_usage", [])
                 except Exception as e:
                     print(f"Error loading database, resetting to default: {e}")
                     self.save()
@@ -48,11 +51,23 @@ class MindFlowDB:
                 self.save()
 
     def save(self):
+        """Atomic write: write to temp file then rename to prevent corruption on crash."""
         with self.lock:
             try:
-                os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
-                with open(self.filepath, "w", encoding="utf-8") as f:
-                    json.dump(self.data, f, indent=4, ensure_ascii=False)
+                dir_path = os.path.dirname(self.filepath)
+                os.makedirs(dir_path, exist_ok=True)
+                fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.json')
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        json.dump(self.data, f, indent=4, ensure_ascii=False)
+                    os.replace(tmp_path, self.filepath)
+                except Exception:
+                    # Clean up temp file on failure
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
             except Exception as e:
                 print(f"Error saving database: {e}")
 
@@ -70,10 +85,11 @@ class MindFlowDB:
                 elif isinstance(v, list):
                     # Filter, lowercase, and exclude generic browser names to prevent tracking hijacks
                     disallowed = {"chrome.exe", "chrome", "msedge.exe", "msedge", "firefox.exe", "firefox", "opera.exe", "opera", "brave.exe", "brave", "iexplore.exe", "iexplore", "browser", "explorer"}
-                    self.data["settings"][k] = [
+                    filtered = [
                         str(x).strip().lower() for x in v 
                         if x and str(x).strip().lower() not in disallowed
                     ]
+                    self.data["settings"][k] = filtered[:50]  # Cap keyword count
         self.save()
 
     def log_session(self, mode, start_time, end_time, brain_dump=None, bypassed=False):
@@ -111,6 +127,41 @@ class MindFlowDB:
 
     def get_sessions(self):
         return self.data["sessions"]
+
+    def log_app_usage(self, process, title, duration):
+        """
+        Logs duration (in seconds) spent on a specific process on the current date.
+        """
+        if not process or process == "None":
+            return
+        
+        with self.lock:
+            today_str = datetime.today().date().isoformat()
+            
+            # Find if we already have an entry for this process and date
+            found = False
+            for entry in self.data.setdefault("app_usage", []):
+                if entry.get("date") == today_str and entry.get("process") == process:
+                    entry["duration"] = entry.get("duration", 0) + duration
+                    # Update title to the latest active window title
+                    if title and title != "None":
+                        entry["title"] = title
+                    found = True
+                    break
+            
+            if not found:
+                self.data["app_usage"].append({
+                    "date": today_str,
+                    "process": process,
+                    "title": title if title else "None",
+                    "duration": duration
+                })
+            
+            self.save()
+
+    def get_app_usage(self):
+        with self.lock:
+            return self.data.setdefault("app_usage", [])
 
     def get_adaptive_times(self):
         """Calculate dynamic work minutes and rest seconds based on reflections and bypasses."""

@@ -5,11 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MIND-FLOW // Cognitive Shield Companion</title>
     <meta name="description" content="A self-hosted, silent cognitive assistant protecting your focus and mental energy battery.">
-    <link rel="stylesheet" href="/static/css/style.css?v=3">
+    <link rel="stylesheet" href="/static/css/style.css?v=7">
 </head>
 <body>
-    <div class="glass-bg-glow" id="glow-1"></div>
-    <div class="glass-bg-glow" id="glow-2"></div>
+    <div class="glass-bg-glow-wrapper" id="glow-1">
+        <div class="glass-bg-glow-inner" id="glow-1-inner"></div>
+    </div>
+    <div class="glass-bg-glow-wrapper" id="glow-2">
+        <div class="glass-bg-glow-inner" id="glow-2-inner"></div>
+    </div>
 
     <div class="app-container">
         <!-- Sidebar Navigation -->
@@ -21,36 +25,82 @@
                     <span>COGNITIVE SHIELD</span>
                 </div>
             </div>
-            <nav class="nav-menu">
+            <nav class="nav-menu" role="navigation" aria-label="Main navigation">
                 <div class="nav-indicator" id="nav-indicator"></div>
                 <button class="nav-btn active" id="nav-btn-dashboard" onclick="switchTab('dashboard')">
-                    <span class="btn-icon">⚡</span> Dashboard
+                    <span class="btn-icon">⚡</span> Dashboard <kbd class="kbd-hint">1</kbd>
                 </button>
                 <button class="nav-btn" id="nav-btn-analytics" onclick="switchTab('analytics')">
-                    <span class="btn-icon">📊</span> Energy Map
+                    <span class="btn-icon">📊</span> Energy Map <kbd class="kbd-hint">2</kbd>
                 </button>
                 <button class="nav-btn" id="nav-btn-settings" onclick="switchTab('settings')">
-                    <span class="btn-icon">⚙️</span> Preferences
+                    <span class="btn-icon">⚙️</span> Preferences <kbd class="kbd-hint">3</kbd>
                 </button>
             </nav>
             
             <!-- Ambient Audio Widget -->
             <div class="ambient-audio-card">
                 <div class="audio-header">
-                    <span class="audio-title">🎧 Ambient Sound</span>
+                    <span class="audio-title" onclick="toggleSoundboxCollapse()" style="cursor: pointer; user-select: none;" title="Toggle Collapse">🎧 Ambient Soundbox <span id="soundbox-caret" style="font-size: 0.65rem; margin-left: 0.25rem;">▼</span></span>
                     <button class="audio-toggle-btn" id="audio-toggle-btn" onclick="toggleAmbientAudio()">Play</button>
-                </div>
-                <div class="audio-body">
-                    <div class="audio-control-row">
-                        <select id="ambient-sound-select" class="audio-select" onchange="changeAmbientSound()">
-                            <option value="brown">Brown Noise</option>
-                            <option value="pink">Pink Noise</option>
-                            <option value="white">White Noise</option>
-                            <option value="rain">Deep Rain Synth</option>
-                        </select>
+                    <div class="audio-waveform" id="audio-waveform">
+                        <span class="audio-waveform-bar"></span>
+                        <span class="audio-waveform-bar"></span>
+                        <span class="audio-waveform-bar"></span>
+                        <span class="audio-waveform-bar"></span>
+                        <span class="audio-waveform-bar"></span>
                     </div>
+                </div>
+                <div class="audio-body" id="soundbox-body">
+                    <div class="audio-presets-grid">
+                        <button type="button" class="audio-preset-btn active" data-sound="brown" onclick="selectAmbientSound('brown')" title="Brown Noise: Deep, warm focus rumble">
+                            <span class="preset-icon">🟫</span>
+                            <span class="preset-name">Brown</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="pink" onclick="selectAmbientSound('pink')" title="Pink Noise: Balanced, smooth focus static">
+                            <span class="preset-icon">🌸</span>
+                            <span class="preset-name">Pink</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="white" onclick="selectAmbientSound('white')" title="White Noise: Bright, blocks harsh external noise">
+                            <span class="preset-icon">🌬️</span>
+                            <span class="preset-name">White</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="rain" onclick="selectAmbientSound('rain')" title="Deep Rain: Soothing pitter-patter & wind gusts">
+                            <span class="preset-icon">🌧️</span>
+                            <span class="preset-name">Rain</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="fire" onclick="selectAmbientSound('fire')" title="Cozy Fire: Crackles & pops of a burning campfire">
+                            <span class="preset-icon">🔥</span>
+                            <span class="preset-name">Fire</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="waves" onclick="selectAmbientSound('waves')" title="Ocean Waves: Natural swell and ebb of beach tides">
+                            <span class="preset-icon">🌊</span>
+                            <span class="preset-name">Waves</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="drone" onclick="selectAmbientSound('drone')" title="Cosmic Space: Resonant celestial synth sweeps">
+                            <span class="preset-icon">🪐</span>
+                            <span class="preset-name">Space</span>
+                        </button>
+                        <button type="button" class="audio-preset-btn" data-sound="focus" onclick="selectAmbientSound('focus')" title="Theta Waves: Binaural beats for deep cognitive work">
+                            <span class="preset-icon">🧠</span>
+                            <span class="preset-name">Focus</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Hidden select for backwards compatibility, just in case -->
+                    <select id="ambient-sound-select" style="display: none;">
+                        <option value="brown">Brown Noise</option>
+                        <option value="pink">Pink Noise</option>
+                        <option value="white">White Noise</option>
+                        <option value="rain">Deep Rain Synth</option>
+                        <option value="fire">Cozy Fire</option>
+                        <option value="waves">Ocean Waves</option>
+                        <option value="drone">Cosmic Space</option>
+                        <option value="focus">Theta Waves</option>
+                    </select>
+
                     <div class="audio-volume-row">
-                        <span class="volume-icon">🔊</span>
+                        <span class="volume-icon" id="volume-icon-btn" onclick="toggleMuteAmbient()" style="cursor: pointer; user-select: none;" title="Toggle Mute">🔊</span>
                         <input type="range" id="audio-volume-slider" min="0" max="1" step="0.05" value="0.5" oninput="adjustAmbientVolume(this.value)">
                     </div>
                 </div>
@@ -64,10 +114,11 @@
                 <button class="toggle-btn" id="toggle-shield-btn">Pause Companion</button>
                 <button class="toggle-btn quit-btn" id="quit-app-btn" onclick="quitApplication()">Close App</button>
             </div>
+            <div class="sidebar-resizer" id="sidebar-resizer"></div>
         </aside>
 
         <!-- Main Content Area -->
-        <main class="main-content">
+        <main class="main-content" role="main" aria-label="Dashboard content">
             <!-- TAB 1: DASHBOARD -->
             <section class="tab-content active" id="tab-dashboard">
                 <header class="section-header">
@@ -96,6 +147,7 @@
                                     <div class="battery-inner" id="battery-fill" style="width: 0%;">
                                         <div class="battery-liquid-wave wave-1"></div>
                                         <div class="battery-liquid-wave wave-2"></div>
+                                        <div class="battery-liquid-wave wave-3"></div>
                                         <div class="battery-glow"></div>
                                         <div class="battery-bubbles-container" id="battery-bubbles"></div>
                                     </div>
@@ -159,7 +211,7 @@
                                 <button type="button" class="app-action-btn work-add-btn" onclick="addCurrentAppToKeywords('work')">+ Work</button>
                                 <button type="button" class="app-action-btn recharge-add-btn" onclick="addCurrentAppToKeywords('recharge')">+ Recharge</button>
                             </div>
-                            <button type="button" class="manual-lockout-btn" id="manual-lockout-btn" onclick="triggerManualLockout()">⚡ Force Rest Break (Lockout)</button>
+                            <button type="button" class="manual-lockout-btn" id="manual-lockout-btn" onclick="triggerManualLockout()">🌿 Start Mindful Rest Break</button>
                         </div>
                     </div>
 
@@ -171,6 +223,8 @@
                         <div class="workspace-visual">
                             <div class="portal-sphere" id="portal-sphere">
                                 <div class="portal-core"></div>
+                                <div class="portal-node node-1"></div>
+                                <div class="portal-node node-2"></div>
                             </div>
                             <div class="workspace-info">
                                 <p>Active Profile</p>
@@ -270,7 +324,10 @@
                         <h3>Weekly Fatigue & Friction Analysis</h3>
                         <p class="card-desc">Comparison of task friction against mental energy levels throughout the week.</p>
                         <div class="chart-container" id="chart-container">
-                            <!-- Custom SVG Line Chart will be injected here -->
+                            <!-- Loading skeleton shown before data loads -->
+                            <div class="skeleton-container" id="chart-skeleton">
+                                <div class="skeleton skeleton-chart"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -282,8 +339,27 @@
                         </div>
                     </div>
 
+                    <!-- Application Focus Breakdown Card -->
+                    <div class="card glass-card span-2 app-stats-card">
+                        <div class="app-stats-header">
+                            <div>
+                                <h3>Application Focus Breakdown</h3>
+                                <p class="card-desc" style="margin-bottom: 0;">Time breakdown of your active foreground applications.</p>
+                            </div>
+                            <div class="app-stats-filters">
+                                <button type="button" class="filter-pill active" id="app-filter-today" onclick="setAppStatsFilter('today')">Today</button>
+                                <button type="button" class="filter-pill" id="app-filter-weekly" onclick="setAppStatsFilter('weekly')">Past 7 Days</button>
+                            </div>
+                        </div>
+                        <div class="app-stats-list-wrapper">
+                            <div class="app-stats-list" id="app-stats-list">
+                                <!-- Dynamic entries injected by JS -->
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Recent Roadblocks & Reflection Log -->
-                    <div class="card glass-card reflections-list-card">
+                    <div class="card glass-card span-3 reflections-list-card">
                         <h3>Reflection Logs</h3>
                         <div class="reflections-table-wrapper">
                             <table class="reflections-table">
@@ -296,7 +372,14 @@
                                     </tr>
                                 </thead>
                                 <tbody id="reflections-log-body">
-                                    <!-- Injected logs -->
+                                    <!-- Loading skeletons -->
+                                    <tr class="skeleton-container" id="table-skeleton">
+                                        <td colspan="4">
+                                            <div class="skeleton skeleton-row"></div>
+                                            <div class="skeleton skeleton-row"></div>
+                                            <div class="skeleton skeleton-row"></div>
+                                        </td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -313,56 +396,72 @@
                     </div>
                 </header>
 
-                <div class="card glass-card max-width-card">
-                    <h3>Focus & Recharge Parameters</h3>
-                    <form id="settings-form" class="settings-form-layout">
-                        <div class="settings-grid">
+                <form id="settings-form" class="settings-form-layout">
+                    <div class="grid-layout">
+                        <!-- Card 1: Focus & Sprint Timers -->
+                        <div class="card glass-card">
+                            <h3>Focus & Sprint Timers</h3>
+                            <p class="card-desc">Configure the cognitive duration and idle thresholds.</p>
+                            
                             <div class="form-group">
                                 <label for="work-limit-input">Work Block Limit (Minutes)</label>
-                                <p class="setting-desc">Maximum study/work duration before enforcing a 20s visual break.</p>
+                                <p class="setting-desc">Maximum duration before visual break.</p>
                                 <input type="number" id="work-limit-input" min="5" max="180" required>
                             </div>
-                            <div class="form-group">
+                            
+                            <div class="form-group" style="margin-top: 1rem;">
                                 <label for="idle-timeout-input">Idle Sensing Timeout (Seconds)</label>
-                                <p class="setting-desc">Inactivity period before switching to Rest Mode.</p>
+                                <p class="setting-desc">Inactivity period before switching to Rest.</p>
                                 <input type="number" id="idle-timeout-input" min="10" max="600" required>
                             </div>
-                            <div class="form-group checkbox-group" style="grid-column: span 2; display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+                            
+                            <div class="form-group checkbox-group">
                                 <input type="checkbox" id="autopilot-input" style="width: 18px; height: 18px; cursor: pointer;">
                                 <div>
-                                    <label for="autopilot-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Cognitive Autopilot (Adaptive Sprints)</label>
-                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Dynamically scale work and rest limits based on reflection ratings and bypassed rest breaks.</p>
+                                    <label for="autopilot-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Cognitive Autopilot</label>
+                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Scale limits dynamically based on ratings.</p>
                                 </div>
                             </div>
                         </div>
 
-                        <hr class="divider">
+                        <!-- Card 2: Foreground Classifier Rules -->
+                        <div class="card glass-card span-2">
+                            <h3>Foreground Classifier Rules</h3>
+                            <p class="card-desc">Define which window titles trigger Work or Recharge modes.</p>
+                            
+                            <div class="form-group">
+                                <label for="work-keywords-input">Work Mode Window Title Keywords</label>
+                                <p class="setting-desc">Comma-separated active window title parts that shift the app to Work Mode.</p>
+                                <textarea id="work-keywords-input" rows="3" placeholder="e.g. vs code, visual studio, word, docs"></textarea>
+                            </div>
 
-                        <div class="form-group">
-                            <label for="work-keywords-input">Work Mode Window Title Keywords</label>
-                            <p class="setting-desc">Comma-separated active window title parts that shift the app to Work Mode.</p>
-                            <textarea id="work-keywords-input" rows="3" placeholder="e.g. vs code, visual studio, word, docs"></textarea>
+                            <div class="form-group" style="margin-top: 1.25rem;">
+                                <label for="recharge-keywords-input">Recharge Mode Window Title Keywords</label>
+                                <p class="setting-desc">Comma-separated active window title parts that shift the app to Recharge Mode.</p>
+                                <textarea id="recharge-keywords-input" rows="3" placeholder="e.g. steam, vlc, netflix, youtube, spotify"></textarea>
+                            </div>
                         </div>
+                    </div>
 
-                        <div class="form-group">
-                            <label for="recharge-keywords-input">Recharge Mode Window Title Keywords</label>
-                            <p class="setting-desc">Comma-separated active window title parts that shift the app to Recharge Mode.</p>
-                            <textarea id="recharge-keywords-input" rows="3" placeholder="e.g. steam, vlc, netflix, youtube, spotify"></textarea>
-                        </div>
-
-                        <div class="settings-actions">
-                            <span class="status-msg" id="settings-save-status"></span>
-                            <button type="submit" class="submit-btn">Apply Settings</button>
-                        </div>
-                    </form>
-                </div>
+                    <div class="settings-actions">
+                        <span class="status-msg" id="settings-save-status"></span>
+                        <button type="submit" class="submit-btn">Apply Settings</button>
+                    </div>
+                </form>
             </section>
         </main>
     </div>
 
-    <!-- Notification Toast -->
-    <div class="toast" id="app-toast">Settings Saved successfully!</div>
+    <!-- Scroll to Top -->
+    <button class="scroll-top-btn" id="scroll-top-btn" aria-label="Scroll to top" onclick="scrollToTop()">↑</button>
 
-    <script src="/static/js/dashboard.js?v=3"></script>
+    <!-- Notification Toast -->
+    <div class="toast" id="app-toast">
+        <span class="toast-icon" id="toast-icon">✓</span>
+        <span id="toast-text">Settings Saved successfully!</span>
+        <div class="toast-progress" id="toast-progress"></div>
+    </div>
+
+    <script src="/static/js/dashboard.js?v=7"></script>
 </body>
 </html>

@@ -108,9 +108,9 @@ def get_idle_seconds():
 def trigger_lockout_overlay(duration_seconds=20):
     """Enforce a fullscreen borderless Tkinter window to lockout visual focus with a Brain Dump phase."""
     try:
-        winsound.Beep(880, 150)
-        winsound.Beep(880, 150)
-        winsound.Beep(1200, 300)
+        # Warm, gentle door-bell style chime instead of a high-pitched alarm
+        winsound.Beep(330, 200)  # E4
+        winsound.Beep(440, 250)  # A4
     except Exception:
         pass
 
@@ -119,7 +119,7 @@ def trigger_lockout_overlay(duration_seconds=20):
     root.overrideredirect(True)
     root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
     root.attributes("-topmost", True)
-    root.configure(bg="#07070d")
+    root.configure(bg="#0b0f19")
 
     captured_dump = ""
     phase1_active = True
@@ -128,18 +128,18 @@ def trigger_lockout_overlay(duration_seconds=20):
 
     frame = tk.Frame(
         root, bg="#0e0e1a", bd=1, relief="solid", 
-        highlightbackground="#23233b", highlightthickness=1, padx=45, pady=40
+        highlightbackground="#2e2e4f", highlightthickness=1, padx=45, pady=40
     )
     frame.place(relx=0.5, rely=0.5, anchor="center")
 
     title_label = tk.Label(
-        frame, text="MIND-FLOW // COGNITIVE SAVE-STATE",
+        frame, text="🌿 COGNITIVE SAVE-STATE 🌿",
         font=("Outfit", 22, "bold"), fg="#b49aff", bg="#0e0e1a"
     )
     title_label.pack(pady=(5, 10))
 
     desc_label = tk.Label(
-        frame, text="Dump your active thoughts or next steps before locking out.",
+        frame, text="Write down your active thoughts or next steps to safely pause your flow.",
         font=("Inter", 12), fg="#9d9db8", bg="#0e0e1a"
     )
     desc_label.pack(pady=5)
@@ -155,7 +155,7 @@ def trigger_lockout_overlay(duration_seconds=20):
 
     timer_label = tk.Label(
         frame, text=f"Grace period: {grace_remaining} seconds remaining",
-        font=("Outfit", 12, "bold"), fg="#ff6b6b", bg="#0e0e1a"
+        font=("Outfit", 12, "bold"), fg="#b49aff", bg="#0e0e1a"
     )
     timer_label.pack(pady=5)
 
@@ -198,10 +198,10 @@ def trigger_lockout_overlay(duration_seconds=20):
         btn_frame.pack_forget()
         desc_label.pack_forget()
 
-        title_label.config(text="MIND-FLOW // COGNITIVE SHIELD ACTIVE", fg="#ff6b6b")
+        title_label.config(text="🌸 MINDFUL RECHARGE TIME 🌸", fg="#2dd4a8")
         
         anchor_title = tk.Label(
-            frame, text="YOUR ANCHORED MIND STATE:",
+            frame, text="YOUR SECURED FLOW STATE:",
             font=("Outfit", 11, "bold"), fg="#fbbf24", bg="#0e0e1a"
         )
         anchor_title.pack(pady=(15, 2))
@@ -303,11 +303,7 @@ def trigger_lockout_overlay(duration_seconds=20):
         if lockout_remaining > 0:
             lockout_remaining -= 1
             lockout_timer_label.config(text=f"{lockout_remaining} seconds remaining")
-            if lockout_remaining <= 3 or lockout_remaining % 5 == 0:
-                try:
-                    winsound.Beep(440, 80)
-                except Exception:
-                    pass
+            # No alarm sound during relaxation period to keep it peaceful and stress-free
             root.after(1000, update_lockout_countdown)
         else:
             nonlocal completed_fully
@@ -344,11 +340,29 @@ def main_state_machine():
     shared_state["current_mode"] = current_mode
     state_start_time = datetime.now()
     
+    # Initialize shared app tracking variables
+    shared_state["last_app_process"] = None
+    shared_state["last_app_title"] = None
+    shared_state["app_accumulated_seconds"] = 0
+    
     while True:
         time.sleep(1.0)
         
         # If user deactivated companion tracking, bypass state machine checks and sweep back workspace
         if not shared_state["tracking_active"]:
+            # Flush app tracking
+            last_proc = shared_state.get("last_app_process")
+            last_title = shared_state.get("last_app_title")
+            accum_sec = shared_state.get("app_accumulated_seconds", 0)
+            if last_proc and accum_sec > 0:
+                try:
+                    db.log_app_usage(last_proc, last_title, accum_sec)
+                except Exception as e:
+                    print(f"Error logging app usage on pause: {e}")
+                shared_state["last_app_process"] = None
+                shared_state["last_app_title"] = None
+                shared_state["app_accumulated_seconds"] = 0
+                
             if current_mode != "neutral":
                 print(f"Companion disabled: transitioning {current_mode} -> neutral")
                 db.log_session(current_mode, state_start_time, datetime.now())
@@ -380,7 +394,56 @@ def main_state_machine():
             shared_state["last_external_process"] = active_process
         
         idle_sec = get_idle_seconds()
-        shared_state["idle_seconds"] = int(idle_sec)
+        try:
+            idle_sec_val = float(idle_sec)
+        except (TypeError, ValueError):
+            idle_sec_val = 0.0
+        shared_state["idle_seconds"] = int(idle_sec_val)
+
+        # App tracking logic
+        # We only track if user is active (idle_sec_val < 5) and the app is not Paused/None
+        if idle_sec_val < 5:
+            if active_process and active_process != "None" and active_process != "Paused":
+                last_proc = shared_state.get("last_app_process")
+                last_title = shared_state.get("last_app_title")
+                accum_sec = shared_state.get("app_accumulated_seconds", 0)
+
+                if active_process == last_proc:
+                    shared_state["app_accumulated_seconds"] = accum_sec + 1
+                    # Update window title if it's new and valid
+                    if active_title and active_title != "None" and active_title != "Paused":
+                        shared_state["last_app_title"] = active_title
+                else:
+                    # Application changed, log previous
+                    if last_proc and accum_sec > 0:
+                        try:
+                            db.log_app_usage(last_proc, last_title, accum_sec)
+                        except Exception as e:
+                            print(f"Error logging app usage on switch: {e}")
+                    shared_state["last_app_process"] = active_process
+                    shared_state["last_app_title"] = active_title
+                    shared_state["app_accumulated_seconds"] = 1
+                
+                # Periodically flush every 30 seconds of continuous use of the same app
+                if shared_state.get("app_accumulated_seconds", 0) >= 30:
+                    try:
+                        db.log_app_usage(shared_state["last_app_process"], shared_state["last_app_title"], shared_state["app_accumulated_seconds"])
+                    except Exception as e:
+                        print(f"Error logging app usage periodic: {e}")
+                    shared_state["app_accumulated_seconds"] = 0
+        else:
+            # User went idle, flush accumulated time
+            last_proc = shared_state.get("last_app_process")
+            last_title = shared_state.get("last_app_title")
+            accum_sec = shared_state.get("app_accumulated_seconds", 0)
+            if last_proc and accum_sec > 0:
+                try:
+                    db.log_app_usage(last_proc, last_title, accum_sec)
+                except Exception as e:
+                    print(f"Error logging app usage on idle: {e}")
+                shared_state["last_app_process"] = None
+                shared_state["last_app_title"] = None
+                shared_state["app_accumulated_seconds"] = 0
 
         # Get settings from database dynamically
         settings = db.get_settings()
@@ -395,6 +458,20 @@ def main_state_machine():
         if shared_state.get("manual_lockout_requested", False):
             shared_state["manual_lockout_requested"] = False
             print(f"Manual lockout requested. Launching lockout overlay with rest duration ({rest_limit_sec}s).")
+            
+            # Flush app usage before manual lockout
+            last_proc = shared_state.get("last_app_process")
+            last_title = shared_state.get("last_app_title")
+            accum_sec = shared_state.get("app_accumulated_seconds", 0)
+            if last_proc and accum_sec > 0:
+                try:
+                    db.log_app_usage(last_proc, last_title, accum_sec)
+                except Exception as e:
+                    print(f"Error logging app usage on manual lockout: {e}")
+                shared_state["last_app_process"] = None
+                shared_state["last_app_title"] = None
+                shared_state["app_accumulated_seconds"] = 0
+            
             now = datetime.now()
             db.log_session(current_mode if current_mode != "neutral" else "work", state_start_time, now)
             
@@ -407,7 +484,7 @@ def main_state_machine():
 
         # Determine target mode
         target_mode = "neutral"
-        if idle_sec >= idle_limit:
+        if idle_sec_val >= idle_limit:
             target_mode = "rest"
         else:
             is_work = any(matches_keyword(kw, active_process) or matches_keyword(kw, active_title) for kw in work_keywords)
@@ -436,6 +513,20 @@ def main_state_machine():
             # Enforce Hard Ceilings for Work Mode
             if current_mode == "work" and elapsed >= work_limit_sec:
                 print(f"Hard focus ceiling limit reached ({work_limit_sec}s). Launching lockout overlay with rest duration ({rest_limit_sec}s).")
+                
+                # Flush app usage before hard focus ceiling lockout
+                last_proc = shared_state.get("last_app_process")
+                last_title = shared_state.get("last_app_title")
+                accum_sec = shared_state.get("app_accumulated_seconds", 0)
+                if last_proc and accum_sec > 0:
+                    try:
+                        db.log_app_usage(last_proc, last_title, accum_sec)
+                    except Exception as e:
+                        print(f"Error logging app usage on hard ceiling: {e}")
+                    shared_state["last_app_process"] = None
+                    shared_state["last_app_title"] = None
+                    shared_state["app_accumulated_seconds"] = 0
+                
                 brain_dump, completed = trigger_lockout_overlay(rest_limit_sec)
                 db.log_session("work", state_start_time, datetime.now(), brain_dump=brain_dump, bypassed=not completed)
                 state_start_time = datetime.now()
@@ -489,7 +580,7 @@ def launch_app_window(url):
     for path in chrome_paths:
         if os.path.exists(path):
             try:
-                subprocess.Popen([path, f"--app={url}"])
+                subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
                 return True
             except Exception:
                 pass
@@ -497,7 +588,7 @@ def launch_app_window(url):
     for path in edge_paths:
         if os.path.exists(path):
             try:
-                subprocess.Popen([path, f"--app={url}"])
+                subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
                 return True
             except Exception:
                 pass

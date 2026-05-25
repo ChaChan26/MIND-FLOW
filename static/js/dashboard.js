@@ -1,5 +1,13 @@
 // MIND-FLOW Dashboard Logic
 
+// Security: HTML escape helper to prevent XSS in innerHTML injections
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
+
 let currentTab = 'dashboard';
 let statusInterval = null;
 let lastActiveTitle = '';
@@ -7,6 +15,8 @@ let lastExternalWindow = 'None';
 let lastExternalProcess = 'None';
 let lastWeekdaySummary = null;
 let lastReflections = null;
+let appStatsData = [];
+let appStatsFilter = 'today';
 
 // DOM Elements
 const bodyEl = document.body;
@@ -65,6 +75,13 @@ function switchTab(tabId) {
     document.getElementById(`nav-btn-${tabId}`).classList.add('active');
     updateNavIndicator();
     
+    // Smooth scroll the content area back to top on tab switch
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+        mainContent.scrollTop = 0;
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
     if (tabId === 'analytics') {
         loadAnalytics();
     } else if (tabId === 'settings') {
@@ -112,7 +129,13 @@ function updateNavIndicator() {
         indicator.style.opacity = '0';
     }
 }
-window.addEventListener('load', updateNavIndicator);
+window.addEventListener('load', () => {
+    updateNavIndicator();
+    const volSlider = document.getElementById('audio-volume-slider');
+    if (volSlider) {
+        updateVolumeSliderBackground(volSlider);
+    }
+});
 
 // Live Clock Update
 function updateClock() {
@@ -164,10 +187,23 @@ function formatTime(seconds) {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-// Show Custom Toast Notification
+// Show Custom Toast Notification with icon and progress bar
 function showToast(message, isError = false) {
     const toast = document.getElementById('app-toast');
-    toast.textContent = message;
+    const toastIcon = document.getElementById('toast-icon');
+    const toastText = document.getElementById('toast-text');
+    const toastProgress = document.getElementById('toast-progress');
+    
+    if (toastText) toastText.textContent = message;
+    if (toastIcon) toastIcon.textContent = isError ? '✗' : '✓';
+    
+    // Reset progress bar animation
+    if (toastProgress) {
+        toastProgress.style.animation = 'none';
+        toastProgress.offsetHeight; // force reflow
+        toastProgress.style.animation = 'toast-countdown 3s linear forwards';
+    }
+    
     if (isError) {
         toast.style.background = 'rgba(239, 68, 68, 0.95)';
         toast.style.borderColor = '#ef4444';
@@ -587,6 +623,7 @@ async function loadAnalytics() {
     try {
         const res = await fetch('/api/analytics');
         const data = await res.json();
+        hideSkeletons();
         
         // 1. Load Insights
         const insightsList = document.getElementById('insights-list');
@@ -608,14 +645,14 @@ async function loadAnalytics() {
                 card.innerHTML = `
                     <div class="insight-header">
                         <div class="insight-title-group">
-                            <span class="insight-icon">${insight.icon}</span>
-                            <span class="insight-title">${insight.title}</span>
+                            <span class="insight-icon">${escapeHtml(insight.icon)}</span>
+                            <span class="insight-title">${escapeHtml(insight.title)}</span>
                         </div>
-                        <span class="insight-metric-badge">${insight.metric}</span>
+                        <span class="insight-metric-badge">${escapeHtml(insight.metric)}</span>
                     </div>
-                    <p class="insight-desc">${insight.description}</p>
+                    <p class="insight-desc">${escapeHtml(insight.description)}</p>
                     <div class="insight-tip-box">
-                        <strong>💡 Action Tip:</strong> ${insight.actionable_tip}
+                        <strong>💡 Action Tip:</strong> ${escapeHtml(insight.actionable_tip)}
                     </div>
                 `;
                 insightsList.appendChild(card);
@@ -629,7 +666,7 @@ async function loadAnalytics() {
                 recList.forEach(rec => {
                     const div = document.createElement('div');
                     div.className = 'insight-card-item type-info';
-                    div.innerHTML = `<p class="insight-desc">${rec}</p>`;
+                    div.innerHTML = `<p class="insight-desc">${escapeHtml(rec)}</p>`;
                     insightsList.appendChild(div);
                 });
             }
@@ -657,10 +694,10 @@ async function loadAnalytics() {
                 if (ref.friction_level >= 4) frictionBadge = `<span class="rating-badge badge-red">${ref.friction_level} / 5</span>`;
                 
                 tr.innerHTML = `
-                    <td>${dateStr}</td>
+                    <td>${escapeHtml(dateStr)}</td>
                     <td>${energyBadge}</td>
                     <td>${frictionBadge}</td>
-                    <td><code>${ref.summary}</code></td>
+                    <td><code>${escapeHtml(ref.summary)}</code></td>
                 `;
                 tableBody.appendChild(tr);
             });
@@ -728,15 +765,15 @@ async function loadAnalytics() {
                     const durationMin = Math.round(session.duration / 60);
                     let summaryText = `${durationMin} mins of focus/rest`;
                     if (session.brain_dump) {
-                        summaryText += ` — Save-State: "${session.brain_dump}"`;
+                        summaryText += ` — Save-State: "${escapeHtml(session.brain_dump)}"`;
                     }
                     if (session.bypassed) {
                         summaryText += ` (Eye Rest Bypassed)`;
                     }
                     
                     item.innerHTML = `
-                        <span class="event-time">${timeStr}</span>
-                        <span class="event-badge ${badgeClass}">${session.mode}</span>
+                        <span class="event-time">${escapeHtml(timeStr)}</span>
+                        <span class="event-badge ${escapeHtml(badgeClass)}">${escapeHtml(session.mode)}</span>
                         <span class="event-summary">${summaryText}</span>
                     `;
                     timelineEvents.appendChild(item);
@@ -749,10 +786,140 @@ async function loadAnalytics() {
         lastReflections = data.reflections;
         renderEnergyMap(lastWeekdaySummary, lastReflections);
         
+        // 4. Render App Usage Statistics
+        appStatsData = data.app_usage || [];
+        renderAppStats();
+        
     } catch (e) {
         showToast("Error loading analytics data", true);
         console.error(e);
     }
+}
+
+// Filter application statistics
+function setAppStatsFilter(filter) {
+    appStatsFilter = filter;
+    document.querySelectorAll('.app-stats-filters .filter-pill').forEach(btn => btn.classList.remove('active'));
+    
+    if (filter === 'today') {
+        const btnToday = document.getElementById('app-filter-today');
+        if (btnToday) btnToday.classList.add('active');
+    } else {
+        const btnWeekly = document.getElementById('app-filter-weekly');
+        if (btnWeekly) btnWeekly.classList.add('active');
+    }
+    
+    renderAppStats();
+}
+
+// Render app stats list
+function renderAppStats() {
+    const listEl = document.getElementById('app-stats-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    
+    // Filter data based on selection
+    let filteredData = [];
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    if (appStatsFilter === 'today') {
+        // Find entries matching today's date
+        filteredData = appStatsData.filter(entry => entry.date === todayStr);
+    } else {
+        // Last 7 days including today
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - 7);
+        const cutoffStr = cutoffDate.toISOString().split('T')[0];
+        
+        // Group by process and category to show cumulative totals
+        const cumulative = {};
+        appStatsData.forEach(entry => {
+            if (entry.date >= cutoffStr) {
+                const key = entry.process;
+                if (!cumulative[key]) {
+                    cumulative[key] = {
+                        process: entry.process,
+                        title: entry.title,
+                        duration: 0,
+                        category: entry.category
+                    };
+                }
+                cumulative[key].duration += entry.duration;
+                // Prefer non-empty title or the latest title
+                if (entry.title && entry.title !== "None") {
+                    cumulative[key].title = entry.title;
+                }
+            }
+        });
+        filteredData = Object.values(cumulative);
+    }
+    
+    // Sort by duration descending
+    filteredData.sort((a, b) => b.duration - a.duration);
+    
+    if (filteredData.length === 0) {
+        listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0;">No application activity tracked for this period.</div>`;
+        return;
+    }
+    
+    // Calculate total duration for percentages
+    const totalDuration = filteredData.reduce((sum, item) => sum + item.duration, 0);
+    
+    // Emojis mapping
+    const getAppEmoji = (proc) => {
+        const p = proc.toLowerCase();
+        if (p.includes('code') || p.includes('visualstudio') || p.includes('pycharm') || p.includes('sublime')) return '💻';
+        if (p.includes('chrome') || p.includes('edge') || p.includes('firefox') || p.includes('brave') || p.includes('opera') || p.includes('iexplore') || p.includes('browser')) return '🌐';
+        if (p.includes('steam') || p.includes('game') || p.includes('epic') || p.includes('xbox') || p.includes('gog')) return '🎮';
+        if (p.includes('spotify') || p.includes('music') || p.includes('vlc') || p.includes('netflix') || p.includes('youtube')) return '🎵';
+        if (p.includes('discord') || p.includes('teams') || p.includes('slack') || p.includes('skype') || p.includes('zoom')) return '💬';
+        if (p.includes('cmd') || p.includes('powershell') || p.includes('terminal') || p.includes('bash')) return '⚡';
+        if (p.includes('explorer')) return '📁';
+        if (p.includes('word') || p.includes('powerpnt') || p.includes('excel') || p.includes('acrobat') || p.includes('pdf')) return '📄';
+        return '📱';
+    };
+    
+    // Format duration nicely
+    const formatAppDuration = (sec) => {
+        if (sec < 60) return `${sec}s`;
+        const mins = Math.floor(sec / 60);
+        if (mins < 60) return `${mins}m`;
+        const hrs = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        return `${hrs}h ${remMins}m`;
+    };
+    
+    filteredData.forEach(item => {
+        const pct = totalDuration > 0 ? (item.duration / totalDuration) * 100 : 0;
+        const emoji = getAppEmoji(item.process);
+        const durationText = formatAppDuration(item.duration);
+        
+        const appItem = document.createElement('div');
+        appItem.className = 'app-item';
+        appItem.innerHTML = `
+            <div class="app-item-top">
+                <div class="app-item-details">
+                    <span class="app-item-icon">${emoji}</span>
+                    <div class="app-item-meta">
+                        <span class="app-name">${escapeHtml(item.process)}</span>
+                        <span class="app-title-sub" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
+                    </div>
+                </div>
+                <span class="app-duration-badge">${durationText}</span>
+            </div>
+            <div class="app-progress-container">
+                <div class="app-progress-bar ${item.category}" style="width: 0%;"></div>
+            </div>
+        `;
+        
+        listEl.appendChild(appItem);
+        
+        // Trigger reflow for width transition animation
+        setTimeout(() => {
+            const bar = appItem.querySelector('.app-progress-bar');
+            if (bar) bar.style.width = `${pct}%`;
+        }, 50);
+    });
 }
 
 // Render dynamic custom SVG chart
@@ -1021,7 +1188,7 @@ function renderEnergyMap(weekdayData, reflections) {
         }) : [];
         
         let summariesText = dayRefs.length > 0 
-            ? dayRefs.map(r => `• ${r.summary}`).join('<br>') 
+            ? dayRefs.map(r => `• ${escapeHtml(r.summary)}`).join('<br>') 
             : 'No reflections logged today.';
             
         tooltipEl.innerHTML = `
@@ -1036,8 +1203,11 @@ function renderEnergyMap(weekdayData, reflections) {
         `;
         
         tooltipEl.style.opacity = '1';
-        tooltipEl.style.top = `${e.pageY - 20}px`;
-        tooltipEl.style.left = `${e.pageX + 15}px`;
+        const tooltipRect = tooltipEl.getBoundingClientRect();
+        const maxLeft = window.innerWidth - (tooltipRect.width || 200) - 20;
+        const maxTop = window.innerHeight - (tooltipRect.height || 100) - 20;
+        tooltipEl.style.top = `${Math.min(e.pageY - 20, maxTop + window.scrollY)}px`;
+        tooltipEl.style.left = `${Math.min(e.pageX + 15, maxLeft + window.scrollX)}px`;
     });
 
     overlay.addEventListener('mouseleave', () => {
@@ -1164,6 +1334,7 @@ async function quitApplication() {
 // Automatically redraw analytics chart on window resize
 let resizeTimeout;
 window.addEventListener('resize', () => {
+    updateNavIndicator();
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
         if (currentTab === 'analytics' && lastWeekdaySummary) {
@@ -1180,34 +1351,44 @@ let audioSource = null;
 let rainNodes = [];
 let gainNode = null;
 let isPlayingAudio = false;
-let rainSchedulerInterval = null;
+let ambientSchedulerInterval = null;
+let whiteNoiseBuffer = null;
+let pinkNoiseBuffer = null;
+let brownNoiseBuffer = null;
+let preMuteVolume = 0.5;
 
 function toggleAmbientAudio() {
     const btn = document.getElementById('audio-toggle-btn');
+    const waveform = document.getElementById('audio-waveform');
     if (!btn) return;
     
     if (isPlayingAudio) {
         stopAmbientAudio();
         btn.textContent = 'Play';
         btn.classList.remove('playing');
+        if (waveform) waveform.classList.remove('active');
     } else {
         startAmbientAudio();
         btn.textContent = 'Pause';
         btn.classList.add('playing');
+        if (waveform) waveform.classList.add('active');
     }
 }
 
 function createWhiteNoiseBuffer() {
+    if (whiteNoiseBuffer) return whiteNoiseBuffer;
     const bufferSize = audioCtx.sampleRate * 2;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
         data[i] = Math.random() * 2 - 1;
     }
+    whiteNoiseBuffer = buffer;
     return buffer;
 }
 
 function createPinkNoiseBuffer() {
+    if (pinkNoiseBuffer) return pinkNoiseBuffer;
     const bufferSize = audioCtx.sampleRate * 2;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -1224,10 +1405,12 @@ function createPinkNoiseBuffer() {
         b6 = white * 0.115926;
         data[i] = pink * 0.11; // estimate to compensate gain
     }
+    pinkNoiseBuffer = buffer;
     return buffer;
 }
 
 function createBrownNoiseBuffer() {
+    if (brownNoiseBuffer) return brownNoiseBuffer;
     const bufferSize = audioCtx.sampleRate * 2;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -1238,45 +1421,94 @@ function createBrownNoiseBuffer() {
         lastOut = data[i];
         data[i] *= 3.5; // Compensate for loss of volume
     }
+    brownNoiseBuffer = buffer;
     return buffer;
 }
 
 function playRaindrop() {
-    if (!audioCtx || audioCtx.state === 'suspended') return;
+    if (!audioCtx || audioCtx.state === 'suspended' || !gainNode) return;
     const time = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
+    
+    const source = audioCtx.createBufferSource();
+    source.buffer = createPinkNoiseBuffer();
+    
     const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1000 + Math.random() * 800, time);
+    filter.Q.setValueAtTime(6 + Math.random() * 4, time);
     
-    // Randomize pitch of raindrop
-    const freq = 800 + Math.random() * 1200;
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, time);
-    osc.frequency.exponentialRampToValueAtTime(80, time + 0.04);
+    const dropGain = audioCtx.createGain();
+    const peakVolume = 0.008 + Math.random() * 0.012;
+    dropGain.gain.setValueAtTime(0, time);
+    dropGain.gain.linearRampToValueAtTime(peakVolume, time + 0.002);
+    dropGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.035);
     
-    // Quick amplitude envelope
-    gain.gain.setValueAtTime(0.0, time);
-    gain.gain.linearRampToValueAtTime(0.005 + Math.random() * 0.015, time + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+    source.connect(filter);
+    filter.connect(dropGain);
+    dropGain.connect(gainNode);
     
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(1200, time);
+    source.start(time);
+    source.stop(time + 0.05);
     
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(gainNode);
-    
-    osc.start(time);
-    osc.stop(time + 0.05);
+    setTimeout(() => {
+        try {
+            source.disconnect();
+            filter.disconnect();
+            dropGain.disconnect();
+        } catch(e) {}
+    }, 100);
 }
 
-function startRaindropScheduler() {
-    if (rainSchedulerInterval) clearInterval(rainSchedulerInterval);
-    rainSchedulerInterval = setInterval(() => {
-        if (!isPlayingAudio || document.getElementById('ambient-sound-select').value !== 'rain') return;
-        // Play raindrop with random timing jitter
-        playRaindrop();
-    }, 150 + Math.random() * 100);
+function playFireCrackle() {
+    if (!audioCtx || audioCtx.state === 'suspended' || !gainNode) return;
+    const time = audioCtx.currentTime;
+    
+    const source = audioCtx.createBufferSource();
+    source.buffer = createWhiteNoiseBuffer();
+    
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(1800 + Math.random() * 1800, time);
+    
+    const crackleGain = audioCtx.createGain();
+    const peakVolume = 0.012 + Math.random() * 0.018;
+    crackleGain.gain.setValueAtTime(0, time);
+    crackleGain.gain.linearRampToValueAtTime(peakVolume, time + 0.001);
+    crackleGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.012);
+    
+    source.connect(filter);
+    filter.connect(crackleGain);
+    crackleGain.connect(gainNode);
+    
+    source.start(time);
+    source.stop(time + 0.03);
+    
+    setTimeout(() => {
+        try {
+            source.disconnect();
+            filter.disconnect();
+            crackleGain.disconnect();
+        } catch(e) {}
+    }, 100);
+}
+
+function startAmbientScheduler(type) {
+    if (ambientSchedulerInterval) clearInterval(ambientSchedulerInterval);
+    ambientSchedulerInterval = setInterval(() => {
+        if (!isPlayingAudio) return;
+        
+        if (type === 'rain') {
+            playRaindrop();
+        } else if (type === 'fire') {
+            const rand = Math.random();
+            if (rand < 0.25) {
+                playFireCrackle();
+                setTimeout(playFireCrackle, 50 + Math.random() * 50);
+            } else if (rand < 0.65) {
+                playFireCrackle();
+            }
+        }
+    }, 140 + Math.random() * 200);
 }
 
 function startAmbientAudio() {
@@ -1300,31 +1532,44 @@ function startAmbientAudio() {
     const select = document.getElementById('ambient-sound-select');
     const soundType = select ? select.value : 'brown';
     
-    let buffer;
-    if (soundType === 'white') {
-        buffer = createWhiteNoiseBuffer();
-    } else if (soundType === 'pink') {
-        buffer = createPinkNoiseBuffer();
-    } else if (soundType === 'brown' || soundType === 'rain') {
-        buffer = createBrownNoiseBuffer();
+    // Waveform indicator color mapping
+    let accentColor = '#8b5cf6'; // default purple
+    if (soundType === 'brown') accentColor = '#dfad8f';
+    else if (soundType === 'pink') accentColor = '#f472b6';
+    else if (soundType === 'white') accentColor = '#ffffff';
+    else if (soundType === 'rain') accentColor = '#38bdf8';
+    else if (soundType === 'fire') accentColor = '#fb923c';
+    else if (soundType === 'waves') accentColor = '#2dd4bf';
+    else if (soundType === 'drone') accentColor = '#a78bfa';
+    else if (soundType === 'focus') accentColor = '#facc15';
+    document.documentElement.style.setProperty('--ambient-active-color', accentColor);
+    
+    if (soundType === 'white' || soundType === 'pink' || soundType === 'brown' || soundType === 'rain' || soundType === 'waves') {
+        let buffer;
+        if (soundType === 'white') {
+            buffer = createWhiteNoiseBuffer();
+        } else if (soundType === 'pink' || soundType === 'waves') {
+            buffer = createPinkNoiseBuffer();
+        } else if (soundType === 'brown' || soundType === 'rain') {
+            buffer = createBrownNoiseBuffer();
+        }
+        
+        audioSource = audioCtx.createBufferSource();
+        audioSource.buffer = buffer;
+        audioSource.loop = true;
     }
     
-    audioSource = audioCtx.createBufferSource();
-    audioSource.buffer = buffer;
-    audioSource.loop = true;
-    
     if (soundType === 'rain') {
-        // Deep Rain lowpass filter & LFO modulation (for wind gusts)
         const filter = audioCtx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(250, audioCtx.currentTime);
+        filter.frequency.setValueAtTime(320, audioCtx.currentTime);
         
         const lfo = audioCtx.createOscillator();
         lfo.type = 'sine';
-        lfo.frequency.value = 0.06; // 16s period
+        lfo.frequency.value = 0.05;
         
         const lfoGain = audioCtx.createGain();
-        lfoGain.gain.value = 120;
+        lfoGain.gain.value = 140;
         
         lfo.connect(lfoGain);
         lfoGain.connect(filter.frequency);
@@ -1334,22 +1579,182 @@ function startAmbientAudio() {
         
         lfo.start();
         rainNodes.push(lfo);
+        rainNodes.push(lfoGain);
         rainNodes.push(filter);
         
-        startRaindropScheduler();
+        startAmbientScheduler('rain');
+        audioSource.start();
+        
+    } else if (soundType === 'fire') {
+        const bgSource = audioCtx.createBufferSource();
+        bgSource.buffer = createBrownNoiseBuffer();
+        bgSource.loop = true;
+        
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(140, audioCtx.currentTime);
+        
+        const lfo = audioCtx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 1.2;
+        
+        const lfoGain = audioCtx.createGain();
+        lfoGain.gain.value = 0.04;
+        
+        const bgGain = audioCtx.createGain();
+        bgGain.gain.value = 0.15;
+        
+        lfo.connect(lfoGain);
+        lfoGain.connect(bgGain.gain);
+        
+        bgSource.connect(filter);
+        filter.connect(bgGain);
+        bgGain.connect(gainNode);
+        
+        bgSource.start();
+        lfo.start();
+        
+        rainNodes.push(bgSource, filter, lfo, lfoGain, bgGain);
+        startAmbientScheduler('fire');
+        
+    } else if (soundType === 'waves') {
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 450;
+        
+        const waveGain = audioCtx.createGain();
+        waveGain.gain.value = 0.28;
+        
+        const lfo = audioCtx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.12;
+        
+        const lfoFilterGain = audioCtx.createGain();
+        lfoFilterGain.gain.value = 320;
+        
+        const lfoVolumeGain = audioCtx.createGain();
+        lfoVolumeGain.gain.value = 0.22;
+        
+        lfo.connect(lfoFilterGain);
+        lfoFilterGain.connect(filter.frequency);
+        
+        lfo.connect(lfoVolumeGain);
+        lfoVolumeGain.connect(waveGain.gain);
+        
+        audioSource.connect(waveGain);
+        waveGain.connect(filter);
+        filter.connect(gainNode);
+        
+        lfo.start();
+        audioSource.start();
+        
+        rainNodes.push(lfo, lfoFilterGain, lfoVolumeGain, waveGain, filter);
+        
+    } else if (soundType === 'drone') {
+        const osc1 = audioCtx.createOscillator();
+        osc1.type = 'sawtooth';
+        osc1.frequency.value = 55;
+        
+        const osc2 = audioCtx.createOscillator();
+        osc2.type = 'triangle';
+        osc2.frequency.value = 82.5;
+        
+        const osc3 = audioCtx.createOscillator();
+        osc3.type = 'sawtooth';
+        osc3.frequency.value = 55.4;
+        
+        const osc4 = audioCtx.createOscillator();
+        osc4.type = 'triangle';
+        osc4.frequency.value = 110;
+        
+        const droneGain = audioCtx.createGain();
+        droneGain.gain.value = 0.08;
+        
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 160;
+        filter.Q.value = 3.5;
+        
+        const lfo = audioCtx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.06;
+        
+        const lfoFilterGain = audioCtx.createGain();
+        lfoFilterGain.gain.value = 70;
+        
+        lfo.connect(lfoFilterGain);
+        lfoFilterGain.connect(filter.frequency);
+        
+        osc1.connect(droneGain);
+        osc2.connect(droneGain);
+        osc3.connect(droneGain);
+        osc4.connect(droneGain);
+        
+        droneGain.connect(filter);
+        filter.connect(gainNode);
+        
+        osc1.start();
+        osc2.start();
+        osc3.start();
+        osc4.start();
+        lfo.start();
+        
+        rainNodes.push(osc1, osc2, osc3, osc4, droneGain, filter, lfo, lfoFilterGain);
+        
+    } else if (soundType === 'focus') {
+        const merger = audioCtx.createChannelMerger(2);
+        
+        const oscLeft = audioCtx.createOscillator();
+        oscLeft.type = 'sine';
+        oscLeft.frequency.value = 140;
+        
+        const oscRight = audioCtx.createOscillator();
+        oscRight.type = 'sine';
+        oscRight.frequency.value = 144;
+        
+        oscLeft.connect(merger, 0, 0);
+        oscRight.connect(merger, 0, 1);
+        
+        const binGain = audioCtx.createGain();
+        binGain.gain.value = 0.12;
+        
+        merger.connect(binGain);
+        
+        const noiseSource = audioCtx.createBufferSource();
+        noiseSource.buffer = createPinkNoiseBuffer();
+        noiseSource.loop = true;
+        
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = 220;
+        
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.value = 0.08;
+        
+        noiseSource.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        
+        binGain.connect(gainNode);
+        noiseGain.connect(gainNode);
+        
+        oscLeft.start();
+        oscRight.start();
+        noiseSource.start();
+        
+        rainNodes.push(oscLeft, oscRight, merger, binGain, noiseSource, noiseFilter, noiseGain);
+        
     } else {
         audioSource.connect(gainNode);
+        audioSource.start();
     }
-    
-    audioSource.start();
 }
 
 function stopAmbientAudio() {
     isPlayingAudio = false;
     stopSoundNodes();
-    if (rainSchedulerInterval) {
-        clearInterval(rainSchedulerInterval);
-        rainSchedulerInterval = null;
+    if (ambientSchedulerInterval) {
+        clearInterval(ambientSchedulerInterval);
+        ambientSchedulerInterval = null;
     }
 }
 
@@ -1357,12 +1762,18 @@ function stopSoundNodes() {
     if (audioSource) {
         try {
             audioSource.stop();
+            audioSource.disconnect();
         } catch(e) {}
         audioSource = null;
     }
     rainNodes.forEach(node => {
+        if (node instanceof OscillatorNode || node instanceof AudioBufferSourceNode) {
+            try {
+                node.stop();
+            } catch(e) {}
+        }
         try {
-            node.stop();
+            node.disconnect();
         } catch(e) {}
     });
     rainNodes = [];
@@ -1374,9 +1785,67 @@ function changeAmbientSound() {
     }
 }
 
+function selectAmbientSound(soundType) {
+    document.querySelectorAll('.audio-preset-btn').forEach(btn => {
+        if (btn.getAttribute('data-sound') === soundType) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    const select = document.getElementById('ambient-sound-select');
+    if (select) {
+        select.value = soundType;
+    }
+    
+    if (isPlayingAudio) {
+        startAmbientAudio();
+    }
+}
+
+function toggleMuteAmbient() {
+    const volSlider = document.getElementById('audio-volume-slider');
+    const iconBtn = document.getElementById('volume-icon-btn');
+    if (!volSlider || !iconBtn) return;
+    
+    const currentVal = parseFloat(volSlider.value);
+    if (currentVal > 0) {
+        preMuteVolume = currentVal;
+        volSlider.value = 0;
+        iconBtn.textContent = '🔇';
+        iconBtn.title = "Unmute";
+    } else {
+        volSlider.value = preMuteVolume;
+        iconBtn.textContent = '🔊';
+        iconBtn.title = "Mute";
+    }
+    adjustAmbientVolume(volSlider.value);
+}
+
+function updateVolumeSliderBackground(slider) {
+    const value = (slider.value - slider.min) / (slider.max - slider.min) * 100;
+    slider.style.background = `linear-gradient(to right, var(--ambient-active-color, var(--active-mode-color, var(--work-color))) 0%, var(--ambient-active-color, var(--active-mode-color, var(--work-color))) ${value}%, rgba(255, 255, 255, 0.08) ${value}%, rgba(255, 255, 255, 0.08) 100%)`;
+}
+
 function adjustAmbientVolume(val) {
     if (gainNode && audioCtx) {
         gainNode.gain.setValueAtTime(parseFloat(val), audioCtx.currentTime);
+    }
+    const volSlider = document.getElementById('audio-volume-slider');
+    if (volSlider) {
+        updateVolumeSliderBackground(volSlider);
+    }
+    
+    const iconBtn = document.getElementById('volume-icon-btn');
+    if (iconBtn) {
+        if (parseFloat(val) > 0) {
+            iconBtn.textContent = '🔊';
+            iconBtn.title = "Mute";
+        } else {
+            iconBtn.textContent = '🔇';
+            iconBtn.title = "Unmute";
+        }
     }
 }
 
@@ -1432,7 +1901,7 @@ async function triggerManualLockout() {
         });
         if (res.ok) {
             const data = await res.json();
-            showToast(data.message || "Enforcing rest screen. Please relax your eyes!");
+            showToast(data.message || "Starting your restful break. Please relax your eyes! 🌸");
             pollStatus();
         } else {
             showToast("Failed to trigger manual break", true);
@@ -1442,4 +1911,136 @@ async function triggerManualLockout() {
         showToast("Error triggering manual rest break", true);
     }
 }
+
+// ==========================================
+// Keyboard Shortcuts (1/2/3 for tabs)
+// ==========================================
+document.addEventListener('keydown', (e) => {
+    // Don't trigger if user is typing in an input/textarea
+    const tag = document.activeElement.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    
+    switch(e.key) {
+        case '1':
+            switchTab('dashboard');
+            break;
+        case '2':
+            switchTab('analytics');
+            break;
+        case '3':
+            switchTab('settings');
+            break;
+    }
+});
+
+// ==========================================
+// Scroll-to-Top Button
+// ==========================================
+function scrollToTop() {
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+        mainContent.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+(function initScrollToTop() {
+    const mainContent = document.querySelector('.main-content');
+    const scrollBtn = document.getElementById('scroll-top-btn');
+    if (!mainContent || !scrollBtn) return;
+    
+    mainContent.addEventListener('scroll', () => {
+        if (mainContent.scrollTop > 300) {
+            scrollBtn.classList.add('visible');
+        } else {
+            scrollBtn.classList.remove('visible');
+        }
+    });
+})();
+
+// ==========================================
+// Loading Skeleton Show/Hide
+// ==========================================
+function hideSkeletons() {
+    document.querySelectorAll('.skeleton-container').forEach(el => {
+        el.style.display = 'none';
+    });
+}
+
+// ==========================================
+// Sidebar Resizing Logic
+// ==========================================
+(function initSidebarResizer() {
+    const sidebar = document.querySelector('.sidebar');
+    const resizer = document.getElementById('sidebar-resizer');
+    const container = document.querySelector('.app-container');
+    
+    if (!resizer || !sidebar || !container) return;
+    
+    // Load saved width from localStorage
+    const savedWidth = localStorage.getItem('sidebar-width');
+    if (savedWidth && window.innerWidth > 900) {
+        container.style.setProperty('--sidebar-width', `${savedWidth}px`);
+        setTimeout(updateNavIndicator, 100);
+    }
+    
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        
+        document.body.classList.add('resizing');
+        resizer.classList.add('resizing');
+        
+        const startX = e.clientX;
+        const startWidth = sidebar.getBoundingClientRect().width;
+        
+        function onMouseMove(moveEvent) {
+            const currentX = moveEvent.clientX;
+            // Enforce limits: 200px min, 450px max
+            const newWidth = Math.max(200, Math.min(450, startWidth + (currentX - startX)));
+            container.style.setProperty('--sidebar-width', `${newWidth}px`);
+            localStorage.setItem('sidebar-width', newWidth);
+            
+            updateNavIndicator();
+        }
+        
+        function onMouseUp() {
+            document.body.classList.remove('resizing');
+            resizer.classList.remove('resizing');
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            setTimeout(updateNavIndicator, 50);
+        }
+        
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+})();
+
+// ==========================================
+// Collapsible Soundbox Widget
+// ==========================================
+function toggleSoundboxCollapse() {
+    const body = document.getElementById('soundbox-body');
+    const caret = document.getElementById('soundbox-caret');
+    if (!body || !caret) return;
+    
+    const isCollapsed = body.classList.toggle('collapsed');
+    caret.textContent = isCollapsed ? '▲' : '▼';
+    localStorage.setItem('soundbox-collapsed', isCollapsed ? 'true' : 'false');
+    
+    // Update active nav indicator position as sidebar height changes
+    setTimeout(updateNavIndicator, 320);
+}
+
+// Initialize soundbox collapsed state
+(function initSoundboxCollapse() {
+    const body = document.getElementById('soundbox-body');
+    const caret = document.getElementById('soundbox-caret');
+    if (!body || !caret) return;
+    
+    const isCollapsed = localStorage.getItem('soundbox-collapsed') === 'true';
+    if (isCollapsed) {
+        body.classList.add('collapsed');
+        caret.textContent = '▲';
+    }
+})();
 

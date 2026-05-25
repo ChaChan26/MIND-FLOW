@@ -1,19 +1,76 @@
 import os
 import sys
+from functools import wraps
 from datetime import datetime, date
+from urllib.parse import urlparse
 from flask import Flask, jsonify, request, send_from_directory
+
+def require_local_origin(f):
+    """CSRF protection: reject POST requests from foreign Origins."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        origin = request.headers.get('Origin', '')
+        referer = request.headers.get('Referer', '')
+        allowed_hosts = {'127.0.0.1', 'localhost'}
+        
+        if origin:
+            try:
+                url_to_parse = origin if '://' in origin else f'http://{origin}'
+                parsed = urlparse(url_to_parse)
+                hostname = parsed.hostname
+                if hostname:
+                    hostname = hostname.lower()
+                if hostname not in allowed_hosts:
+                    return jsonify({"error": "Forbidden: invalid origin"}), 403
+            except Exception:
+                return jsonify({"error": "Forbidden: invalid origin"}), 403
+                
+        if referer and not origin:
+            try:
+                url_to_parse = referer if '://' in referer else f'http://{referer}'
+                parsed = urlparse(url_to_parse)
+                hostname = parsed.hostname
+                if hostname:
+                    hostname = hostname.lower()
+                if hostname not in allowed_hosts:
+                    return jsonify({"error": "Forbidden: invalid referer"}), 403
+            except Exception:
+                return jsonify({"error": "Forbidden: invalid referer"}), 403
+                
+        if not origin and not referer:
+            # If both are missing, ensure request is strictly local
+            remote = request.remote_addr
+            if remote not in {'127.0.0.1', '::1', None, ''}:
+                return jsonify({"error": "Forbidden: missing origin/referer verification"}), 403
+
+        return f(*args, **kwargs)
+    return decorated
 
 # Adjust path to import from parent folder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from backend.database import MindFlowDB
 
 def get_resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(os.path.dirname(__file__))
-        base_path = os.path.abspath(os.path.join(base_path, ".."))
+    """ Get absolute path to resource, prioritizing local disk paths before PyInstaller bundled ones """
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.abspath(os.path.dirname(sys.executable))
+        parent_dir = os.path.abspath(os.path.join(exe_dir, ".."))
+        
+        # Check parent folder, executable folder, or hardcoded C:\MIND folder
+        for base in [parent_dir, exe_dir, r"C:\MIND"]:
+            local_path = os.path.join(base, relative_path)
+            if os.path.exists(local_path):
+                return local_path
+                
+        # Fallback to the temp folder where PyInstaller extracted files
+        try:
+            return os.path.join(sys._MEIPASS, relative_path)
+        except AttributeError:
+            pass
+            
+    # Dev mode: use relative path from backend directory
+    base_path = os.path.abspath(os.path.dirname(__file__))
+    base_path = os.path.abspath(os.path.join(base_path, ".."))
     return os.path.join(base_path, relative_path)
 
 app = Flask(__name__, 
@@ -23,6 +80,21 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # Initialize database
 db = MindFlowDB()
+
+@app.before_request
+def validate_host():
+    """Verify that the Host header is strictly local to prevent DNS Rebinding."""
+    host = request.host
+    if not host:
+        # Fallback to remote_addr if Host is missing (e.g. some internal tests)
+        remote = request.remote_addr
+        if remote not in {'127.0.0.1', '::1', None, ''}:
+            return jsonify({"error": "Forbidden: Missing Host header"}), 400
+        return
+    
+    hostname = host.split(':')[0].lower()
+    if hostname not in {'localhost', '127.0.0.1', '[::1]'}:
+        return jsonify({"error": "Forbidden: Invalid Host header"}), 403
 
 # In-memory shared state between Flask thread and Background Watcher thread
 shared_state = {
@@ -34,7 +106,10 @@ shared_state = {
     "tracking_active": True,
     "last_lockout_time": None,
     "last_external_window": "None",
-    "last_external_process": "None"
+    "last_external_process": "None",
+    "last_app_process": None,
+    "last_app_title": None,
+    "app_accumulated_seconds": 0
 }
 
 @app.route("/")
@@ -136,6 +211,7 @@ def get_status():
     })
 
 @app.route("/api/status/toggle", methods=["POST"])
+@require_local_origin
 def toggle_tracking():
     data = request.get_json(silent=True) or {}
     enable = data.get("enable", not shared_state["tracking_active"])
@@ -143,11 +219,13 @@ def toggle_tracking():
     return jsonify({"tracking_active": shared_state["tracking_active"]})
 
 @app.route("/api/status/lockout", methods=["POST"])
+@require_local_origin
 def trigger_manual_lockout():
     shared_state["manual_lockout_requested"] = True
     return jsonify({"status": "success", "message": "Manual lockout triggered"})
 
 @app.route("/api/settings", methods=["GET", "POST"])
+@require_local_origin
 def manage_settings():
     if request.method == "POST":
         data = request.json or {}
@@ -157,6 +235,7 @@ def manage_settings():
         return jsonify(db.get_settings())
 
 @app.route("/api/reflections", methods=["GET", "POST"])
+@require_local_origin
 def manage_reflections():
     if request.method == "POST":
         data = request.json or {}
@@ -166,6 +245,14 @@ def manage_reflections():
         
         if energy is None or friction is None:
             return jsonify({"error": "energy_level and friction_level are required"}), 400
+        
+        # Validate and clamp input ranges
+        try:
+            energy = max(1, min(5, int(energy)))
+            friction = max(1, min(5, int(friction)))
+        except (ValueError, TypeError):
+            return jsonify({"error": "energy_level and friction_level must be integers 1-5"}), 400
+        summary = str(summary).strip()[:500]  # Cap summary length
             
         entry = db.add_reflection(energy, friction, summary)
         return jsonify({"status": "success", "reflection": entry})
@@ -176,6 +263,41 @@ def manage_reflections():
 def get_analytics():
     reflections = db.get_reflections()
     sessions = db.get_sessions()
+    app_usage = db.get_app_usage()
+    
+    import re
+    def matches_keyword(kw, text):
+        kw = kw.lower()
+        text = text.lower()
+        if kw.isalnum():
+            pattern = rf"\b{re.escape(kw)}\b"
+        else:
+            pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
+        return bool(re.search(pattern, text))
+        
+    settings = db.get_settings()
+    work_keywords = settings.get("work_keywords", [])
+    recharge_keywords = settings.get("recharge_keywords", [])
+    
+    processed_app_usage = []
+    for entry in app_usage:
+        process = entry.get("process", "")
+        title = entry.get("title", "")
+        
+        # Categorize
+        category = "neutral"
+        if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
+            category = "work"
+        elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
+            category = "recharge"
+            
+        processed_app_usage.append({
+            "date": entry.get("date"),
+            "process": process,
+            "title": title,
+            "duration": entry.get("duration", 0),
+            "category": category
+        })
     
     # Calculate energy vs friction mapping
     energy_levels = [r["energy_level"] for r in reflections]
@@ -395,10 +517,12 @@ def get_analytics():
         "insights": insights,
         "total_reflections": len(reflections),
         "total_sessions": len(sessions),
-        "today_sessions": today_sessions
+        "today_sessions": today_sessions,
+        "app_usage": processed_app_usage
     })
 
 @app.route("/api/shutdown", methods=["POST"])
+@require_local_origin
 def shutdown_app():
     # Sweep active files back to neutral workspace safely before closing
     from backend.workspace import WorkspaceManager
@@ -406,13 +530,25 @@ def shutdown_app():
     cur_mode = shared_state["current_mode"]
     
     print(f"Shutdown requested via API. Sweeping workspace {cur_mode} -> neutral...")
+    
+    # Flush remaining app usage
+    last_proc = shared_state.get("last_app_process")
+    last_title = shared_state.get("last_app_title")
+    accum_sec = shared_state.get("app_accumulated_seconds", 0)
+    if last_proc and accum_sec > 0:
+        try:
+            db.log_app_usage(last_proc, last_title, accum_sec)
+        except Exception as e:
+            print(f"Error logging app usage on shutdown: {e}")
+            
     db.log_session(cur_mode, datetime.now(), datetime.now()) # log final block close if any
     workspace.swap_workspace(cur_mode, "neutral")
     
-    # Kill the process in a separate thread after giving the API response 500ms to deliver
+    # Graceful shutdown: flush database and exit cleanly
     def terminate():
         import time
         time.sleep(0.5)
+        db.save()  # Ensure final data flush before exit
         import os
         os._exit(0)
         

@@ -97,6 +97,37 @@ class TestMindFlowComponents(unittest.TestCase):
         self.db.data["sessions"] = original_sessions
         self.db.save()
 
+    def test_database_app_usage(self):
+        """Verify logging and fetching application usage statistics in database."""
+        original_app_usage = self.db.data.get("app_usage", []).copy()
+        self.db.data["app_usage"] = []
+        
+        # Log app usage
+        self.db.log_app_usage("code.exe", "index.html - MIND-FLOW", 15)
+        self.db.log_app_usage("code.exe", "app.py - MIND-FLOW", 20)
+        self.db.log_app_usage("chrome.exe", "Google Search", 45)
+        
+        usage = self.db.get_app_usage()
+        
+        # Check that we have exactly 2 unique processes logged
+        self.assertEqual(len(usage), 2)
+        
+        # Verify aggregation on the same process on the same date
+        code_entries = [u for u in usage if u["process"] == "code.exe"]
+        chrome_entries = [u for u in usage if u["process"] == "chrome.exe"]
+        
+        self.assertEqual(len(code_entries), 1)
+        self.assertEqual(code_entries[0]["duration"], 35)
+        self.assertEqual(code_entries[0]["title"], "app.py - MIND-FLOW")  # Latest title
+        
+        self.assertEqual(len(chrome_entries), 1)
+        self.assertEqual(chrome_entries[0]["duration"], 45)
+        self.assertEqual(chrome_entries[0]["title"], "Google Search")
+        
+        # Restore original
+        self.db.data["app_usage"] = original_app_usage
+        self.db.save()
+
     def test_dual_mode_decision_logic(self):
         """Verify the state machine decision engine for processes vs title keywords."""
         
@@ -173,6 +204,53 @@ class TestMindFlowComponents(unittest.TestCase):
         with open(work_profile_file, "r") as f:
             content = f.read()
         self.assertEqual(content, "Desktop Version (Modified)")
+
+    def test_workspace_symlink_safety(self):
+        """Verify that directory junctions and symbolic links are removed without traversing or deleting their target contents."""
+        # Mock os.path.exists and islink
+        with patch.object(self.workspace, 'is_link_or_junction', return_value=True) as mock_is_link, \
+             patch('os.path.isdir', return_value=True) as mock_isdir, \
+             patch('os.rmdir') as mock_rmdir, \
+             patch('shutil.rmtree') as mock_rmtree, \
+             patch('os.remove') as mock_remove:
+             
+            # Test safe_remove on a directory symlink/junction
+            self.workspace.safe_remove("C:\\dummy\\junction_link")
+            mock_is_link.assert_called_with("C:\\dummy\\junction_link")
+            mock_isdir.assert_called_with("C:\\dummy\\junction_link")
+            # Should call os.rmdir to remove the link, NOT shutil.rmtree
+            mock_rmdir.assert_called_once_with("C:\\dummy\\junction_link")
+            mock_rmtree.assert_not_called()
+            mock_remove.assert_not_called()
+
+        # Test safe_remove on a file symlink
+        with patch.object(self.workspace, 'is_link_or_junction', return_value=True) as mock_is_link, \
+             patch('os.path.isdir', return_value=False) as mock_isdir, \
+             patch('os.rmdir') as mock_rmdir, \
+             patch('shutil.rmtree') as mock_rmtree, \
+             patch('os.remove') as mock_remove:
+             
+            self.workspace.safe_remove("C:\\dummy\\file_link")
+            mock_is_link.assert_called_with("C:\\dummy\\file_link")
+            mock_isdir.assert_called_with("C:\\dummy\\file_link")
+            # Should call os.remove to remove the link, NOT shutil.rmtree
+            mock_remove.assert_called_once_with("C:\\dummy\\file_link")
+            mock_rmdir.assert_not_called()
+            mock_rmtree.assert_not_called()
+
+    def test_is_link_or_junction_attributes(self):
+        """Verify is_link_or_junction detects reparse points using file attributes."""
+        mock_stat = MagicMock()
+        mock_stat.st_file_attributes = 1024  # Reparse point flag
+        
+        with patch('os.path.islink', return_value=False), \
+             patch('os.lstat', return_value=mock_stat):
+            self.assertTrue(self.workspace.is_link_or_junction("some_path"))
+            
+        mock_stat.st_file_attributes = 0  # No reparse point flag
+        with patch('os.path.islink', return_value=False), \
+             patch('os.lstat', return_value=mock_stat):
+            self.assertFalse(self.workspace.is_link_or_junction("some_path"))
 
     def test_ctypes_sensors_safeguard(self):
         """Verify the DLL sensor hooks return safe, correct types."""
@@ -360,6 +438,33 @@ class TestMindFlowAPI(unittest.TestCase):
         self.assertIn("today_bypasses", data)
         self.assertIn("companion_message", data)
 
+    def test_require_local_origin(self):
+        # 1. No Origin/Referer headers should be allowed
+        response = self.client.post('/api/status/toggle', json={"enable": True})
+        self.assertEqual(response.status_code, 200)
+
+        # 2. Valid Origin header should be allowed
+        response = self.client.post('/api/status/toggle', json={"enable": True}, headers={"Origin": "http://localhost:5000"})
+        self.assertEqual(response.status_code, 200)
+        
+        response = self.client.post('/api/status/toggle', json={"enable": True}, headers={"Origin": "http://127.0.0.1:5000"})
+        self.assertEqual(response.status_code, 200)
+
+        # 3. Invalid Origin header should be blocked
+        response = self.client.post('/api/status/toggle', json={"enable": True}, headers={"Origin": "http://localhost.attacker.com"})
+        self.assertEqual(response.status_code, 403)
+        
+        response = self.client.post('/api/status/toggle', json={"enable": True}, headers={"Origin": "http://attacker.com?origin=localhost"})
+        self.assertEqual(response.status_code, 403)
+
+        # 4. Valid Referer header (when no Origin) should be allowed
+        response = self.client.post('/api/status/toggle', json={"enable": True}, headers={"Referer": "http://localhost:5000/dashboard"})
+        self.assertEqual(response.status_code, 200)
+
+        # 5. Invalid Referer header (when no Origin) should be blocked
+        response = self.client.post('/api/status/toggle', json={"enable": True}, headers={"Referer": "http://attacker.com/localhost"})
+        self.assertEqual(response.status_code, 403)
+
     def test_toggle_tracking(self):
         # Test toggling off
         response = self.client.post('/api/status/toggle', json={"enable": False})
@@ -440,6 +545,8 @@ class TestMindFlowAPI(unittest.TestCase):
         self.assertIn("weekday_summary", data)
         self.assertIn("recommendations", data)
         self.assertIn("insights", data)
+        self.assertIn("app_usage", data)
+        self.assertIsInstance(data["app_usage"], list)
 
     @patch('os._exit')
     def test_shutdown_app(self, mock_exit):
@@ -458,6 +565,30 @@ class TestMindFlowAPI(unittest.TestCase):
                     break
                 time.sleep(0.1)
             mock_exit.assert_called_with(0)
+
+    def test_host_header_validation(self):
+        # 1. Valid Host headers should be allowed
+        response = self.client.get('/api/status', headers={"Host": "localhost:5000"})
+        self.assertEqual(response.status_code, 200)
+        
+        response = self.client.get('/api/status', headers={"Host": "127.0.0.1:5000"})
+        self.assertEqual(response.status_code, 200)
+
+        # 2. Invalid Host headers should be blocked (DNS rebinding simulation)
+        response = self.client.get('/api/status', headers={"Host": "attacker.com"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Invalid Host header", response.get_json()["error"])
+        
+        response = self.client.get('/api/status', headers={"Host": "localhost.attacker.com:5000"})
+        self.assertEqual(response.status_code, 403)
+
+        # 3. Request from non-local IP with missing Origin/Referer should be blocked
+        response = self.client.post('/api/status/toggle', json={"enable": True}, environ_base={'REMOTE_ADDR': '192.168.1.100'})
+        self.assertEqual(response.status_code, 403)
+        
+        # 4. Request from local IP with missing Origin/Referer should be allowed
+        response = self.client.post('/api/status/toggle', json={"enable": True}, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        self.assertEqual(response.status_code, 200)
 
 class TestAppWindowLaunch(unittest.TestCase):
     @patch('os.path.exists')

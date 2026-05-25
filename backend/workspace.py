@@ -44,18 +44,41 @@ class WorkspaceManager:
             except Exception as e:
                 print(f"Failed to create recharge placeholder: {e}")
 
+    def is_link_or_junction(self, path):
+        """Detect if path is a symbolic link or a Windows directory junction/reparse point."""
+        if os.path.islink(path):
+            return True
+        try:
+            st = os.lstat(path)
+            # FILE_ATTRIBUTE_REPARSE_POINT is 1024 (0x400)
+            if hasattr(st, 'st_file_attributes') and (st.st_file_attributes & 1024):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def safe_remove(self, path):
+        """Safely remove a file or folder, ensuring symbolic links/junctions are not traversed."""
+        try:
+            if self.is_link_or_junction(path):
+                # Unlink the symlink or junction itself
+                if os.path.isdir(path):
+                    os.rmdir(path)
+                else:
+                    os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        except Exception as e:
+            print(f"Failed to safe_remove {path}: {e}")
+
     def clean_workspace_folder(self):
         """Helper to force-clean the workspace folder in case of dangling files."""
         if os.path.exists(self.workspace_dir):
             for item in os.listdir(self.workspace_dir):
                 path = os.path.join(self.workspace_dir, item)
-                try:
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
-                except Exception as e:
-                    print(f"Failed to delete {path} during cleanup: {e}")
+                self.safe_remove(path)
 
     def move_contents(self, src, dst):
         """Safely moves all contents of src folder into dst folder, handling collisions."""
@@ -66,11 +89,8 @@ class WorkspaceManager:
             s = os.path.join(src, item)
             d = os.path.join(dst, item)
             try:
-                if os.path.exists(d):
-                    if os.path.isdir(d):
-                        shutil.rmtree(d)
-                    else:
-                        os.remove(d)
+                if os.path.exists(d) or self.is_link_or_junction(d):
+                    self.safe_remove(d)
                 shutil.move(s, d)
             except Exception as e:
                 print(f"Error moving {s} to {d}: {e}")
