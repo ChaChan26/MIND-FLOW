@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import threading
+import copy
 from datetime import datetime
 
 DB_FILE = r"C:\MIND\mind_flow_data.json"
@@ -22,6 +23,8 @@ DEFAULT_SETTINGS = {
 }
 
 class MindFlowDB:
+    file_lock = threading.Lock() # Class-level lock to serialize background disk writes across all DB instances
+
     def __init__(self):
         self.lock = threading.RLock()
         self.filepath = DB_FILE
@@ -35,41 +38,50 @@ class MindFlowDB:
 
     def load(self):
         with self.lock:
-            if os.path.exists(self.filepath):
-                try:
-                    with open(self.filepath, "r", encoding="utf-8") as f:
-                        loaded = json.load(f)
-                        # Merge loaded keys to ensure schema safety
-                        self.data["settings"] = {**DEFAULT_SETTINGS, **loaded.get("settings", {})}
-                        self.data["sessions"] = loaded.get("sessions", [])
-                        self.data["reflections"] = loaded.get("reflections", [])
-                        self.data["app_usage"] = loaded.get("app_usage", [])
-                except Exception as e:
-                    print(f"Error loading database, resetting to default: {e}")
-                    self.save()
-            else:
-                self.save()
-
-    def save(self):
-        """Atomic write: write to temp file then rename to prevent corruption on crash."""
-        with self.lock:
-            try:
-                dir_path = os.path.dirname(self.filepath)
-                os.makedirs(dir_path, exist_ok=True)
-                fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.json')
-                try:
-                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                        json.dump(self.data, f, indent=4, ensure_ascii=False)
-                    os.replace(tmp_path, self.filepath)
-                except Exception:
-                    # Clean up temp file on failure
+            with MindFlowDB.file_lock:
+                if os.path.exists(self.filepath):
                     try:
-                        os.unlink(tmp_path)
-                    except OSError:
-                        pass
-                    raise
-            except Exception as e:
-                print(f"Error saving database: {e}")
+                        with open(self.filepath, "r", encoding="utf-8") as f:
+                            loaded = json.load(f)
+                            # Merge loaded keys to ensure schema safety
+                            self.data["settings"] = {**DEFAULT_SETTINGS, **loaded.get("settings", {})}
+                            self.data["sessions"] = loaded.get("sessions", [])
+                            self.data["reflections"] = loaded.get("reflections", [])
+                            self.data["app_usage"] = loaded.get("app_usage", [])
+                    except Exception as e:
+                        print(f"Error loading database, resetting to default: {e}")
+                        self.save(sync=True)
+                else:
+                    self.save(sync=True)
+
+    def save(self, sync=False):
+        """Atomic write to prevent corruption on crash (default: async background)."""
+        with self.lock:
+            data_copy = copy.deepcopy(self.data)
+        
+        def _bg_write(data_to_write):
+            with MindFlowDB.file_lock:
+                try:
+                    dir_path = os.path.dirname(self.filepath)
+                    os.makedirs(dir_path, exist_ok=True)
+                    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.json')
+                    try:
+                        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                            json.dump(data_to_write, f, indent=4, ensure_ascii=False)
+                        os.replace(tmp_path, self.filepath)
+                    except Exception:
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
+                        raise
+                except Exception as e:
+                    print(f"Error saving database: {e}")
+
+        if sync:
+            _bg_write(data_copy)
+        else:
+            threading.Thread(target=_bg_write, args=(data_copy,), daemon=True).start()
 
     def get_settings(self):
         return self.data["settings"]
@@ -143,17 +155,26 @@ class MindFlowDB:
             for entry in self.data.setdefault("app_usage", []):
                 if entry.get("date") == today_str and entry.get("process") == process:
                     entry["duration"] = entry.get("duration", 0) + duration
-                    # Update title to the latest active window title
+                    
+                    # Update titles dictionary
+                    titles = entry.setdefault("titles", {})
                     if title and title != "None":
+                        titles[title] = titles.get(title, 0) + duration
+                        # Update title to the latest active window title (legacy field)
                         entry["title"] = title
                     found = True
                     break
             
             if not found:
+                titles = {}
+                if title and title != "None":
+                    titles[title] = duration
+                    
                 self.data["app_usage"].append({
                     "date": today_str,
                     "process": process,
                     "title": title if title else "None",
+                    "titles": titles,
                     "duration": duration
                 })
             
@@ -178,14 +199,17 @@ class MindFlowDB:
                     "reason": "Autopilot Off"
                 }
             
-            # Count bypasses today
+            # Count bypasses today (short-circuiting reverse search since sessions are chronological)
             bypasses_today = 0
             today_date = datetime.today().date()
-            for s in self.data.get("sessions", []):
+            for s in reversed(self.data.get("sessions", [])):
                 try:
                     start_dt = datetime.fromisoformat(s["start"])
-                    if start_dt.date() == today_date and s.get("bypassed", False):
-                        bypasses_today += 1
+                    if start_dt.date() == today_date:
+                        if s.get("bypassed", False):
+                            bypasses_today += 1
+                    elif start_dt.date() < today_date:
+                        break
                 except:
                     pass
             

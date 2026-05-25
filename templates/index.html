@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MIND-FLOW // Cognitive Shield Companion</title>
     <meta name="description" content="A self-hosted, silent cognitive assistant protecting your focus and mental energy battery.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css?v=8">
 </head>
 <body>
@@ -351,6 +354,23 @@
                                 <button type="button" class="filter-pill" id="app-filter-weekly" onclick="setAppStatsFilter('weekly')">Past 7 Days</button>
                             </div>
                         </div>
+                        
+                        <!-- Category Ratio Segmented Progress Bar -->
+                        <div class="app-ratio-bar-container" id="app-ratio-bar-container" style="display: none;">
+                            <div class="app-ratio-bar" id="app-ratio-bar">
+                                <div class="app-ratio-segment work" id="ratio-seg-work" style="width: 0%;"></div>
+                                <div class="app-ratio-segment recharge" id="ratio-seg-recharge" style="width: 0%;"></div>
+                                <div class="app-ratio-segment neutral" id="ratio-seg-neutral" style="width: 0%;"></div>
+                            </div>
+                            <div class="app-ratio-legend">
+                                <span class="ratio-legend-item"><span class="legend-dot work"></span>Work: <span id="ratio-pct-work">0%</span></span>
+                                <span class="ratio-legend-item"><span class="legend-dot recharge"></span>Recharge: <span id="ratio-pct-recharge">0%</span></span>
+                                <span class="ratio-legend-item"><span class="legend-dot neutral"></span>Neutral: <span id="ratio-pct-neutral">0%</span></span>
+                            </div>
+                        </div>
+                        
+                        <p class="app-stats-hint">💡 Click any row to expand details and view active window titles.</p>
+                        
                         <div class="app-stats-list-wrapper">
                             <div class="app-stats-list" id="app-stats-list">
                                 <!-- Dynamic entries injected by JS -->

@@ -126,24 +126,29 @@ def get_status():
     adaptive_reason = adaptive["reason"]
     work_limit_seconds = settings["work_duration_minutes"] * 60
     
-    # Estimate battery level based on daily reflection
+    # Estimate battery level based on daily reflection (optimized with reverse search)
     reflections = db.get_reflections()
     today_str = date.today().isoformat()
-    today_reflections = [r for r in reflections if r["timestamp"].startswith(today_str)]
     
     current_energy = 5 # Default
-    if today_reflections:
-        # Take the most recent reflection's energy level
-        current_energy = today_reflections[-1]["energy_level"]
+    for r in reversed(reflections):
+        if r["timestamp"].startswith(today_str):
+            current_energy = r["energy_level"]
+            break
+        try:
+            if datetime.fromisoformat(r["timestamp"]).date() < date.today():
+                break
+        except:
+            pass
         
-    # Calculate today's total stats
+    # Calculate today's total stats (optimized with chronological short-circuiting)
     sessions = db.get_sessions()
     today_work = 0
     today_recharge = 0
     today_rest = 0
     today_bypasses = 0
     
-    for s in sessions:
+    for s in reversed(sessions):
         if s["start"].startswith(today_str):
             mode = s["mode"]
             duration = s["duration"]
@@ -155,6 +160,12 @@ def get_status():
                 today_rest += duration
             if s.get("bypassed", False):
                 today_bypasses += 1
+        else:
+            try:
+                if datetime.fromisoformat(s["start"]).date() < date.today():
+                    break
+            except:
+                pass
                 
     # Add ongoing sessions to the totals in real-time
     cur_mode = shared_state["current_mode"]
@@ -266,30 +277,40 @@ def get_analytics():
     app_usage = db.get_app_usage()
     
     import re
+    _route_regex_cache = {}
     def matches_keyword(kw, text):
         kw = kw.lower()
         text = text.lower()
-        if kw.isalnum():
-            pattern = rf"\b{re.escape(kw)}\b"
-        else:
-            pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
-        return bool(re.search(pattern, text))
+        if kw not in _route_regex_cache:
+            if kw.isalnum():
+                pattern = rf"\b{re.escape(kw)}\b"
+            else:
+                pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
+            _route_regex_cache[kw] = re.compile(pattern)
+        return bool(_route_regex_cache[kw].search(text))
         
     settings = db.get_settings()
     work_keywords = settings.get("work_keywords", [])
     recharge_keywords = settings.get("recharge_keywords", [])
+    
+    # Classification cache to avoid redundant regex matching across thousands of entries
+    classification_cache = {}
     
     processed_app_usage = []
     for entry in app_usage:
         process = entry.get("process", "")
         title = entry.get("title", "")
         
-        # Categorize
-        category = "neutral"
-        if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
-            category = "work"
-        elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
-            category = "recharge"
+        cache_key = (process, title)
+        if cache_key in classification_cache:
+            category = classification_cache[cache_key]
+        else:
+            category = "neutral"
+            if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
+                category = "work"
+            elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
+                category = "recharge"
+            classification_cache[cache_key] = category
             
         processed_app_usage.append({
             "date": entry.get("date"),
@@ -548,7 +569,7 @@ def shutdown_app():
     def terminate():
         import time
         time.sleep(0.5)
-        db.save()  # Ensure final data flush before exit
+        db.save(sync=True)  # Ensure final data flush before exit
         import os
         os._exit(0)
         

@@ -78,9 +78,8 @@ function switchTab(tabId) {
     // Smooth scroll the content area back to top on tab switch
     const mainContent = document.querySelector('.main-content');
     if (mainContent) {
-        mainContent.scrollTop = 0;
+        mainContent.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
     
     if (tabId === 'analytics') {
         loadAnalytics();
@@ -168,6 +167,9 @@ document.querySelectorAll('.card').forEach(card => {
         const rect = card.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+        card.style.setProperty('--mouse-x', `${x}px`);
+        card.style.setProperty('--mouse-y', `${y}px`);
+        
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
         const rotateX = ((y - centerY) / centerY) * -3;
@@ -175,8 +177,8 @@ document.querySelectorAll('.card').forEach(card => {
         card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-4px)`;
     });
     card.addEventListener('mouseleave', () => {
-        card.style.transition = '';
-        card.style.transform = '';
+        card.style.transition = 'transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s ease, box-shadow 0.4s ease';
+        card.style.transform = 'perspective(800px) rotateX(0deg) rotateY(0deg) translateY(0px)';
     });
 });
 
@@ -823,8 +825,30 @@ function renderAppStats() {
     const todayStr = new Date().toISOString().split('T')[0];
     
     if (appStatsFilter === 'today') {
-        // Find entries matching today's date
-        filteredData = appStatsData.filter(entry => entry.date === todayStr);
+        // Find entries matching today's date and aggregate them safely
+        const cumulative = {};
+        appStatsData.filter(entry => entry.date === todayStr).forEach(entry => {
+            const key = entry.process;
+            if (!cumulative[key]) {
+                cumulative[key] = {
+                    process: entry.process,
+                    title: entry.title,
+                    titles: {},
+                    duration: 0,
+                    category: entry.category
+                };
+            }
+            cumulative[key].duration += entry.duration;
+            if (entry.title && entry.title !== "None") {
+                cumulative[key].title = entry.title;
+            }
+            if (entry.titles) {
+                for (const [title, dur] of Object.entries(entry.titles)) {
+                    cumulative[key].titles[title] = (cumulative[key].titles[title] || 0) + dur;
+                }
+            }
+        });
+        filteredData = Object.values(cumulative);
     } else {
         // Last 7 days including today
         const cutoffDate = new Date();
@@ -840,6 +864,7 @@ function renderAppStats() {
                     cumulative[key] = {
                         process: entry.process,
                         title: entry.title,
+                        titles: {},
                         duration: 0,
                         category: entry.category
                     };
@@ -849,6 +874,12 @@ function renderAppStats() {
                 if (entry.title && entry.title !== "None") {
                     cumulative[key].title = entry.title;
                 }
+                // Merge sub-titles durations
+                if (entry.titles) {
+                    for (const [title, dur] of Object.entries(entry.titles)) {
+                        cumulative[key].titles[title] = (cumulative[key].titles[title] || 0) + dur;
+                    }
+                }
             }
         });
         filteredData = Object.values(cumulative);
@@ -857,13 +888,46 @@ function renderAppStats() {
     // Sort by duration descending
     filteredData.sort((a, b) => b.duration - a.duration);
     
+    // Calculate total duration for ratio metrics
+    let workDuration = 0;
+    let rechargeDuration = 0;
+    let neutralDuration = 0;
+    
+    filteredData.forEach(item => {
+        if (item.category === 'work') {
+            workDuration += item.duration;
+        } else if (item.category === 'recharge') {
+            rechargeDuration += item.duration;
+        } else {
+            neutralDuration += item.duration;
+        }
+    });
+    
+    const totalDuration = workDuration + rechargeDuration + neutralDuration;
+    
+    // Render Category Ratio Bar
+    const ratioContainer = document.getElementById('app-ratio-bar-container');
+    if (totalDuration > 0 && ratioContainer) {
+        ratioContainer.style.display = 'block';
+        const workPct = Math.round((workDuration / totalDuration) * 100);
+        const rechargePct = Math.round((rechargeDuration / totalDuration) * 100);
+        const neutralPct = Math.round((neutralDuration / totalDuration) * 100);
+        
+        document.getElementById('ratio-seg-work').style.width = `${workPct}%`;
+        document.getElementById('ratio-seg-recharge').style.width = `${rechargePct}%`;
+        document.getElementById('ratio-seg-neutral').style.width = `${neutralPct}%`;
+        
+        document.getElementById('ratio-pct-work').textContent = `${workPct}%`;
+        document.getElementById('ratio-pct-recharge').textContent = `${rechargePct}%`;
+        document.getElementById('ratio-pct-neutral').textContent = `${neutralPct}%`;
+    } else if (ratioContainer) {
+        ratioContainer.style.display = 'none';
+    }
+    
     if (filteredData.length === 0) {
         listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0;">No application activity tracked for this period.</div>`;
         return;
     }
-    
-    // Calculate total duration for percentages
-    const totalDuration = filteredData.reduce((sum, item) => sum + item.duration, 0);
     
     // Emojis mapping
     const getAppEmoji = (proc) => {
@@ -889,26 +953,53 @@ function renderAppStats() {
         return `${hrs}h ${remMins}m`;
     };
     
-    filteredData.forEach(item => {
+    filteredData.forEach((item, index) => {
         const pct = totalDuration > 0 ? (item.duration / totalDuration) * 100 : 0;
         const emoji = getAppEmoji(item.process);
         const durationText = formatAppDuration(item.duration);
         
+        // Build sub-items list html
+        let subItemsHtml = '';
+        if (item.titles && Object.keys(item.titles).length > 0) {
+            // Sort sub-titles by duration descending
+            const sortedSubTitles = Object.entries(item.titles).sort((a, b) => b[1] - a[1]);
+            sortedSubTitles.forEach(([title, dur]) => {
+                subItemsHtml += `
+                    <div class="app-sub-item">
+                        <span class="app-sub-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+                        <span class="app-sub-duration">${formatAppDuration(dur)}</span>
+                    </div>
+                `;
+            });
+        } else {
+            // Fallback to the main title
+            subItemsHtml = `
+                <div class="app-sub-item">
+                    <span class="app-sub-name" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
+                    <span class="app-sub-duration">${durationText}</span>
+                </div>
+            `;
+        }
+        
         const appItem = document.createElement('div');
         appItem.className = 'app-item';
+        appItem.id = `app-item-${index}`;
         appItem.innerHTML = `
-            <div class="app-item-top">
+            <div class="app-item-top" onclick="toggleAppDetails(${index})">
                 <div class="app-item-details">
                     <span class="app-item-icon">${emoji}</span>
                     <div class="app-item-meta">
-                        <span class="app-name">${escapeHtml(item.process)}</span>
+                        <span class="app-name">${escapeHtml(item.process)}<span class="app-expand-chevron">▼</span></span>
                         <span class="app-title-sub" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
                     </div>
                 </div>
                 <span class="app-duration-badge">${durationText}</span>
             </div>
-            <div class="app-progress-container">
+            <div class="app-progress-container" onclick="toggleAppDetails(${index})" style="cursor: pointer;">
                 <div class="app-progress-bar ${item.category}" style="width: 0%;"></div>
+            </div>
+            <div class="app-sub-list">
+                ${subItemsHtml}
             </div>
         `;
         
@@ -920,6 +1011,14 @@ function renderAppStats() {
             if (bar) bar.style.width = `${pct}%`;
         }, 50);
     });
+}
+
+// Toggle expansion of specific window titles list
+function toggleAppDetails(index) {
+    const el = document.getElementById(`app-item-${index}`);
+    if (el) {
+        el.classList.toggle('expanded');
+    }
 }
 
 // Render dynamic custom SVG chart

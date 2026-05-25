@@ -119,10 +119,15 @@ class TestMindFlowComponents(unittest.TestCase):
         self.assertEqual(len(code_entries), 1)
         self.assertEqual(code_entries[0]["duration"], 35)
         self.assertEqual(code_entries[0]["title"], "app.py - MIND-FLOW")  # Latest title
+        self.assertIn("titles", code_entries[0])
+        self.assertEqual(code_entries[0]["titles"]["index.html - MIND-FLOW"], 15)
+        self.assertEqual(code_entries[0]["titles"]["app.py - MIND-FLOW"], 20)
         
         self.assertEqual(len(chrome_entries), 1)
         self.assertEqual(chrome_entries[0]["duration"], 45)
         self.assertEqual(chrome_entries[0]["title"], "Google Search")
+        self.assertIn("titles", chrome_entries[0])
+        self.assertEqual(chrome_entries[0]["titles"]["Google Search"], 45)
         
         # Restore original
         self.db.data["app_usage"] = original_app_usage
@@ -332,7 +337,7 @@ class TestMindFlowComponents(unittest.TestCase):
         original_reflections = self.db.data["reflections"].copy()
         
         try:
-            self.db.update_settings({"work_duration_minutes": 45})
+            self.db.update_settings({"work_duration_minutes": 45, "adaptive_timers_enabled": True})
             
             # Scenario A: Default (no reflections, no bypasses)
             self.db.data["sessions"] = []
@@ -548,7 +553,7 @@ class TestMindFlowAPI(unittest.TestCase):
         self.assertIn("app_usage", data)
         self.assertIsInstance(data["app_usage"], list)
 
-    @patch('os._exit')
+    @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
         # Patch swap_workspace to avoid actually moving user's desktop files during test
         with patch('backend.workspace.WorkspaceManager.swap_workspace') as mock_swap:

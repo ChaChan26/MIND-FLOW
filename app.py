@@ -41,17 +41,20 @@ from backend.database import MindFlowDB
 db = MindFlowDB()
 
 import re
+_keyword_regex_cache = {}
 
-# Keep matches_keyword for matches window filters
+# Keep matches_keyword for matches window filters (optimized with regex cache)
 def matches_keyword(kw, text):
     """Check if a keyword matches a target text respecting word boundaries."""
     kw = kw.lower()
     text = text.lower()
-    if kw.isalnum():
-        pattern = rf"\b{re.escape(kw)}\b"
-    else:
-        pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
-    return bool(re.search(pattern, text))
+    if kw not in _keyword_regex_cache:
+        if kw.isalnum():
+            pattern = rf"\b{re.escape(kw)}\b"
+        else:
+            pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
+        _keyword_regex_cache[kw] = re.compile(pattern)
+    return bool(_keyword_regex_cache[kw].search(text))
 
 class LASTINPUTINFO(ctypes.Structure):
     _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
@@ -326,12 +329,21 @@ def main_state_machine(gui_process=None):
     print("MIND-FLOW Core State Machine started.")
     workspace = WorkspaceManager()
 
-    # Seed initial daily reflection if none exist for today
+    # Seed initial daily reflection if none exist for today (optimized with reverse search)
     try:
         from datetime import date
         today_str = date.today().isoformat()
         reflections = db.get_reflections()
-        has_today_refl = any(r["timestamp"].startswith(today_str) for r in reflections)
+        has_today_refl = False
+        for r in reversed(reflections):
+            if r["timestamp"].startswith(today_str):
+                has_today_refl = True
+                break
+            try:
+                if datetime.fromisoformat(r["timestamp"]).date() < date.today():
+                    break
+            except:
+                pass
         if not has_today_refl:
             db.add_reflection(5, 1, "[Autopilot] Cognitive Companion active for the day")
             print("Autopilot: Seeded initial daily reflection (Energy: 5, Friction: 1)")
