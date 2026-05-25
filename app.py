@@ -584,15 +584,12 @@ def main_state_machine(gui_process=None):
 
 def run_pyside_gui(url):
     """Run a standalone PySide6 QtWebEngineView window."""
-    import os
-    # Fix GPU flickering / hardware acceleration glitching in QtWebEngine
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu-compositing"
-    
     from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QColor
     import psutil
+    import os
     import sys
     import threading
     

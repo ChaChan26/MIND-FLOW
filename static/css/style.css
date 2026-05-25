@@ -208,8 +208,8 @@ h1, h2, h3, h4, .live-clock, .battery-pct {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    /* backdrop-filter: blur(24px); */
+    /* -webkit-backdrop-filter: blur(24px); */
     overflow-y: auto;
     scroll-behavior: smooth;
     scrollbar-width: none;
@@ -469,8 +469,8 @@ body.resizing * {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     padding: 2rem;
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* backdrop-filter: blur(var(--glass-blur)); */
+    /* -webkit-backdrop-filter: blur(var(--glass-blur)); */
     transition: transform 0.45s ease-out, border-color var(--transition-speed) ease, box-shadow 0.4s ease;
     box-shadow: var(--shadow-card);
     transform-style: preserve-3d;
@@ -1433,7 +1433,7 @@ input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
     border-radius: var(--radius-md);
     font-size: 0.9rem;
     font-weight: 500;
-    backdrop-filter: blur(12px);
+    /* backdrop-filter: blur(12px); */
     z-index: 1000;
     transform: translateY(150%);
     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -2722,7 +2722,7 @@ body.mode-rest .portal-sphere::after {
     font-size: 0.8rem;
     pointer-events: none;
     z-index: 1000;
-    backdrop-filter: blur(12px);
+    /* backdrop-filter: blur(12px); */
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
     opacity: 0;
     transition: opacity 0.2s ease, transform 0.15s ease;
@@ -2911,7 +2911,7 @@ body.mode-rest .portal-sphere::after {
     color: var(--text-secondary);
     font-size: 1.1rem;
     cursor: pointer;
-    backdrop-filter: blur(12px);
+    /* backdrop-filter: blur(12px); */
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
     transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     z-index: 999;
