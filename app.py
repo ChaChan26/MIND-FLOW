@@ -1,8 +1,6 @@
 import os
 import sys
 import io
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--use-gl=angle"
-os.environ["QSG_RHI_BACKEND"] = "d3d11"
 
 class Unbuffered:
     def __init__(self, stream):
@@ -585,13 +583,9 @@ def main_state_machine(gui_process=None):
         except Exception as e:
             print(f"Error in automatic reflection tracker: {e}")
 
-def run_pyside_gui(url):
-    """Run a standalone PySide6 QtWebEngineView window."""
-    from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    from PySide6.QtWebEngineCore import QWebEngineProfile
-    from PySide6.QtCore import QUrl
-    from PySide6.QtGui import QColor
+def run_webview_gui(url):
+    """Run a standalone pywebview Edge WebView2 window."""
+    import webview
     import psutil
     import os
     import sys
@@ -612,36 +606,20 @@ def run_pyside_gui(url):
     monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
     monitor_thread.start()
     
-    # 2. Qt Application Setup
-    app = QApplication(sys.argv)
-    
-    palette = app.palette()
-    palette.setColor(palette.ColorRole.Window, QColor("#0b0f19"))
-    app.setPalette(palette)
-    
-    window = QMainWindow()
-    window.setWindowTitle("MIND-FLOW // Cognitive Companion Dashboard")
-    window.resize(1280, 800)
-    
-    web_view = QWebEngineView()
-    web_view.page().profile().setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
-    web_view.setUrl(QUrl(url))
-    web_view.page().setBackgroundColor(QColor("#0b0f19"))
-    
-    layout = QVBoxLayout()
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(web_view)
-    
-    container = QWidget()
-    container.setLayout(layout)
-    window.setCentralWidget(container)
-    
-    window.show()
-    sys.exit(app.exec())
+    # 2. WebView window setup
+    # Set background color to #0b0f19 to avoid white flash
+    window = webview.create_window(
+        "MIND-FLOW // Cognitive Companion Dashboard",
+        url,
+        width=1280,
+        height=800,
+        background_color="#0b0f19"
+    )
+    webview.start()
 
 # Original app window launcher restored for test suite Popen expectations
 def launch_app_window(url):
-    """Launch the dashboard url in PySide6 standalone window, falling back to original code in testing."""
+    """Launch the dashboard url in pywebview standalone window, falling back to original code in testing."""
     import sys
     import subprocess
     import os
@@ -679,7 +657,7 @@ def launch_app_window(url):
         webbrowser.open(url)
         return False
 
-    # Standard execution: launch PySide6 process
+    # Standard execution: launch pywebview process
     if getattr(sys, 'frozen', False):
         exe = sys.executable
         try:
@@ -697,9 +675,9 @@ def launch_app_window(url):
             return None
 
 if __name__ == "__main__":
-    # If --gui argument is passed, launch the PySide6 standalone window process
+    # If --gui argument is passed, launch the pywebview standalone window process
     if len(sys.argv) > 1 and sys.argv[1] == "--gui":
-        run_pyside_gui("http://127.0.0.1:5000")
+        run_webview_gui("http://127.0.0.1:5000")
         sys.exit(0)
 
     # Ensure workspace profile directory exists
@@ -713,7 +691,7 @@ if __name__ == "__main__":
     # Wait a brief moment for Flask to initialize
     time.sleep(0.5)
 
-    # 2. Open dashboard in native app window (PySide6 process)
+    # 2. Open dashboard in native app window (pywebview process)
     print("Launching Cognitive Dashboard in Standalone App Mode...")
     gui_proc = launch_app_window("http://127.0.0.1:5000")
 
