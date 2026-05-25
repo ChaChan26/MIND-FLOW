@@ -1,5 +1,8 @@
+import os
 import sys
 import io
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--use-gl=angle"
+os.environ["QSG_RHI_BACKEND"] = "d3d11"
 
 class Unbuffered:
     def __init__(self, stream):
