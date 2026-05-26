@@ -31,13 +31,16 @@
             <nav class="nav-menu" role="navigation" aria-label="Main navigation">
                 <div class="nav-indicator" id="nav-indicator"></div>
                 <button class="nav-btn active" id="nav-btn-dashboard" onclick="switchTab('dashboard')">
-                    <span class="btn-icon">⚡</span> Dashboard <kbd class="kbd-hint">1</kbd>
+                    <span class="btn-icon">⚡</span> Dashboard
                 </button>
                 <button class="nav-btn" id="nav-btn-analytics" onclick="switchTab('analytics')">
-                    <span class="btn-icon">📊</span> Energy Map <kbd class="kbd-hint">2</kbd>
+                    <span class="btn-icon">📊</span> Energy Map
+                </button>
+                <button class="nav-btn" id="nav-btn-zen" onclick="switchTab('zen')">
+                    <span class="btn-icon">🧘</span> Zen Space
                 </button>
                 <button class="nav-btn" id="nav-btn-settings" onclick="switchTab('settings')">
-                    <span class="btn-icon">⚙️</span> Preferences <kbd class="kbd-hint">3</kbd>
+                    <span class="btn-icon">⚙️</span> Preferences
                 </button>
             </nav>
             
@@ -88,6 +91,10 @@
                             <span class="preset-icon">🧠</span>
                             <span class="preset-name">Focus</span>
                         </button>
+                        <button type="button" class="audio-preset-btn" data-sound="alpha" onclick="selectAmbientSound('alpha')" title="Alpha Waves: 10Hz binaural beats for calm focus & stress relief">
+                            <span class="preset-icon">🧘</span>
+                            <span class="preset-name">Alpha</span>
+                        </button>
                     </div>
                     
                     <!-- Hidden select for backwards compatibility, just in case -->
@@ -100,6 +107,7 @@
                         <option value="waves">Ocean Waves</option>
                         <option value="drone">Cosmic Space</option>
                         <option value="focus">Theta Waves</option>
+                        <option value="alpha">Alpha Waves</option>
                     </select>
 
                     <div class="audio-volume-row">
@@ -135,6 +143,18 @@
                 <div class="companion-advice-card" id="companion-message-banner">
                     <span class="advice-icon">🛡️</span>
                     <p id="companion-advice-text">Your companion is watching over you. Looking good!</p>
+                </div>
+
+                <!-- Focus Wisdom Banner -->
+                <div class="wisdom-card" id="wisdom-banner">
+                    <div class="wisdom-content">
+                        <span class="wisdom-emoji">✨</span>
+                        <div>
+                            <span class="wisdom-label">Focus Wisdom</span>
+                            <p id="wisdom-quote-text">"Breathe in energy, breathe out friction. Focus on one micro-step at a time."</p>
+                        </div>
+                    </div>
+                    <button type="button" class="goal-clear-btn" onclick="cycleWisdom()">New Quote</button>
                 </div>
 
                 <div class="grid-layout">
@@ -247,21 +267,21 @@
                                 <div class="form-group">
                                     <label>Mental Energy right now?</label>
                                     <div class="rating-group" id="energy-rating">
-                                        <button type="button" class="rate-btn" data-val="1"><span class="rate-emoji">😰</span><span class="rate-label">Drained</span></button>
-                                        <button type="button" class="rate-btn" data-val="2"><span class="rate-emoji">😮‍💨</span><span class="rate-label">Low</span></button>
-                                        <button type="button" class="rate-btn" data-val="3"><span class="rate-emoji">😐</span><span class="rate-label">Neutral</span></button>
-                                        <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">😊</span><span class="rate-label">Good</span></button>
-                                        <button type="button" class="rate-btn active" data-val="5"><span class="rate-emoji">🔥</span><span class="rate-label">Peak</span></button>
+                                        <button type="button" class="rate-btn" data-val="1"><span class="rate-emoji">😰</span><span class="rate-label">Drained (1)</span></button>
+                                        <button type="button" class="rate-btn" data-val="2"><span class="rate-emoji">😮‍💨</span><span class="rate-label">Low (2)</span></button>
+                                        <button type="button" class="rate-btn" data-val="3"><span class="rate-emoji">😐</span><span class="rate-label">Neutral (3)</span></button>
+                                        <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">😊</span><span class="rate-label">Good (4)</span></button>
+                                        <button type="button" class="rate-btn active" data-val="5"><span class="rate-emoji">🔥</span><span class="rate-label">Peak (5)</span></button>
                                     </div>
                                 </div>
                                 <div class="form-group">
                                     <label>Friction/Difficulty today?</label>
                                     <div class="rating-group" id="friction-rating">
-                                        <button type="button" class="rate-btn" data-val="1"><span class="rate-emoji">🌊</span><span class="rate-label">Smooth</span></button>
-                                        <button type="button" class="rate-btn active" data-val="2"><span class="rate-emoji">🌤️</span><span class="rate-label">Easy</span></button>
-                                        <button type="button" class="rate-btn" data-val="3"><span class="rate-emoji">⛅</span><span class="rate-label">Mixed</span></button>
-                                        <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">🌩️</span><span class="rate-label">Tough</span></button>
-                                        <button type="button" class="rate-btn" data-val="5"><span class="rate-emoji">🧱</span><span class="rate-label">Blocked</span></button>
+                                        <button type="button" class="rate-btn" data-val="1"><span class="rate-emoji">🌊</span><span class="rate-label">Smooth (1)</span></button>
+                                        <button type="button" class="rate-btn active" data-val="2"><span class="rate-emoji">🌤️</span><span class="rate-label">Easy (2)</span></button>
+                                        <button type="button" class="rate-btn" data-val="3"><span class="rate-emoji">⛅</span><span class="rate-label">Mixed (3)</span></button>
+                                        <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">🌩️</span><span class="rate-label">Tough (4)</span></button>
+                                        <button type="button" class="rate-btn" data-val="5"><span class="rate-emoji">🧱</span><span class="rate-label">Blocked (5)</span></button>
                                     </div>
                                 </div>
                             </div>
@@ -277,10 +297,54 @@
                                     <button type="button" class="ref-tag" onclick="addTag('Deep Flow')">+ Deep Flow</button>
                                     <button type="button" class="ref-tag" onclick="addTag('Rest Break')">+ Rest Break</button>
                                     <button type="button" class="ref-tag" onclick="addTag('Fatigue Alert')">+ Fatigue Alert</button>
+                                    <button type="button" class="ref-tag ref-tag-gratitude" onclick="prefillGratitude()" style="background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.4); color: #fbbf24; font-weight: 500;">✨ Gratitude Win</button>
                                 </div>
                             </div>
                             <button type="submit" class="submit-btn">Save Reflection</button>
                         </form>
+                    </div>
+                    
+                    <!-- Focus Intention Card -->
+                    <div class="card glass-card goal-card" id="goal-card">
+                        <h3>Current Micro-Goal</h3>
+                        <p class="card-desc">Set a single intentional micro-goal for your current focus session.</p>
+                        
+                        <div class="goal-input-area" id="goal-input-area">
+                            <input type="text" id="goal-input" placeholder="e.g., Fix the DB connection pool memory leak" maxlength="100">
+                            <button type="button" class="goal-set-btn" id="goal-set-btn" onclick="saveGoal()">Set Focus</button>
+                        </div>
+                        
+                        <div class="goal-display-area" id="goal-display-area" style="display: none;">
+                            <div class="goal-display-text" id="goal-display-text"></div>
+                            <div class="goal-actions">
+                                <button type="button" class="goal-complete-btn" onclick="completeGoal()">✓ Complete Win!</button>
+                                <button type="button" class="goal-clear-btn" onclick="clearGoal()">Edit</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Daily Hydration Tracker Card -->
+                    <div class="card glass-card span-2 hydration-card" id="hydration-card">
+                        <div class="hydration-header">
+                            <div>
+                                <h3>Daily Hydration Tracker</h3>
+                                <p class="card-desc">Proper hydration helps shield your brain from fatigue and visual headaches. Log 8 cups daily.</p>
+                            </div>
+                            <div class="hydration-progress">
+                                <span id="hydration-pct-text">0%</span>
+                                <span class="hydration-status-msg" id="hydration-msg">Not hydrated yet</span>
+                            </div>
+                        </div>
+                        <div class="hydration-cups-row" id="hydration-cups-container">
+                            <button type="button" class="cup-btn" onclick="logHydration(0)" data-index="0" title="Click to log cup 1">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(1)" data-index="1" title="Click to log cup 2">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(2)" data-index="2" title="Click to log cup 3">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(3)" data-index="3" title="Click to log cup 4">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(4)" data-index="4" title="Click to log cup 5">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(5)" data-index="5" title="Click to log cup 6">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(6)" data-index="6" title="Click to log cup 7">💧</button>
+                            <button type="button" class="cup-btn" onclick="logHydration(7)" data-index="7" title="Click to log cup 8">💧</button>
+                        </div>
                     </div>
                     
                     <!-- Daily Focus Timeline Widget -->
@@ -435,11 +499,25 @@
                                 <input type="number" id="idle-timeout-input" min="10" max="600" required>
                             </div>
                             
-                            <div class="form-group checkbox-group">
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label for="rest-duration-input">Rest Break Duration (Seconds)</label>
+                                <p class="setting-desc">Base duration of the lockout rest screen.</p>
+                                <input type="number" id="rest-duration-input" min="10" max="600" required>
+                            </div>
+                            
+                            <div class="form-group checkbox-group" style="margin-top: 1.25rem;">
                                 <input type="checkbox" id="autopilot-input" style="width: 18px; height: 18px; cursor: pointer;">
                                 <div>
                                     <label for="autopilot-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Cognitive Autopilot</label>
                                     <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Scale limits dynamically based on ratings.</p>
+                                </div>
+                            </div>
+
+                            <div class="form-group checkbox-group" style="margin-top: 1rem;">
+                                <input type="checkbox" id="eyecare-input" style="width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <label for="eyecare-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Eye Care Shield</label>
+                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Apply a warm, low-contrast night light filter to reduce fatigue.</p>
                                 </div>
                             </div>
                         </div>
@@ -469,11 +547,91 @@
                     </div>
                 </form>
             </section>
+
+            <!-- TAB 4: ZEN SPACE -->
+            <section class="tab-content" id="tab-zen">
+                <header class="section-header">
+                    <div>
+                        <h2>Attention Restoration Room</h2>
+                        <p class="subtitle">Relax your directed attention. Gently move your mouse over the canvas and breathe in rhythm with the stardust expansion.</p>
+                    </div>
+                </header>
+                <div class="grid-layout">
+                    <!-- Left: Stardust breathing canvas (span-2) -->
+                    <div class="card glass-card span-2 zen-card" style="padding: 1.5rem;">
+                        <div class="zen-canvas-container">
+                            <canvas id="zen-canvas"></canvas>
+                            <div class="zen-overlay">
+                                <div class="zen-breather" id="zen-breather-bubble"></div>
+                                <div class="zen-breather-text" id="zen-breather-text">Zen Active</div>
+                            </div>
+                        </div>
+                        <div class="zen-controls" style="margin-top: 1.5rem; display: flex; justify-content: center;">
+                            <button type="button" class="toggle-btn" id="zen-reset-particles-btn" onclick="resetZenParticles()">Re-seed Stardust</button>
+                        </div>
+                    </div>
+
+                    <!-- Right: 5-4-3-2-1 Sensory Grounding Widget (span-1) -->
+                    <div class="card glass-card grounding-card" id="grounding-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 480px;">
+                        <div>
+                            <h3 style="margin-bottom: 0.25rem;">Sensory Reset</h3>
+                            <p class="card-desc" style="margin-bottom: 1.25rem;">The 5-4-3-2-1 grounding method helps reset a fatigued nervous system.</p>
+                            
+                            <div class="grounding-step-container">
+                                <div class="grounding-step-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                                    <span class="grounding-step-badge" id="grounding-badge" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--recharge-color); letter-spacing: 0.05em;">Step 1 of 5</span>
+                                    <span class="grounding-step-sense" id="grounding-sense" style="font-size: 0.95rem; font-weight: 600;">👀 Sight</span>
+                                </div>
+                                
+                                <div class="grounding-step-body">
+                                    <h4 id="grounding-prompt-title" style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">Find 5 things you can see</h4>
+                                    <p id="grounding-prompt-desc" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 1.25rem;">Acknowledge 5 items in your visual field. Type them below to ground your focus.</p>
+                                </div>
+                                
+                                <div class="grounding-inputs-area" id="grounding-inputs-area">
+                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;">
+                                        <input type="text" class="grounding-field" id="grounding-input-0" placeholder="Acknowledge item 1..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    </div>
+                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-1">
+                                        <input type="text" class="grounding-field" id="grounding-input-1" placeholder="Acknowledge item 2..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    </div>
+                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-2">
+                                        <input type="text" class="grounding-field" id="grounding-input-2" placeholder="Acknowledge item 3..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    </div>
+                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-3">
+                                        <input type="text" class="grounding-field" id="grounding-input-3" placeholder="Acknowledge item 4..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    </div>
+                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-4">
+                                        <input type="text" class="grounding-field" id="grounding-input-4" placeholder="Acknowledge item 5..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="grounding-actions" style="margin-top: 1.25rem; display: flex; gap: 0.5rem; justify-content: flex-end; width: 100%;">
+                            <button type="button" class="goal-clear-btn" id="grounding-prev-btn" onclick="prevGroundingStep()" style="display: none; padding: 0.45rem 0.85rem; font-size: 0.8rem; margin: 0;">Back</button>
+                            <button type="button" class="submit-btn" id="grounding-next-btn" onclick="nextGroundingStep()" style="padding: 0.45rem 1rem; font-size: 0.8rem; margin: 0; background: var(--recharge-color); border-color: var(--recharge-color); color: #0b0f19; font-weight: 600;">Next Step</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
     <!-- Scroll to Top -->
     <button class="scroll-top-btn" id="scroll-top-btn" aria-label="Scroll to top" onclick="scrollToTop()">↑</button>
+
+    <!-- Floating Settings Changes Banner -->
+    <div class="floating-settings-banner" id="unsaved-changes-banner">
+        <div class="banner-content">
+            <span class="banner-icon">⚙️</span>
+            <span class="banner-text">You have unsaved preferences changes.</span>
+        </div>
+        <div class="banner-actions">
+            <button type="button" class="banner-btn discard-btn" onclick="discardSettingsChanges()">Discard</button>
+            <button type="button" class="banner-btn apply-btn" onclick="applySettingsChanges()">Apply Settings</button>
+        </div>
+    </div>
 
     <!-- Notification Toast -->
     <div class="toast" id="app-toast">

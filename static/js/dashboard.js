@@ -67,24 +67,49 @@ document.querySelectorAll('#friction-rating .rate-btn').forEach(btn => {
 
 // Tab Navigation
 function switchTab(tabId) {
+    if (tabId !== 'settings' && typeof checkSettingsDirty === 'function' && checkSettingsDirty()) {
+        if (!confirm("You have unsaved preferences changes. Do you want to leave without applying?")) {
+            // Restore active state on settings button
+            const settingsBtn = document.getElementById('nav-btn-settings');
+            if (settingsBtn) {
+                document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+                settingsBtn.classList.add('active');
+            }
+            return;
+        } else {
+            discardSettingsChanges();
+        }
+    }
     currentTab = tabId;
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
     
-    document.getElementById(`tab-${tabId}`).classList.add('active');
-    document.getElementById(`nav-btn-${tabId}`).classList.add('active');
-    updateNavIndicator();
+    const activeTab = document.getElementById(`tab-${tabId}`);
+    const activeBtn = document.getElementById(`nav-btn-${tabId}`);
+    if (activeTab) activeTab.classList.add('active');
+    if (activeBtn) activeBtn.classList.add('active');
     
-    // Smooth scroll the content area back to top on tab switch
+    // Instant scroll to top to prevent animation overhead during tab shifts
     const mainContent = document.querySelector('.main-content');
     if (mainContent) {
-        mainContent.scrollTo({ top: 0, behavior: 'smooth' });
+        mainContent.scrollTop = 0;
     }
+    
+    // Defer reading layout properties to the next animation frame
+    requestAnimationFrame(() => {
+        updateNavIndicator();
+    });
     
     if (tabId === 'analytics') {
         loadAnalytics();
+        stopZenCanvas();
     } else if (tabId === 'settings') {
         loadSettings();
+        stopZenCanvas();
+    } else if (tabId === 'zen') {
+        initZenCanvas();
+    } else {
+        stopZenCanvas();
     }
 }
 
@@ -149,36 +174,73 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// Animate BG glow slightly based on mouse move to feel organic
+// Animate BG glow slightly based on mouse move to feel organic (optimized with requestAnimationFrame & GPU acceleration)
+let glowTicking = false;
+let glowMouseX = 0;
+let glowMouseY = 0;
+
 document.addEventListener('mousemove', (e) => {
-    const x = e.clientX / window.innerWidth;
-    const y = e.clientY / window.innerHeight;
+    glowMouseX = e.clientX;
+    glowMouseY = e.clientY;
     
-    glow1.style.transform = `translate(${x * 30}px, ${y * 30}px)`;
-    glow2.style.transform = `translate(${-x * 40}px, ${-y * 40}px)`;
+    if (!glowTicking) {
+        requestAnimationFrame(updateGlow);
+        glowTicking = true;
+    }
 });
 
-// 3D Card Tilt Effect
+function updateGlow() {
+    const x = glowMouseX / window.innerWidth;
+    const y = glowMouseY / window.innerHeight;
+    
+    glow1.style.transform = `translate3d(${x * 30}px, ${y * 30}px, 0)`;
+    glow2.style.transform = `translate3d(${-x * 40}px, ${-y * 40}px, 0)`;
+    glowTicking = false;
+}
+
+// 3D Card Tilt Effect (Optimized with cached dimensions and requestAnimationFrame)
 document.querySelectorAll('.card').forEach(card => {
+    let rect = null;
+    let cardTicking = false;
+    let localMouseX = 0;
+    let localMouseY = 0;
+    
     card.addEventListener('mouseenter', () => {
+        rect = card.getBoundingClientRect();
         card.style.transition = 'transform 0.1s ease-out, border-color 0.3s ease, box-shadow 0.4s ease';
     });
+    
     card.addEventListener('mousemove', (e) => {
-        const rect = card.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        card.style.setProperty('--mouse-x', `${x}px`);
-        card.style.setProperty('--mouse-y', `${y}px`);
+        if (!rect) rect = card.getBoundingClientRect();
+        localMouseX = e.clientX - rect.left;
+        localMouseY = e.clientY - rect.top;
+        
+        if (!cardTicking) {
+            requestAnimationFrame(updateCardTilt);
+            cardTicking = true;
+        }
+    });
+    
+    function updateCardTilt() {
+        if (!rect) {
+            cardTicking = false;
+            return;
+        }
+        card.style.setProperty('--mouse-x', `${localMouseX}px`);
+        card.style.setProperty('--mouse-y', `${localMouseY}px`);
         
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
-        const rotateX = ((y - centerY) / centerY) * -3;
-        const rotateY = ((x - centerX) / centerX) * 3;
-        card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-4px)`;
-    });
+        const rotateX = ((localMouseY - centerY) / centerY) * -3;
+        const rotateY = ((localMouseX - centerX) / centerX) * 3;
+        card.style.transform = `perspective(800px) rotate3d(1, 0, 0, ${rotateX}deg) rotate3d(0, 1, 0, ${rotateY}deg) translate3d(0, -4px, 0)`;
+        cardTicking = false;
+    }
+    
     card.addEventListener('mouseleave', () => {
+        rect = null;
         card.style.transition = 'transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s ease, box-shadow 0.4s ease';
-        card.style.transform = 'perspective(800px) rotateX(0deg) rotateY(0deg) translateY(0px)';
+        card.style.transform = 'perspective(800px) rotate3d(1, 0, 0, 0deg) rotate3d(0, 1, 0, 0deg) translate3d(0, 0, 0)';
     });
 });
 
@@ -246,10 +308,15 @@ async function pollStatus() {
         if (!res.ok) throw new Error("Status API error");
         const status = await res.json();
         
-        // 1. Update Body classes for mode specific glows
-        bodyEl.className = '';
-        bodyEl.classList.add(`mode-${status.current_mode}`);
-        updateNavIndicator();
+        // 1. Update Body classes for mode specific glows (only on changes to prevent layout thrashing)
+        const activeMode = status.current_mode || 'neutral';
+        if (!bodyEl.classList.contains(`mode-${activeMode}`)) {
+            bodyEl.className = '';
+            bodyEl.classList.add(`mode-${activeMode}`);
+            requestAnimationFrame(() => {
+                updateNavIndicator();
+            });
+        }
         
         // 2. Status Details
         currentModeTitle.textContent = `${status.current_mode} mode`;
@@ -428,6 +495,16 @@ async function pollStatus() {
             toggleShieldBtn.style.color = 'var(--recharge-color)';
         }
         
+        // 7. Update Focus Intention Goal UI if set
+        if (status.current_goal !== undefined) {
+            updateGoalUI(status.current_goal);
+        }
+        
+        // 7.5 Update Daily Hydration UI if set
+        if (status.hydration !== undefined) {
+            updateHydrationUI(status.hydration);
+        }
+        
     } catch (e) {
         console.error("Failed status poll: ", e);
         currentModeTitle.textContent = 'Offline';
@@ -451,6 +528,108 @@ toggleShieldBtn.addEventListener('click', async () => {
     }
 });
 
+// Floating Settings Changes Dirty Tracking
+let initialSettings = null;
+let dirtyTrackingInitialized = false;
+
+function checkSettingsDirty() {
+    if (!initialSettings) return false;
+    
+    const workLimit = document.getElementById('work-limit-input');
+    const idleTimeout = document.getElementById('idle-timeout-input');
+    const restDuration = document.getElementById('rest-duration-input');
+    const workKeywords = document.getElementById('work-keywords-input');
+    const rechargeKeywords = document.getElementById('recharge-keywords-input');
+    const autopilot = document.getElementById('autopilot-input');
+    const eyecare = document.getElementById('eyecare-input');
+    
+    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare) {
+        return false;
+    }
+    
+    const current = {
+        work_duration_minutes: parseInt(workLimit.value) || 0,
+        idle_timeout_seconds: parseInt(idleTimeout.value) || 0,
+        rest_duration_seconds: parseInt(restDuration.value) || 0,
+        work_keywords: workKeywords.value,
+        recharge_keywords: rechargeKeywords.value,
+        adaptive_timers_enabled: autopilot.checked,
+        eye_care_mode: eyecare.checked
+    };
+    
+    const isDirty = (
+        current.work_duration_minutes !== initialSettings.work_duration_minutes ||
+        current.idle_timeout_seconds !== initialSettings.idle_timeout_seconds ||
+        current.rest_duration_seconds !== initialSettings.rest_duration_seconds ||
+        current.work_keywords !== initialSettings.work_keywords ||
+        current.recharge_keywords !== initialSettings.recharge_keywords ||
+        current.adaptive_timers_enabled !== initialSettings.adaptive_timers_enabled ||
+        current.eye_care_mode !== initialSettings.eye_care_mode
+    );
+    
+    const banner = document.getElementById('unsaved-changes-banner');
+    if (banner) {
+        if (isDirty) {
+            banner.classList.add('show');
+        } else {
+            banner.classList.remove('show');
+        }
+    }
+    return isDirty;
+}
+
+function discardSettingsChanges() {
+    if (!initialSettings) return;
+    
+    const workLimit = document.getElementById('work-limit-input');
+    const idleTimeout = document.getElementById('idle-timeout-input');
+    const restDuration = document.getElementById('rest-duration-input');
+    const workKeywords = document.getElementById('work-keywords-input');
+    const rechargeKeywords = document.getElementById('recharge-keywords-input');
+    const autopilot = document.getElementById('autopilot-input');
+    const eyecare = document.getElementById('eyecare-input');
+    
+    if (workLimit) workLimit.value = initialSettings.work_duration_minutes;
+    if (idleTimeout) idleTimeout.value = initialSettings.idle_timeout_seconds;
+    if (restDuration) restDuration.value = initialSettings.rest_duration_seconds;
+    if (workKeywords) workKeywords.value = initialSettings.work_keywords;
+    if (rechargeKeywords) rechargeKeywords.value = initialSettings.recharge_keywords;
+    if (autopilot) autopilot.checked = initialSettings.adaptive_timers_enabled;
+    if (eyecare) {
+        eyecare.checked = initialSettings.eye_care_mode;
+        if (initialSettings.eye_care_mode) {
+            document.body.classList.add('eye-care-active');
+        } else {
+            document.body.classList.remove('eye-care-active');
+        }
+    }
+    
+    checkSettingsDirty();
+}
+
+function applySettingsChanges() {
+    const form = document.getElementById('settings-form');
+    if (form) {
+        if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+        } else {
+            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+}
+
+function initSettingsDirtyTracking() {
+    if (dirtyTrackingInitialized) return;
+    const settingsForm = document.getElementById('settings-form');
+    if (settingsForm) {
+        settingsForm.querySelectorAll('input, textarea').forEach(input => {
+            input.addEventListener('input', checkSettingsDirty);
+            input.addEventListener('change', checkSettingsDirty);
+        });
+        dirtyTrackingInitialized = true;
+    }
+}
+
 // Load Settings from Backend
 async function loadSettings() {
     try {
@@ -459,9 +638,33 @@ async function loadSettings() {
         
         document.getElementById('work-limit-input').value = settings.work_duration_minutes;
         document.getElementById('idle-timeout-input').value = settings.idle_timeout_seconds;
+        document.getElementById('rest-duration-input').value = settings.rest_duration_seconds || 20;
         document.getElementById('work-keywords-input').value = settings.work_keywords.join(', ');
         document.getElementById('recharge-keywords-input').value = settings.recharge_keywords.join(', ');
         document.getElementById('autopilot-input').checked = settings.adaptive_timers_enabled !== false;
+        
+        const eyeCareEnabled = settings.eye_care_mode === true;
+        document.getElementById('eyecare-input').checked = eyeCareEnabled;
+        if (eyeCareEnabled) {
+            document.body.classList.add('eye-care-active');
+        } else {
+            document.body.classList.remove('eye-care-active');
+        }
+        
+        // Cache initial settings
+        initialSettings = {
+            work_duration_minutes: settings.work_duration_minutes,
+            idle_timeout_seconds: settings.idle_timeout_seconds,
+            rest_duration_seconds: settings.rest_duration_seconds || 20,
+            work_keywords: settings.work_keywords.join(', '),
+            recharge_keywords: settings.recharge_keywords.join(', '),
+            adaptive_timers_enabled: settings.adaptive_timers_enabled !== false,
+            eye_care_mode: settings.eye_care_mode === true
+        };
+        
+        initSettingsDirtyTracking();
+        checkSettingsDirty();
+        
     } catch (e) {
         showToast("Error loading settings", true);
     }
@@ -474,9 +677,11 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     const settings = {
         work_duration_minutes: parseInt(document.getElementById('work-limit-input').value),
         idle_timeout_seconds: parseInt(document.getElementById('idle-timeout-input').value),
+        rest_duration_seconds: parseInt(document.getElementById('rest-duration-input').value),
         work_keywords: document.getElementById('work-keywords-input').value.split(',').map(k => k.trim()),
         recharge_keywords: document.getElementById('recharge-keywords-input').value.split(',').map(k => k.trim()),
-        adaptive_timers_enabled: document.getElementById('autopilot-input').checked
+        adaptive_timers_enabled: document.getElementById('autopilot-input').checked,
+        eye_care_mode: document.getElementById('eyecare-input').checked
     };
     
     try {
@@ -487,6 +692,25 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         });
         if (res.ok) {
             showToast("Settings Applied Successfully!");
+            // Dynamic eye care toggle
+            const eyeCareEnabled = document.getElementById('eyecare-input').checked;
+            if (eyeCareEnabled) {
+                document.body.classList.add('eye-care-active');
+            } else {
+                document.body.classList.remove('eye-care-active');
+            }
+            
+            // Re-cache initial settings
+            initialSettings = {
+                work_duration_minutes: settings.work_duration_minutes,
+                idle_timeout_seconds: settings.idle_timeout_seconds,
+                rest_duration_seconds: settings.rest_duration_seconds,
+                work_keywords: document.getElementById('work-keywords-input').value,
+                recharge_keywords: document.getElementById('recharge-keywords-input').value,
+                adaptive_timers_enabled: settings.adaptive_timers_enabled,
+                eye_care_mode: settings.eye_care_mode
+            };
+            checkSettingsDirty();
         } else {
             showToast("Failed to save settings", true);
         }
@@ -686,6 +910,15 @@ async function loadAnalytics() {
             sortedReflections.forEach(ref => {
                 const tr = document.createElement('tr');
                 
+                const summaryLower = (ref.summary || '').toLowerCase();
+                if (summaryLower.includes('coding win') || summaryLower.includes('deep flow') || summaryLower.includes('rest break')) {
+                    tr.classList.add('win-row');
+                } else if (summaryLower.includes('bug roadblock') || summaryLower.includes('stuck in loop') || summaryLower.includes('fatigue alert')) {
+                    tr.classList.add('roadblock-row');
+                } else if (summaryLower.includes('gratitude') || summaryLower.includes('victory')) {
+                    tr.classList.add('gratitude-row');
+                }
+                
                 const dt = new Date(ref.timestamp);
                 const dateStr = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 
@@ -820,9 +1053,17 @@ function renderAppStats() {
     if (!listEl) return;
     listEl.innerHTML = '';
     
+    // Timezone-safe local date string helper
+    const getLocalDateString = (d = new Date()) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     // Filter data based on selection
     let filteredData = [];
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     
     if (appStatsFilter === 'today') {
         // Find entries matching today's date and aggregate them safely
@@ -835,7 +1076,11 @@ function renderAppStats() {
                     title: entry.title,
                     titles: {},
                     duration: 0,
-                    category: entry.category
+                    category: entry.category,
+                    work_duration: 0,
+                    recharge_duration: 0,
+                    neutral_duration: 0,
+                    title_categories: {}
                 };
             }
             cumulative[key].duration += entry.duration;
@@ -847,13 +1092,31 @@ function renderAppStats() {
                     cumulative[key].titles[title] = (cumulative[key].titles[title] || 0) + dur;
                 }
             }
+            if (entry.title_categories) {
+                for (const [title, cat] of Object.entries(entry.title_categories)) {
+                    cumulative[key].title_categories[title] = cat;
+                }
+            }
+            
+            // Backward compatibility fallback for legacy database entries
+            let workD = entry.work_duration || 0;
+            let rechargeD = entry.recharge_duration || 0;
+            let neutralD = entry.neutral_duration || 0;
+            if (workD === 0 && rechargeD === 0 && neutralD === 0) {
+                if (entry.category === 'work') workD = entry.duration;
+                else if (entry.category === 'recharge') rechargeD = entry.duration;
+                else neutralD = entry.duration;
+            }
+            cumulative[key].work_duration += workD;
+            cumulative[key].recharge_duration += rechargeD;
+            cumulative[key].neutral_duration += neutralD;
         });
         filteredData = Object.values(cumulative);
     } else {
         // Last 7 days including today
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - 7);
-        const cutoffStr = cutoffDate.toISOString().split('T')[0];
+        const cutoffStr = getLocalDateString(cutoffDate);
         
         // Group by process and category to show cumulative totals
         const cumulative = {};
@@ -866,7 +1129,11 @@ function renderAppStats() {
                         title: entry.title,
                         titles: {},
                         duration: 0,
-                        category: entry.category
+                        category: entry.category,
+                        work_duration: 0,
+                        recharge_duration: 0,
+                        neutral_duration: 0,
+                        title_categories: {}
                     };
                 }
                 cumulative[key].duration += entry.duration;
@@ -880,27 +1147,52 @@ function renderAppStats() {
                         cumulative[key].titles[title] = (cumulative[key].titles[title] || 0) + dur;
                     }
                 }
+                if (entry.title_categories) {
+                    for (const [title, cat] of Object.entries(entry.title_categories)) {
+                        cumulative[key].title_categories[title] = cat;
+                    }
+                }
+                
+                // Backward compatibility fallback for legacy database entries
+                let workD = entry.work_duration || 0;
+                let rechargeD = entry.recharge_duration || 0;
+                let neutralD = entry.neutral_duration || 0;
+                if (workD === 0 && rechargeD === 0 && neutralD === 0) {
+                    if (entry.category === 'work') workD = entry.duration;
+                    else if (entry.category === 'recharge') rechargeD = entry.duration;
+                    else neutralD = entry.duration;
+                }
+                cumulative[key].work_duration += workD;
+                cumulative[key].recharge_duration += rechargeD;
+                cumulative[key].neutral_duration += neutralD;
             }
         });
         filteredData = Object.values(cumulative);
     }
     
+    // Re-determine predominant category for each accumulated item
+    filteredData.forEach(item => {
+        if (item.work_duration >= item.recharge_duration && item.work_duration >= item.neutral_duration) {
+            item.category = 'work';
+        } else if (item.recharge_duration >= item.work_duration && item.recharge_duration >= item.neutral_duration) {
+            item.category = 'recharge';
+        } else {
+            item.category = 'neutral';
+        }
+    });
+
     // Sort by duration descending
     filteredData.sort((a, b) => b.duration - a.duration);
     
-    // Calculate total duration for ratio metrics
+    // Calculate total duration for ratio metrics (accurately from sub-item classifications)
     let workDuration = 0;
     let rechargeDuration = 0;
     let neutralDuration = 0;
     
     filteredData.forEach(item => {
-        if (item.category === 'work') {
-            workDuration += item.duration;
-        } else if (item.category === 'recharge') {
-            rechargeDuration += item.duration;
-        } else {
-            neutralDuration += item.duration;
-        }
+        workDuration += item.work_duration;
+        rechargeDuration += item.recharge_duration;
+        neutralDuration += item.neutral_duration;
     });
     
     const totalDuration = workDuration + rechargeDuration + neutralDuration;
@@ -964,9 +1256,13 @@ function renderAppStats() {
             // Sort sub-titles by duration descending
             const sortedSubTitles = Object.entries(item.titles).sort((a, b) => b[1] - a[1]);
             sortedSubTitles.forEach(([title, dur]) => {
+                const cat = (item.title_categories && item.title_categories[title]) || 'neutral';
                 subItemsHtml += `
                     <div class="app-sub-item">
-                        <span class="app-sub-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+                        <span class="app-sub-name" title="${escapeHtml(title)}">
+                            <span class="legend-dot ${cat}" style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px;"></span>
+                            ${escapeHtml(title)}
+                        </span>
                         <span class="app-sub-duration">${formatAppDuration(dur)}</span>
                     </div>
                 `;
@@ -975,7 +1271,10 @@ function renderAppStats() {
             // Fallback to the main title
             subItemsHtml = `
                 <div class="app-sub-item">
-                    <span class="app-sub-name" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
+                    <span class="app-sub-name" title="${escapeHtml(item.title)}">
+                        <span class="legend-dot neutral" style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px;"></span>
+                        ${escapeHtml(item.title)}
+                    </span>
                     <span class="app-sub-duration">${durationText}</span>
                 </div>
             `;
@@ -1066,7 +1365,11 @@ function renderEnergyMap(weekdayData, reflections) {
         text.setAttribute("y", y + 4);
         text.setAttribute("class", "chart-axis-text");
         text.setAttribute("text-anchor", "end");
-        text.textContent = val;
+        
+        let axisLabel = val.toString();
+        if (val === 5) axisLabel = "5 (Max)";
+        if (val === 1) axisLabel = "1 (Min)";
+        text.textContent = axisLabel;
         svg.appendChild(text);
     }
     
@@ -1235,10 +1538,35 @@ function renderEnergyMap(weekdayData, reflections) {
     overlay.style.cursor = "crosshair";
     svg.appendChild(overlay);
 
-    // Crosshair hover tracking event listeners
+    // Crosshair hover tracking event listeners (optimized with cached dimensions and requestAnimationFrame)
+    let svgRect = null;
+    let chartTicking = false;
+    let chartMouseX = 0;
+    let chartPageX = 0;
+    let chartPageY = 0;
+
+    overlay.addEventListener('mouseenter', () => {
+        svgRect = svg.getBoundingClientRect();
+    });
+
     overlay.addEventListener('mousemove', (e) => {
-        const rect = svg.getBoundingClientRect();
-        const localX = (e.clientX - rect.left) * (width / rect.width);
+        if (!svgRect) svgRect = svg.getBoundingClientRect();
+        chartMouseX = e.clientX;
+        chartPageX = e.pageX;
+        chartPageY = e.pageY;
+        
+        if (!chartTicking) {
+            requestAnimationFrame(updateChartTooltip);
+            chartTicking = true;
+        }
+    });
+
+    function updateChartTooltip() {
+        if (!svgRect) {
+            chartTicking = false;
+            return;
+        }
+        const localX = (chartMouseX - svgRect.left) * (width / svgRect.width);
         
         // Find nearest weekday column
         const colWidth = chartW / 6;
@@ -1290,11 +1618,26 @@ function renderEnergyMap(weekdayData, reflections) {
             ? dayRefs.map(r => `• ${escapeHtml(r.summary)}`).join('<br>') 
             : 'No reflections logged today.';
             
+        const getEnergyLabel = (val) => {
+            if (val >= 4.5) return "Peak";
+            if (val >= 3.5) return "Good";
+            if (val >= 2.5) return "Neutral";
+            if (val >= 1.5) return "Low";
+            return "Drained";
+        };
+        const getFrictionLabel = (val) => {
+            if (val >= 4.5) return "Blocked";
+            if (val >= 3.5) return "Tough";
+            if (val >= 2.5) return "Mixed";
+            if (val >= 1.5) return "Easy";
+            return "Smooth";
+        };
+
         tooltipEl.innerHTML = `
             <h4>${dayName} Analysis</h4>
             <div class="chart-tooltip-metric">
-                <span>⚡ Avg Energy: <strong style="color: var(--recharge-color);">${avgEnergy.toFixed(1)}/5</strong></span>
-                <span>🧱 Avg Friction: <strong style="color: var(--work-color);">${avgFriction.toFixed(1)}/5</strong></span>
+                <span>⚡ Avg Energy: <strong style="color: var(--recharge-color);">${avgEnergy.toFixed(1)}/5 (${getEnergyLabel(avgEnergy)})</strong></span>
+                <span>🧱 Avg Friction: <strong style="color: var(--work-color);">${avgFriction.toFixed(1)}/5 (${getFrictionLabel(avgFriction)})</strong></span>
             </div>
             <div class="chart-tooltip-summary">
                 ${summariesText}
@@ -1305,11 +1648,14 @@ function renderEnergyMap(weekdayData, reflections) {
         const tooltipRect = tooltipEl.getBoundingClientRect();
         const maxLeft = window.innerWidth - (tooltipRect.width || 200) - 20;
         const maxTop = window.innerHeight - (tooltipRect.height || 100) - 20;
-        tooltipEl.style.top = `${Math.min(e.pageY - 20, maxTop + window.scrollY)}px`;
-        tooltipEl.style.left = `${Math.min(e.pageX + 15, maxLeft + window.scrollX)}px`;
-    });
+        tooltipEl.style.top = `${Math.min(chartPageY - 20, maxTop + window.scrollY)}px`;
+        tooltipEl.style.left = `${Math.min(chartPageX + 15, maxLeft + window.scrollX)}px`;
+        
+        chartTicking = false;
+    }
 
     overlay.addEventListener('mouseleave', () => {
+        svgRect = null;
         guideLine.style.opacity = "0";
         tooltipEl.style.opacity = "0";
         svg.querySelectorAll('.chart-dot-energy, .chart-dot-friction').forEach(circle => {
@@ -1641,6 +1987,7 @@ function startAmbientAudio() {
     else if (soundType === 'waves') accentColor = '#2dd4bf';
     else if (soundType === 'drone') accentColor = '#a78bfa';
     else if (soundType === 'focus') accentColor = '#facc15';
+    else if (soundType === 'alpha') accentColor = '#fbbf24';
     document.documentElement.style.setProperty('--ambient-active-color', accentColor);
     
     if (soundType === 'white' || soundType === 'pink' || soundType === 'brown' || soundType === 'rain' || soundType === 'waves') {
@@ -1842,6 +2189,46 @@ function startAmbientAudio() {
         
         rainNodes.push(oscLeft, oscRight, merger, binGain, noiseSource, noiseFilter, noiseGain);
         
+    } else if (soundType === 'alpha') {
+        const merger = audioCtx.createChannelMerger(2);
+        
+        const oscLeft = audioCtx.createOscillator();
+        oscLeft.type = 'sine';
+        oscLeft.frequency.value = 140;
+        
+        const oscRight = audioCtx.createOscillator();
+        oscRight.type = 'sine';
+        oscRight.frequency.value = 150; // 10Hz differential (Alpha waves)
+        
+        oscLeft.connect(merger, 0, 0);
+        oscRight.connect(merger, 0, 1);
+        
+        const binGain = audioCtx.createGain();
+        binGain.gain.value = 0.12;
+        merger.connect(binGain);
+        
+        const noiseSource = audioCtx.createBufferSource();
+        noiseSource.buffer = createPinkNoiseBuffer();
+        noiseSource.loop = true;
+        
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = 220;
+        
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.value = 0.08;
+        
+        noiseSource.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        
+        binGain.connect(gainNode);
+        noiseGain.connect(gainNode);
+        
+        oscLeft.start();
+        oscRight.start();
+        noiseSource.start();
+        
+        rainNodes.push(oscLeft, oscRight, merger, binGain, noiseSource, noiseFilter, noiseGain);
     } else {
         audioSource.connect(gainNode);
         audioSource.start();
@@ -2142,4 +2529,755 @@ function toggleSoundboxCollapse() {
         caret.textContent = '▲';
     }
 })();
+
+// ==========================================
+// Micro-Goals Management Controller
+// ==========================================
+function updateGoalUI(goal) {
+    const inputArea = document.getElementById('goal-input-area');
+    const displayArea = document.getElementById('goal-display-area');
+    const displayText = document.getElementById('goal-display-text');
+    const inputField = document.getElementById('goal-input');
+    
+    if (goal && goal.trim() !== "") {
+        if (inputArea) inputArea.style.display = 'none';
+        if (displayArea) displayArea.style.display = 'block';
+        if (displayText) displayText.textContent = goal;
+    } else {
+        if (inputArea) inputArea.style.display = 'flex';
+        if (displayArea) displayArea.style.display = 'none';
+        if (inputField) inputField.value = '';
+    }
+}
+
+async function loadGoal() {
+    try {
+        const res = await fetch('/api/goal');
+        const data = await res.json();
+        updateGoalUI(data.goal);
+    } catch(e) {
+        console.error("Error loading goal:", e);
+    }
+}
+
+async function saveGoal() {
+    const inputField = document.getElementById('goal-input');
+    if (!inputField) return;
+    
+    const goal = inputField.value.trim();
+    if (goal === "") {
+        showToast("Please enter a goal first", true);
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/goal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goal: goal })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            updateGoalUI(data.goal);
+            showToast("Focus intention set!");
+        } else {
+            showToast("Failed to save goal", true);
+        }
+    } catch(e) {
+        showToast("Network error setting goal", true);
+    }
+}
+
+async function clearGoal() {
+    try {
+        const res = await fetch('/api/goal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goal: "" })
+        });
+        if (res.ok) {
+            updateGoalUI("");
+            showToast("Focus intention cleared");
+        }
+    } catch(e) {
+        showToast("Error clearing goal", true);
+    }
+}
+
+async function completeGoal() {
+    const displayText = document.getElementById('goal-display-text');
+    const goalText = displayText ? displayText.textContent : "";
+    
+    try {
+        // 1. Post to reflections as a win automatically
+        const resRefl = await fetch('/api/reflections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                energy_level: 5,
+                friction_level: 1,
+                summary: `[Coding Win] Completed Focus Goal: ${goalText}`
+            })
+        });
+        
+        // 2. Clear active goal
+        const resClear = await fetch('/api/goal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goal: "" })
+        });
+        
+        if (resRefl.ok && resClear.ok) {
+            updateGoalUI("");
+            showToast("Intention accomplished! Logged in private vault.");
+            
+            // Trigger particle burst at complete button
+            const completeBtn = document.querySelector('.goal-complete-btn');
+            if (completeBtn) {
+                const rect = completeBtn.getBoundingClientRect();
+                const fakeEvent = {
+                    clientX: rect.left + rect.width / 2,
+                    clientY: rect.top + rect.height / 2
+                };
+                triggerParticleBurst(fakeEvent);
+            }
+            
+            pollStatus();
+            loadAnalytics();
+        } else {
+            showToast("Failed to complete goal", true);
+        }
+    } catch(e) {
+        showToast("Error completing goal", true);
+    }
+}
+
+// Call loadGoal on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadGoal();
+    // Fetch initial hydration
+    fetch('/api/hydration')
+        .then(r => r.json())
+        .then(data => updateHydrationUI(data))
+        .catch(e => console.error("Error loading hydration: ", e));
+    
+    // Initialize grounding stepper UI
+    updateGroundingUI();
+
+});
+
+// Prefill Gratitude Reflection Input
+function prefillGratitude() {
+    const input = document.getElementById('reflection-summary');
+    if (input) {
+        input.value = "[Gratitude] 3 things I'm grateful for: 1.  2.  3. ";
+        input.focus();
+        const pos = "[Gratitude] 3 things I'm grateful for: ".length;
+        input.setSelectionRange(pos, pos);
+    }
+}
+
+// Hydration logging controller
+async function logHydration(index) {
+    try {
+        const currentCups = document.querySelectorAll('#hydration-cups-container .cup-btn.filled').length;
+        const targetCups = index + 1;
+        const newCups = (targetCups === currentCups) ? currentCups - 1 : targetCups;
+        
+        const res = await fetch('/api/hydration', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cups: newCups })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            updateHydrationUI(data.hydration);
+            const cupBtn = document.querySelector(`.cup-btn[data-index="${index}"]`);
+            if (cupBtn) {
+                cupBtn.classList.add('clicked');
+                setTimeout(() => cupBtn.classList.remove('clicked'), 400);
+            }
+            if (newCups > currentCups) {
+                showToast("Logged cup of water! Stay hydrated. 💧");
+            } else {
+                showToast("Removed logged water cup. 💧");
+            }
+        }
+    } catch(e) {
+        console.error("Failed to log hydration: ", e);
+    }
+}
+
+function updateHydrationUI(hydration) {
+    const cups = hydration.cups || 0;
+    const pct = Math.min(100, Math.round((cups / 8) * 100));
+    
+    const pctText = document.getElementById('hydration-pct-text');
+    const msgText = document.getElementById('hydration-msg');
+    
+    if (pctText) pctText.textContent = `${pct}%`;
+    if (msgText) {
+        if (cups >= 8) {
+            msgText.textContent = "Fully hydrated! Excellent shield protection.";
+            msgText.style.color = "var(--recharge-color)";
+        } else if (cups >= 4) {
+            msgText.textContent = `${cups}/8 cups. Keep going!`;
+            msgText.style.color = "var(--work-color)";
+        } else {
+            msgText.textContent = `${cups}/8 cups. Drink some water.`;
+            msgText.style.color = "var(--text-muted)";
+        }
+    }
+    
+    const cupButtons = document.querySelectorAll('.cup-btn');
+    cupButtons.forEach((btn, idx) => {
+        if (idx < cups) {
+            btn.classList.add('filled');
+        } else {
+            btn.classList.remove('filled');
+        }
+    });
+}
+
+// Zen Space tab custom interactive canvas
+let zenCanvas = null;
+let zenCtx = null;
+let zenAnimFrame = null;
+let zenParticles = [];
+const MAX_ZEN_PARTICLES = 120;
+let zenMouse = { x: null, y: null, active: false };
+let zenStartTime = 0;
+
+class ZenParticle {
+    constructor(w, h) {
+        this.reset(w, h);
+    }
+    reset(w, h) {
+        this.x = Math.random() * w;
+        this.y = Math.random() * h;
+        this.vx = (Math.random() - 0.5) * 0.4;
+        this.vy = (Math.random() - 0.5) * 0.4;
+        this.baseSize = Math.random() * 2 + 1;
+        this.size = this.baseSize;
+        this.colorVal = Math.random();
+        this.alpha = Math.random() * 0.5 + 0.3;
+    }
+    update(w, h, breathFactor) {
+        this.x += this.vx;
+        this.y += this.vy;
+        
+        if (this.x < 0 || this.x > w) this.vx *= -1;
+        if (this.y < 0 || this.y > h) this.vy *= -1;
+        
+        if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
+            const dx = zenMouse.x - this.x;
+            const dy = zenMouse.y - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 120) {
+                const force = (120 - dist) / 120;
+                this.x -= (dx / dist) * force * 1.5;
+                this.y -= (dy / dist) * force * 1.5;
+            }
+        }
+        
+        this.size = this.baseSize * (1 + breathFactor * 1.2);
+    }
+    draw(ctx) {
+        let r, g, b;
+        if (this.colorVal < 0.4) {
+            r = 45; g = 212; b = 168;
+        } else if (this.colorVal < 0.8) {
+            r = 167; g = 139; b = 250;
+        } else {
+            r = 251; g = 191; b = 36;
+        }
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${this.alpha})`;
+        ctx.fill();
+    }
+}
+
+function initZenCanvas() {
+    zenCanvas = document.getElementById('zen-canvas');
+    if (!zenCanvas) return;
+    
+    zenCtx = zenCanvas.getContext('2d');
+    resizeZenCanvas();
+    
+    zenParticles = [];
+    for (let i = 0; i < MAX_ZEN_PARTICLES; i++) {
+        zenParticles.push(new ZenParticle(zenCanvas.width, zenCanvas.height));
+    }
+    
+    zenCanvas.addEventListener('mousemove', handleZenMouseMove);
+    zenCanvas.addEventListener('mouseleave', handleZenMouseLeave);
+    zenCanvas.addEventListener('mouseenter', handleZenMouseEnter);
+    window.addEventListener('resize', resizeZenCanvas);
+    
+    zenStartTime = Date.now();
+    
+    if (zenAnimFrame) cancelAnimationFrame(zenAnimFrame);
+    animateZen();
+}
+
+function stopZenCanvas() {
+    if (zenAnimFrame) {
+        cancelAnimationFrame(zenAnimFrame);
+        zenAnimFrame = null;
+    }
+    if (zenCanvas) {
+        zenCanvas.removeEventListener('mousemove', handleZenMouseMove);
+        zenCanvas.removeEventListener('mouseleave', handleZenMouseLeave);
+        zenCanvas.removeEventListener('mouseenter', handleZenMouseEnter);
+    }
+    window.removeEventListener('resize', resizeZenCanvas);
+}
+
+function resizeZenCanvas() {
+    if (!zenCanvas) return;
+    const rect = zenCanvas.parentElement.getBoundingClientRect();
+    zenCanvas.width = rect.width;
+    zenCanvas.height = rect.height;
+    
+    zenParticles.forEach(p => {
+        if (p.x > zenCanvas.width || p.y > zenCanvas.height) {
+            p.reset(zenCanvas.width, zenCanvas.height);
+        }
+    });
+}
+
+function handleZenMouseMove(e) {
+    if (!zenCanvas) return;
+    const rect = zenCanvas.getBoundingClientRect();
+    zenMouse.x = e.clientX - rect.left;
+    zenMouse.y = e.clientY - rect.top;
+}
+
+function handleZenMouseLeave() {
+    zenMouse.active = false;
+    zenMouse.x = null;
+    zenMouse.y = null;
+}
+
+function handleZenMouseEnter() {
+    zenMouse.active = true;
+}
+
+function resetZenParticles() {
+    if (!zenCanvas) return;
+    zenParticles.forEach(p => p.reset(zenCanvas.width, zenCanvas.height));
+    showToast("Stardust regenerated ✨");
+}
+
+function animateZen() {
+    if (!zenCanvas || !zenCtx) return;
+    
+    const w = zenCanvas.width;
+    const h = zenCanvas.height;
+    
+    zenCtx.clearRect(0, 0, w, h);
+    
+    const elapsed = (Date.now() - zenStartTime) / 1000;
+    const cycleTime = elapsed % 16.0;
+    
+    let breathFactor = 0;
+    let breathText = "";
+    let breathColor = "rgba(45, 212, 168, 0.4)";
+    let textGlowColor = "#2dd4a8";
+    
+    if (cycleTime < 4.0) {
+        breathFactor = cycleTime / 4.0;
+        breathText = "Inhale...";
+        breathColor = "rgba(45, 212, 168, 0.35)";
+        textGlowColor = "#2dd4a8";
+    } else if (cycleTime < 8.0) {
+        breathFactor = 1.0;
+        breathText = "Hold...";
+        breathColor = "rgba(251, 191, 36, 0.35)";
+        textGlowColor = "#fbbf24";
+    } else if (cycleTime < 12.0) {
+        breathFactor = 1.0 - (cycleTime - 8.0) / 4.0;
+        breathText = "Exhale...";
+        breathColor = "rgba(167, 139, 250, 0.35)";
+        textGlowColor = "#a78bfa";
+    } else {
+        breathFactor = 0.0;
+        breathText = "Hold...";
+        breathColor = "rgba(244, 63, 94, 0.35)";
+        textGlowColor = "#f43f5e";
+    }
+    
+    zenParticles.forEach(p => {
+        p.update(w, h, breathFactor);
+        p.draw(zenCtx);
+    });
+    
+    for (let i = 0; i < zenParticles.length; i++) {
+        for (let j = i + 1; j < zenParticles.length; j++) {
+            const p1 = zenParticles[i];
+            const p2 = zenParticles[j];
+            const dx = p1.x - p2.x;
+            const dy = p1.y - p2.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < 60) {
+                const alpha = (60 - dist) / 60 * 0.15;
+                zenCtx.beginPath();
+                zenCtx.moveTo(p1.x, p1.y);
+                zenCtx.lineTo(p2.x, p2.y);
+                zenCtx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                zenCtx.lineWidth = 0.5;
+                zenCtx.stroke();
+            }
+        }
+    }
+    
+    const breatherBubble = document.getElementById('zen-breather-bubble');
+    const breatherText = document.getElementById('zen-breather-text');
+    if (breatherBubble && breatherText) {
+        const scaleVal = 1 + breathFactor * 0.8;
+        breatherBubble.style.transform = `translate(-50%, -50%) scale(${scaleVal})`;
+        breatherBubble.style.borderColor = breathColor;
+        breatherBubble.style.boxShadow = `0 0 ${20 + breathFactor * 25}px ${breathColor}`;
+        
+        breatherText.textContent = breathText;
+        breatherText.style.color = textGlowColor;
+    }
+    
+    zenAnimFrame = requestAnimationFrame(animateZen);
+}
+
+// CURATED FOCUS WISDOM & AFFIRMATIONS
+const WISDOM_QUOTES = [
+    "Focus is the art of deciding what NOT to do right now.",
+    "You are not a machine; your value is not measured by uninterrupted output.",
+    "Breathe in energy, breathe out friction. Focus on one micro-step at a time.",
+    "Rest is not laziness; it is the raw fuel of deep creativity.",
+    "Progress over perfection. Celebrate your small wins today.",
+    "Look away from the screen, drop your shoulders, and relax your jaw.",
+    "A clear mind creates clean code. Step back to step forward.",
+    "Hydrate your body, pace your mind, protect your focus.",
+    "Tension is who you think you should be. Relaxation is who you are.",
+    "One single intention holds more power than a dozen scattered tasks."
+];
+let currentWisdomIndex = 2; // Default starting quote
+
+function cycleWisdom() {
+    const quoteText = document.getElementById('wisdom-quote-text');
+    if (!quoteText) return;
+    
+    let nextIdx = currentWisdomIndex;
+    while (nextIdx === currentWisdomIndex) {
+        nextIdx = Math.floor(Math.random() * WISDOM_QUOTES.length);
+    }
+    currentWisdomIndex = nextIdx;
+    
+    quoteText.style.opacity = '0';
+    setTimeout(() => {
+        quoteText.textContent = `"${WISDOM_QUOTES[currentWisdomIndex]}"`;
+        quoteText.style.opacity = '1';
+    }, 300);
+}
+
+// 5-4-3-2-1 SENSORY GROUNDING STEPPER
+const GROUNDING_STEPS = [
+    {
+        badge: "Step 1 of 5",
+        sense: "👀 Sight",
+        title: "Find 5 things you can see",
+        desc: "Acknowledge 5 items in your visual field. Type them below to ground your focus.",
+        count: 5,
+        placeholders: ["Object 1", "Object 2", "Object 3", "Object 4", "Object 5"]
+    },
+    {
+        badge: "Step 2 of 5",
+        sense: "🤝 Touch",
+        title: "Acknowledge 4 things you can feel",
+        desc: "Notice the physical sensations: texture, temperature, or pressure (e.g. keyboard keys, desk, fabric).",
+        count: 4,
+        placeholders: ["Sensation 1", "Sensation 2", "Sensation 3", "Sensation 4"]
+    },
+    {
+        badge: "Step 3 of 5",
+        sense: "👂 Sound",
+        title: "Listen for 3 distinct sounds",
+        desc: "Focus on 3 sounds in your environment (e.g. humming fan, keyboard click, distant traffic).",
+        count: 3,
+        placeholders: ["Sound 1", "Sound 2", "Sound 3"]
+    },
+    {
+        badge: "Step 4 of 5",
+        sense: "👃 Smell",
+        title: "Identify 2 things you can smell",
+        desc: "Inhale deeply. Notice any aromas in the air, or recall pleasant scents.",
+        count: 2,
+        placeholders: ["Scent 1", "Scent 2"]
+    },
+    {
+        badge: "Step 5 of 5",
+        sense: "👅 Taste / Affirmation",
+        title: "Write 1 thing you can taste or an affirmation",
+        desc: "Note a lingering taste, or type a positive self-affirmation for your work session.",
+        count: 1,
+        placeholders: ["Taste or positive statement..."]
+    }
+];
+let currentGroundingStep = 0;
+
+function updateGroundingUI() {
+    const step = GROUNDING_STEPS[currentGroundingStep];
+    const badgeEl = document.getElementById('grounding-badge');
+    const senseEl = document.getElementById('grounding-sense');
+    const titleEl = document.getElementById('grounding-prompt-title');
+    const descEl = document.getElementById('grounding-prompt-desc');
+    const inputsContainer = document.getElementById('grounding-inputs-area');
+    
+    if (!badgeEl || !senseEl || !titleEl || !descEl || !inputsContainer) return;
+    
+    badgeEl.textContent = step.badge;
+    senseEl.textContent = step.sense;
+    titleEl.textContent = step.title;
+    descEl.textContent = step.desc;
+    
+    inputsContainer.innerHTML = '';
+    for (let i = 0; i < step.count; i++) {
+        const row = document.createElement('div');
+        row.className = 'grounding-input-row';
+        row.style.marginBottom = '0.5rem';
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'grounding-field';
+        input.id = `grounding-input-${i}`;
+        input.placeholder = step.placeholders[i] || `Item ${i+1}...`;
+        
+        row.appendChild(input);
+        inputsContainer.appendChild(row);
+    }
+    
+    const prevBtn = document.getElementById('grounding-prev-btn');
+    if (prevBtn) {
+        prevBtn.style.display = currentGroundingStep === 0 ? 'none' : 'block';
+    }
+    
+    const nextBtn = document.getElementById('grounding-next-btn');
+    if (nextBtn) {
+        if (currentGroundingStep === 4) {
+            nextBtn.textContent = "Complete Reset";
+        } else {
+            nextBtn.textContent = "Next Step";
+        }
+    }
+}
+
+function prevGroundingStep() {
+    if (currentGroundingStep > 0) {
+        currentGroundingStep--;
+        updateGroundingUI();
+    }
+}
+
+async function nextGroundingStep() {
+    const firstInput = document.getElementById('grounding-input-0');
+    if (firstInput && !firstInput.value.trim()) {
+        showToast("Please acknowledge at least the first item to continue.", true);
+        firstInput.focus();
+        return;
+    }
+    
+    if (currentGroundingStep < 4) {
+        currentGroundingStep++;
+        updateGroundingUI();
+    } else {
+        try {
+            const res = await fetch('/api/reflections', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    energy_level: 4,
+                    friction_level: 1,
+                    summary: "[Mindfulness Reset] Completed 5-4-3-2-1 grounding exercise."
+                })
+            });
+            if (res.ok) {
+                showToast("Mindfulness Grounding Completed! mental battery recharged. 🌟");
+                
+                const nextBtn = document.getElementById('grounding-next-btn');
+                if (nextBtn) {
+                    const rect = nextBtn.getBoundingClientRect();
+                    triggerParticleBurst({
+                        clientX: rect.left + rect.width / 2,
+                        clientY: rect.top + rect.height / 2
+                    });
+                }
+                
+                currentGroundingStep = 0;
+                updateGroundingUI();
+                
+                pollStatus();
+                loadAnalytics();
+            }
+        } catch(e) {
+            showToast("Error saving mindfulness reset", true);
+        }
+    }
+}
+
+// ==========================================
+// Mindful Word Recommender Controllers
+// ==========================================
+const ZEN_WORDS = [
+    { word: "Stillness", pronounce: "/ˈstɪlnəs/", category: "Calm", prompt: "Observe the quiet space between your breaths. In this stillness, find your center." },
+    { word: "Clarity", pronounce: "/ˈklærɪti/", category: "Focus", prompt: "Let go of scattered thoughts. Focus on a single point of light, letting other details fade." },
+    { word: "Presence", pronounce: "/ˈprɛzəns/", category: "Focus", prompt: "Bring your attention entirely to the here and now. The future and past are just thoughts." },
+    { word: "Release", pronounce: "/rɪˈliːs/", category: "Calm", prompt: "Unclench your jaw, drop your shoulders, and exhale completely. Let go of accumulated tension." },
+    { word: "Serenity", pronounce: "/sɪˈrɛnɪti/", category: "Calm", prompt: "Accept the present moment exactly as it is. Tranquility comes from letting go of resistance." },
+    { word: "Flow", pronounce: "/floʊ/", category: "Focus", prompt: "Immerse yourself in the gentle current of your actions. Let task and self merge into one." },
+    { word: "Patience", pronounce: "/ˈpeɪʃəns/", category: "Growth", prompt: "Growth happens quietly and in its own time. Rest is a necessary phase of creation." },
+    { word: "Gratitude", pronounce: "/ˈɡrætɪtjuːd/", category: "Growth", prompt: "Reflect on one small thing that brought you comfort today. Hold that feeling." },
+    { word: "Balance", pronounce: "/ˈbæləns/", category: "Growth", prompt: "Acknowledge the rhythm of work and rest. Both are essential to sustain your energy." },
+    { word: "Harmony", pronounce: "/ˈhɑːrməni/", category: "Calm", prompt: "Align your body, breath, and environment. Feel the quiet alignment within." },
+    { word: "Resilience", pronounce: "/rɪˈzɪliəns/", category: "Growth", prompt: "Like a tree bending in the wind, you are flexible and strong. You can weather the challenge." },
+    { word: "Simplicity", pronounce: "/sɪmˈplɪsɪti/", category: "Calm", prompt: "Strip away the unnecessary clutter. Focus on the core of what truly matters." },
+    { word: "Intention", pronounce: "/ɪnˈtɛnʃən/", category: "Focus", prompt: "Define a single, gentle focus for your next hour. Let it guide your steps." },
+    { word: "Compassion", pronounce: "/kəmˈpæʃən/", category: "Growth", prompt: "Be kind to yourself in moments of frustration. You are doing the best you can." },
+    { word: "Acceptance", pronounce: "/əkˈsɛptəns/", category: "Calm", prompt: "Acknowledge your current state without judgment. Peace begins when struggle ends." }
+];
+
+let activeWordIndex = 0;
+
+function updateWordRecommenderUI() {
+    const wordObj = ZEN_WORDS[activeWordIndex];
+    const badgeEl = document.getElementById('active-word-badge');
+    const titleEl = document.getElementById('active-word-title');
+    const pronounceEl = document.getElementById('active-word-pronounce');
+    const promptEl = document.getElementById('active-word-prompt');
+    const contentEl = document.getElementById('active-word-content');
+    
+    if (!badgeEl || !titleEl || !pronounceEl || !promptEl || !contentEl) return;
+    
+    // Add transition class
+    contentEl.classList.add('fade-out');
+    
+    setTimeout(() => {
+        // Update Content
+        titleEl.textContent = wordObj.word;
+        pronounceEl.textContent = wordObj.pronounce;
+        promptEl.textContent = wordObj.prompt;
+        
+        // Update Badge class and text
+        badgeEl.textContent = wordObj.category;
+        badgeEl.className = 'word-badge';
+        if (wordObj.category === 'Calm') {
+            badgeEl.classList.add('badge-calm');
+        } else if (wordObj.category === 'Focus') {
+            badgeEl.classList.add('badge-focus');
+        } else if (wordObj.category === 'Growth') {
+            badgeEl.classList.add('badge-growth');
+        }
+        
+        // Update curated pill active states
+        document.querySelectorAll('.word-pill-btn').forEach(btn => {
+            if (btn.textContent.trim().toLowerCase() === wordObj.word.toLowerCase()) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        // Fade back in
+        contentEl.classList.remove('fade-out');
+    }, 200);
+}
+
+function recommendRandomWord() {
+    let nextIdx = activeWordIndex;
+    while (nextIdx === activeWordIndex) {
+        nextIdx = Math.floor(Math.random() * ZEN_WORDS.length);
+    }
+    activeWordIndex = nextIdx;
+    updateWordRecommenderUI();
+}
+
+function selectRecommendedWordByVal(wordValue) {
+    const idx = ZEN_WORDS.findIndex(w => w.word.toLowerCase() === wordValue.toLowerCase());
+    if (idx !== -1) {
+        activeWordIndex = idx;
+        updateWordRecommenderUI();
+    }
+}
+
+function setAsReflectionTheme() {
+    const wordObj = ZEN_WORDS[activeWordIndex];
+    
+    // 1. Prefill Reflection form on Dashboard
+    const reflectionInput = document.getElementById('reflection-summary');
+    if (reflectionInput) {
+        reflectionInput.value = `[Zen Theme: ${wordObj.word}] Reflecting on the essence of ${wordObj.word.toLowerCase()} during my break.`;
+    }
+    
+    // 2. Set ratings on quick reflection to favorable levels (peak energy, low friction)
+    const energyBtn = document.querySelector('#energy-rating button[data-val="4"]');
+    if (energyBtn) {
+        document.querySelectorAll('#energy-rating button').forEach(b => b.classList.remove('active'));
+        energyBtn.classList.add('active');
+    }
+    const frictionBtn = document.querySelector('#friction-rating button[data-val="1"]');
+    if (frictionBtn) {
+        document.querySelectorAll('#friction-rating button').forEach(b => b.classList.remove('active'));
+        frictionBtn.classList.add('active');
+    }
+    
+    // 3. Switch tab and toast
+    switchTab('dashboard');
+    showToast(`Focus theme set to "${wordObj.word}"! Copied to Dashboard. 🧘`);
+}
+
+async function saveZenWordReflection() {
+    const wordObj = ZEN_WORDS[activeWordIndex];
+    const inputEl = document.getElementById('word-reflection-input');
+    if (!inputEl) return;
+    
+    const text = inputEl.value.trim();
+    if (!text) {
+        showToast("Please enter a reflection sentence first.", true);
+        inputEl.focus();
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/reflections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                energy_level: 4,
+                friction_level: 1,
+                summary: `[Zen Reflection: ${wordObj.word}] ${text}`
+            })
+        });
+        if (res.ok) {
+            showToast(`Logged reflection on "${wordObj.word}"! Stardust recharged. ✨`);
+            inputEl.value = '';
+            
+            // Trigger particle burst at save button
+            const saveBtn = document.getElementById('save-word-reflection-btn');
+            if (saveBtn) {
+                const rect = saveBtn.getBoundingClientRect();
+                triggerParticleBurst({
+                    clientX: rect.left + rect.width / 2,
+                    clientY: rect.top + rect.height / 2
+                });
+            }
+            
+            // Refresh dashboard status & analytics
+            pollStatus();
+            loadAnalytics();
+        } else {
+            showToast("Failed to save Zen reflection.", true);
+        }
+    } catch(e) {
+        showToast("Network error saving reflection.", true);
+    }
+}
 

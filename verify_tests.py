@@ -49,6 +49,8 @@ class TestMindFlowComponents(unittest.TestCase):
         test_settings = {
             "work_duration_minutes": "30",  # String that should be converted to int
             "idle_timeout_seconds": 120,
+            "rest_duration_seconds": "25",  # String that should be converted to int
+            "eye_care_mode": True,
             "work_keywords": ["VS Code", "GitHub", "   Antigravity   "],  # Mixed casing and spacing
             "recharge_keywords": ["Hades.exe", "YouTube"]
         }
@@ -57,9 +59,27 @@ class TestMindFlowComponents(unittest.TestCase):
         updated = self.db.get_settings()
         self.assertEqual(updated["work_duration_minutes"], 30)  # Verify int conversion
         self.assertEqual(updated["idle_timeout_seconds"], 120)
+        self.assertEqual(updated["rest_duration_seconds"], 25)  # Verify int conversion
+        self.assertTrue(updated["eye_care_mode"])
         self.assertIn("antigravity", updated["work_keywords"])  # Verify lowercase conversion & strip
         self.assertIn("hades.exe", updated["recharge_keywords"])
         
+        # Test type validation safety (invalid integer ignored)
+        self.db.update_settings({"work_duration_minutes": "invalid"})
+        self.assertEqual(self.db.get_settings()["work_duration_minutes"], 30)
+        
+        # Test range clamping bounds (prevent lockout / zero errors)
+        self.db.update_settings({"work_duration_minutes": 2, "idle_timeout_seconds": 5, "rest_duration_seconds": 1})
+        clamped = self.db.get_settings()
+        self.assertEqual(clamped["work_duration_minutes"], 10)  # Min work limit
+        self.assertEqual(clamped["idle_timeout_seconds"], 10)  # Min idle limit
+        self.assertEqual(clamped["rest_duration_seconds"], 5)   # Min rest limit
+        
+        # Test string boolean parsing
+        self.db.update_settings({"eye_care_mode": "false", "adaptive_timers_enabled": "true"})
+        self.assertFalse(self.db.get_settings()["eye_care_mode"])
+        self.assertTrue(self.db.get_settings()["adaptive_timers_enabled"])
+
         # Restore
         self.db.update_settings(original_settings)
 
@@ -304,6 +324,12 @@ class TestMindFlowComponents(unittest.TestCase):
         
         self.assertTrue(matches_keyword("vs code", "vs code editor"))
         self.assertFalse(matches_keyword("vs code", "devs code"))
+        self.assertTrue(matches_keyword("vs code", "vs code"))
+
+        # Keywords starting with non-alphanumeric characters (like file extensions)
+        self.assertTrue(matches_keyword(".py", "app.py"))
+        self.assertTrue(matches_keyword(".exe", "chrome.exe"))
+        self.assertFalse(matches_keyword(".py", "app.pyc"))
         
         # Case Insensitivity
         self.assertTrue(matches_keyword("VS CODE", "vs code"))
@@ -408,6 +434,42 @@ class TestMindFlowComponents(unittest.TestCase):
             self.db.update_settings(original_settings)
             self.db.data["sessions"] = original_sessions
             self.db.data["reflections"] = original_reflections
+            self.db.save()
+
+    def test_database_goal_handling(self):
+        """Verify micro-goal set/get and clean serialization."""
+        orig_goal = self.db.get_current_goal()
+        try:
+            self.db.set_current_goal("Test Goal")
+            self.assertEqual(self.db.get_current_goal(), "Test Goal")
+            self.db.set_current_goal("")
+            self.assertEqual(self.db.get_current_goal(), "")
+        finally:
+            self.db.set_current_goal(orig_goal)
+
+    def test_database_hydration_handling(self):
+        """Verify daily hydration resetting and increment safety."""
+        orig_hyd = self.db.data.get("hydration", {"date": "", "cups": 0}).copy()
+        try:
+            # Clean up initial state for a reliable test run
+            self.db.data["hydration"]["cups"] = 0
+            # 1. Fresh state today
+            hyd = self.db.get_hydration()
+            self.assertEqual(hyd["cups"], 0)
+            self.assertEqual(hyd["date"], datetime.today().date().isoformat())
+            
+            # 2. Increment
+            self.db.increment_hydration()
+            self.assertEqual(self.db.get_hydration()["cups"], 1)
+            
+            # 3. Reset on new day
+            self.db.data["hydration"]["date"] = "2020-01-01"
+            self.db.data["hydration"]["cups"] = 5
+            hyd_new = self.db.get_hydration()
+            self.assertEqual(hyd_new["cups"], 0)
+            self.assertEqual(hyd_new["date"], datetime.today().date().isoformat())
+        finally:
+            self.db.data["hydration"] = orig_hyd
             self.db.save()
 
 class TestMindFlowAPI(unittest.TestCase):
@@ -543,15 +605,63 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.save()
 
     def test_get_analytics(self):
-        response = self.client.get('/api/analytics')
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        self.assertIn("reflections", data)
-        self.assertIn("weekday_summary", data)
-        self.assertIn("recommendations", data)
-        self.assertIn("insights", data)
-        self.assertIn("app_usage", data)
-        self.assertIsInstance(data["app_usage"], list)
+        # Insert a mock app usage entry with mixed categories
+        original_app_usage = self.db.data.get("app_usage", []).copy()
+        self.db.data["app_usage"] = [
+            {
+                "date": datetime.today().date().isoformat(),
+                "process": "chrome.exe",
+                "title": "YouTube Video - YouTube - Google Chrome",
+                "titles": {
+                    "GitHub - code repo": 300,        # work keyword -> 300s work
+                    "YouTube Video - YouTube": 60,    # recharge keyword -> 60s recharge
+                    "Random page": 10                 # neutral -> 10s neutral
+                },
+                "duration": 370
+            }
+        ]
+        self.db.save()
+        
+        try:
+            response = self.client.get('/api/analytics')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertIn("reflections", data)
+            self.assertIn("weekday_summary", data)
+            self.assertIn("recommendations", data)
+            self.assertIn("insights", data)
+            self.assertIn("app_usage", data)
+            self.assertIsInstance(data["app_usage"], list)
+            
+            # Find the chrome.exe entry
+            chrome_entries = [e for e in data["app_usage"] if e["process"] == "chrome.exe"]
+            self.assertEqual(len(chrome_entries), 1)
+            chrome = chrome_entries[0]
+            
+            # Assert all the new fields are returned
+            self.assertIn("titles", chrome)
+            self.assertIn("title_categories", chrome)
+            self.assertIn("work_duration", chrome)
+            self.assertIn("recharge_duration", chrome)
+            self.assertIn("neutral_duration", chrome)
+            self.assertIn("category", chrome)
+            
+            # Check values
+            self.assertEqual(chrome["work_duration"], 300)
+            self.assertEqual(chrome["recharge_duration"], 60)
+            self.assertEqual(chrome["neutral_duration"], 10)
+            
+            # Classifications check
+            self.assertEqual(chrome["title_categories"]["GitHub - code repo"], "work")
+            self.assertEqual(chrome["title_categories"]["YouTube Video - YouTube"], "recharge")
+            self.assertEqual(chrome["title_categories"]["Random page"], "neutral")
+            
+            # Predominant category check: work is 300s, recharge is 60s, so it must be "work"
+            self.assertEqual(chrome["category"], "work")
+            
+        finally:
+            self.db.data["app_usage"] = original_app_usage
+            self.db.save()
 
     @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
@@ -594,6 +704,57 @@ class TestMindFlowAPI(unittest.TestCase):
         # 4. Request from local IP with missing Origin/Referer should be allowed
         response = self.client.post('/api/status/toggle', json={"enable": True}, environ_base={'REMOTE_ADDR': '127.0.0.1'})
         self.assertEqual(response.status_code, 200)
+
+    def test_manage_goal(self):
+        orig_goal = self.db.get_current_goal()
+        try:
+            # 1. GET returns current goal
+            response = self.client.get('/api/goal')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("goal", response.get_json())
+            
+            # 2. POST updates current goal
+            response = self.client.post('/api/goal', json={"goal": "Test API goal"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["status"], "success")
+            self.assertEqual(response.get_json()["goal"], "Test API goal")
+            self.assertEqual(self.db.get_current_goal(), "Test API goal")
+
+            # 3. GET status contains current_goal
+            response = self.client.get('/api/status')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["current_goal"], "Test API goal")
+        finally:
+            self.db.set_current_goal(orig_goal)
+
+    def test_hydration_api(self):
+        orig_hyd = self.db.data.get("hydration", {"date": "", "cups": 0}).copy()
+        try:
+            # 1. GET returns hydration JSON
+            response = self.client.get('/api/hydration')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("cups", response.get_json())
+            
+            # 2. POST increments cups
+            cups_before = response.get_json()["cups"]
+            response = self.client.post('/api/hydration')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["status"], "success")
+            self.assertEqual(response.get_json()["hydration"]["cups"], cups_before + 1)
+            
+            # 3. status contains hydration
+            response = self.client.get('/api/status')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["hydration"]["cups"], cups_before + 1)
+
+            # 4. POST with custom cups
+            response = self.client.post('/api/hydration', json={"cups": 5})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["status"], "success")
+            self.assertEqual(response.get_json()["hydration"]["cups"], 5)
+        finally:
+            self.db.data["hydration"] = orig_hyd
+            self.db.save()
 
 class TestAppWindowLaunch(unittest.TestCase):
     @patch('os.path.exists')
@@ -662,7 +823,8 @@ class TestLockoutOverlay(unittest.TestCase):
         button_cmd = None
         def mock_btn_init(*args, **kwargs):
             nonlocal button_cmd
-            button_cmd = kwargs.get("command")
+            if "Save & Rest" in kwargs.get("text", ""):
+                button_cmd = kwargs.get("command")
             return MagicMock()
         mock_button.side_effect = mock_btn_init
 
@@ -681,9 +843,10 @@ class TestLockoutOverlay(unittest.TestCase):
                 cb()
         mock_root.mainloop.side_effect = simulate_mainloop
 
-        dump, completed = trigger_lockout_overlay(1)
+        dump, completed, snoozed = trigger_lockout_overlay(1)
         self.assertEqual(dump, "Test Brain Dump Content")
         self.assertTrue(completed)
+        self.assertFalse(snoozed)
 
     @patch('app.tk.Tk')
     @patch('app.tk.Frame')
@@ -707,9 +870,37 @@ class TestLockoutOverlay(unittest.TestCase):
                 bindings["<Escape>"](None)
         mock_root.mainloop.side_effect = simulate_mainloop
 
-        dump, completed = trigger_lockout_overlay(10)
+        dump, completed, snoozed = trigger_lockout_overlay(10)
         self.assertEqual(dump, "")
         self.assertFalse(completed)
+        self.assertFalse(snoozed)
+
+    @patch('app.tk.Tk')
+    @patch('app.tk.Frame')
+    @patch('app.tk.Label')
+    @patch('app.tk.Text')
+    @patch('app.tk.Button')
+    @patch('app.tk.Canvas')
+    @patch('app.winsound.Beep')
+    def test_trigger_lockout_overlay_snooze_hotkey(self, mock_beep, mock_canvas, mock_button, mock_text, mock_label, mock_frame, mock_tk):
+        mock_root = MagicMock()
+        mock_tk.return_value = mock_root
+
+        bindings = {}
+        def mock_bind(event, callback):
+            bindings[event] = callback
+        mock_root.bind.side_effect = mock_bind
+
+        def simulate_mainloop():
+            # Trigger Ctrl+S key press
+            if "<Control-s>" in bindings:
+                bindings["<Control-s>"](None)
+        mock_root.mainloop.side_effect = simulate_mainloop
+
+        dump, completed, snoozed = trigger_lockout_overlay(10)
+        self.assertEqual(dump, "")
+        self.assertFalse(completed)
+        self.assertTrue(snoozed)
 
 class TestMainStateMachine(unittest.TestCase):
     def setUp(self):
@@ -853,7 +1044,7 @@ class TestMainStateMachine(unittest.TestCase):
         shared_state["current_mode"] = "work"
         shared_state["manual_lockout_requested"] = True
         
-        mock_overlay.return_value = ("Manual Dump", True)
+        mock_overlay.return_value = ("Manual Dump", True, False)
         
         sleep_count = 0
         def sleep_side_effect(secs):

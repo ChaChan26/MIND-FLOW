@@ -19,6 +19,7 @@ if getattr(sys, 'frozen', False):
     is_gui = "--gui" in sys.argv
     log_suffix = "_gui" if is_gui else ""
     try:
+        os.makedirs("C:\\MIND", exist_ok=True)
         sys.stdout = Unbuffered(open(f"C:\\MIND\\app{log_suffix}_stdout.log", "w", encoding="utf-8"))
         sys.stderr = Unbuffered(open(f"C:\\MIND\\app{log_suffix}_stderr.log", "w", encoding="utf-8"))
     except Exception:
@@ -40,21 +41,16 @@ from backend.workspace import WorkspaceManager
 from backend.database import MindFlowDB
 db = MindFlowDB()
 
-import re
-_keyword_regex_cache = {}
+PHYSICAL_STRETCHES = [
+    "Roll your shoulders backward in a slow circle 5 times.",
+    "Gently tilt your head left for 5 seconds, then right for 5 seconds.",
+    "Clasp your hands behind your back and push chest forward to stretch shoulders.",
+    "Extend your arms forward, link fingers, and stretch your upper back.",
+    "Close your eyes, cup your hands over them, and take 3 slow breaths in darkness.",
+    "Rotate your wrists in slow circles outward, then inward 5 times."
+]
 
-# Keep matches_keyword for matches window filters (optimized with regex cache)
-def matches_keyword(kw, text):
-    """Check if a keyword matches a target text respecting word boundaries."""
-    kw = kw.lower()
-    text = text.lower()
-    if kw not in _keyword_regex_cache:
-        if kw.isalnum():
-            pattern = rf"\b{re.escape(kw)}\b"
-        else:
-            pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
-        _keyword_regex_cache[kw] = re.compile(pattern)
-    return bool(_keyword_regex_cache[kw].search(text))
+from backend.database import matches_keyword
 
 class LASTINPUTINFO(ctypes.Structure):
     _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
@@ -105,7 +101,7 @@ def get_idle_seconds():
         lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
         if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
             return 0
-        millis = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        millis = (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) & 0xFFFFFFFF
         return max(0.0, millis / 1000.0)
     except Exception as e:
         print(f"Error reading idle seconds: {e}")
@@ -114,9 +110,12 @@ def get_idle_seconds():
 def trigger_lockout_overlay(duration_seconds=20):
     """Enforce a fullscreen borderless Tkinter window to lockout visual focus with a Brain Dump phase."""
     try:
-        # Warm, gentle door-bell style chime instead of a high-pitched alarm
-        winsound.Beep(330, 200)  # E4
-        winsound.Beep(440, 250)  # A4
+        # Play a peaceful, soft, rising wind chime arpeggio (C4, E4, G4, B4, C5)
+        winsound.Beep(262, 120)  # C4
+        winsound.Beep(330, 120)  # E4
+        winsound.Beep(392, 120)  # G4
+        winsound.Beep(494, 120)  # B4
+        winsound.Beep(523, 200)  # C5
     except Exception:
         pass
 
@@ -127,10 +126,12 @@ def trigger_lockout_overlay(duration_seconds=20):
     root.attributes("-topmost", True)
     root.configure(bg="#0b0f19")
 
+    active_goal = db.get_current_goal()
     captured_dump = ""
     phase1_active = True
     grace_remaining = 15
     completed_fully = False
+    snoozed = False
 
     frame = tk.Frame(
         root, bg="#0e0e1a", bd=1, relief="solid", 
@@ -143,6 +144,13 @@ def trigger_lockout_overlay(duration_seconds=20):
         font=("Outfit", 22, "bold"), fg="#b49aff", bg="#0e0e1a"
     )
     title_label.pack(pady=(5, 10))
+
+    if active_goal:
+        goal_label = tk.Label(
+            frame, text=f"🎯 FOCUS INTENTION: {active_goal}",
+            font=("Inter", 12, "bold"), fg="#a78bfa", bg="#0e0e1a", wraplength=600
+        )
+        goal_label.pack(pady=(0, 10))
 
     desc_label = tk.Label(
         frame, text="Write down your active thoughts or next steps to safely pause your flow.",
@@ -179,12 +187,24 @@ def trigger_lockout_overlay(duration_seconds=20):
         phase1_active = False
         start_lockout_phase()
 
+    def submit_snooze():
+        nonlocal snoozed
+        snoozed = True
+        root.destroy()
+
     save_btn = tk.Button(
         btn_frame, text="Save & Rest (Ctrl+Enter)", font=("Inter", 11, "bold"),
         bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", activeforeground="#ffffff",
         bd=0, padx=20, pady=10, cursor="hand2", command=submit_dump
     )
-    save_btn.pack()
+    save_btn.pack(side="left", padx=10)
+
+    snooze_btn = tk.Button(
+        btn_frame, text="Snooze (2 Min) (Ctrl+S)", font=("Inter", 11, "bold"),
+        bg="#374151", fg="#eaeaf2", activebackground="#4b5563", activeforeground="#ffffff",
+        bd=0, padx=20, pady=10, cursor="hand2", command=submit_snooze
+    )
+    snooze_btn.pack(side="left", padx=10)
 
     def on_btn_enter(e):
         save_btn.config(bg="#7c3aed")
@@ -192,7 +212,17 @@ def trigger_lockout_overlay(duration_seconds=20):
         save_btn.config(bg="#8b5cf6")
     save_btn.bind("<Enter>", on_btn_enter)
     save_btn.bind("<Leave>", on_btn_leave)
+
+    def on_snooze_enter(e):
+        snooze_btn.config(bg="#4b5563")
+    def on_snooze_leave(e):
+        snooze_btn.config(bg="#374151")
+    snooze_btn.bind("<Enter>", on_snooze_enter)
+    snooze_btn.bind("<Leave>", on_snooze_leave)
+
     root.bind("<Control-Return>", submit_dump)
+    root.bind("<Control-s>", lambda event: submit_snooze())
+    root.bind("<Control-S>", lambda event: submit_snooze())
 
     def emergency_exit(event):
         root.destroy()
@@ -220,10 +250,18 @@ def trigger_lockout_overlay(duration_seconds=20):
         anchor_msg.pack(pady=12)
 
         rule_label = tk.Label(
-            frame, text="THE 20-20-20 RULE:\nLook away from your screen at an object 20 feet away\nfor 20 seconds to reset eye strain and cognitive focus.",
+            frame, text="THE 20-20-20 RULE:\nLook away from your screen at an object 20 feet away\nfor 20 seconds to reset eye strain and cognitive focus.\n\n(Box Breathing: Follow the balloon's pace or close your eyes and rest)",
             font=("Inter", 12, "italic"), fg="#9d9db8", bg="#0e0e1a", justify="center"
         )
         rule_label.pack(pady=15)
+
+        import random
+        selected_stretch = random.choice(PHYSICAL_STRETCHES)
+        stretch_label = tk.Label(
+            frame, text=f"💪 PHYSICAL RECHARGE TIP:\n{selected_stretch}",
+            font=("Inter", 11, "bold"), fg="#fbbf24", bg="#0e0e1a", justify="center", wraplength=600
+        )
+        stretch_label.pack(pady=10)
 
         nonlocal lockout_timer_label
         lockout_timer_label = tk.Label(
@@ -246,23 +284,34 @@ def trigger_lockout_overlay(duration_seconds=20):
             if not phase1_active and lockout_remaining > 0:
                 try:
                     elapsed = time.time() - start_anim_time
-                    angle = (elapsed * 2 * math.pi) / 6.0
+                    angle = (elapsed * 2 * math.pi) / 8.0
                     cx = 250 + 160 * math.cos(angle)
                     cy = 90
                     
-                    breath_cycle = elapsed % 8.0
+                    # Box breathing: 4s inhale, 4s hold, 4s exhale, 4s hold (16s cycle)
+                    breath_cycle = elapsed % 16.0
                     if breath_cycle < 4.0:
                         fraction = breath_cycle / 4.0
                         radius = 25 + 30 * fraction
                         text = "INHALE..."
                         color = "#2dd4a8"
                         outline_color = "#5eead4"
-                    else:
-                        fraction = (breath_cycle - 4.0) / 4.0
+                    elif breath_cycle < 8.0:
+                        radius = 55
+                        text = "HOLD..."
+                        color = "#fbbf24"
+                        outline_color = "#fcd34d"
+                    elif breath_cycle < 12.0:
+                        fraction = (breath_cycle - 8.0) / 4.0
                         radius = 55 - 30 * fraction
                         text = "EXHALE..."
                         color = "#b49aff"
                         outline_color = "#c084fc"
+                    else:
+                        radius = 25
+                        text = "HOLD..."
+                        color = "#f43f5e"
+                        outline_color = "#fda4af"
                     
                     canvas.itemconfig(bubble_id, fill=color, outline=outline_color)
                     canvas.itemconfig(instruction_text_id, text=text)
@@ -318,7 +367,7 @@ def trigger_lockout_overlay(duration_seconds=20):
 
     update_grace_countdown()
     root.mainloop()
-    return captured_dump, completed_fully
+    return captured_dump, completed_fully, snoozed
 
 # Import state dictionary from server backend to synchronize API mutations
 from backend.server import shared_state, db, run_server
@@ -510,7 +559,12 @@ def main_state_machine(gui_process=None):
             db.log_session(current_mode if current_mode != "neutral" else "work", state_start_time, now)
             
             # Blocking Tkinter overlay runs
-            brain_dump, completed = trigger_lockout_overlay(rest_limit_sec)
+            brain_dump, completed, snoozed = trigger_lockout_overlay(rest_limit_sec)
+            if snoozed:
+                print("Manual lockout snoozed.")
+                state_start_time = datetime.now()
+                shared_state["elapsed_seconds"] = 0
+                continue
             db.log_session("rest", now, datetime.now(), brain_dump=brain_dump, bypassed=not completed)
             state_start_time = datetime.now()
             shared_state["elapsed_seconds"] = 0
@@ -561,10 +615,16 @@ def main_state_machine(gui_process=None):
                     shared_state["last_app_title"] = None
                     shared_state["app_accumulated_seconds"] = 0
                 
-                brain_dump, completed = trigger_lockout_overlay(rest_limit_sec)
-                db.log_session("work", state_start_time, datetime.now(), brain_dump=brain_dump, bypassed=not completed)
-                state_start_time = datetime.now()
-                shared_state["elapsed_seconds"] = 0
+                from datetime import timedelta
+                brain_dump, completed, snoozed = trigger_lockout_overlay(rest_limit_sec)
+                if snoozed:
+                    print("Hard focus ceiling snoozed. Giving 2 minutes grace period.")
+                    state_start_time = datetime.now() - timedelta(seconds=max(0, work_limit_sec - 120))
+                    shared_state["elapsed_seconds"] = int((datetime.now() - state_start_time).total_seconds())
+                else:
+                    db.log_session("work", state_start_time, datetime.now(), brain_dump=brain_dump, bypassed=not completed)
+                    state_start_time = datetime.now()
+                    shared_state["elapsed_seconds"] = 0
 
         # Automated energy battery tracking (Auto-decay/recharge check)
         try:

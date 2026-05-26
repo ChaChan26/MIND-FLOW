@@ -1,11 +1,26 @@
 import os
 import json
+import re
 import tempfile
 import threading
 import copy
 from datetime import datetime
 
 DB_FILE = r"C:\MIND\mind_flow_data.json"
+
+_keyword_regex_cache = {}
+
+def matches_keyword(kw, text):
+    """Check if a keyword matches a target text respecting word boundaries."""
+    kw = kw.lower()
+    text = text.lower()
+    if kw not in _keyword_regex_cache:
+        escaped_kw = re.escape(kw)
+        left_boundary = r"(?<![a-zA-Z0-9])" if kw and kw[0].isalnum() else ""
+        right_boundary = r"(?![a-zA-Z0-9])" if kw and kw[-1].isalnum() else ""
+        pattern = f"{left_boundary}{escaped_kw}{right_boundary}"
+        _keyword_regex_cache[kw] = re.compile(pattern)
+    return bool(_keyword_regex_cache[kw].search(text))
 
 DEFAULT_SETTINGS = {
     "work_keywords": [
@@ -19,7 +34,9 @@ DEFAULT_SETTINGS = {
     ],
     "work_duration_minutes": 45,
     "idle_timeout_seconds": 180,
-    "adaptive_timers_enabled": True
+    "adaptive_timers_enabled": True,
+    "rest_duration_seconds": 20,
+    "eye_care_mode": False
 }
 
 class MindFlowDB:
@@ -32,7 +49,9 @@ class MindFlowDB:
             "settings": DEFAULT_SETTINGS.copy(),
             "sessions": [],
             "reflections": [],
-            "app_usage": []
+            "app_usage": [],
+            "current_goal": "",
+            "hydration": {"date": "", "cups": 0}
         }
         self.load()
 
@@ -43,11 +62,30 @@ class MindFlowDB:
                     try:
                         with open(self.filepath, "r", encoding="utf-8") as f:
                             loaded = json.load(f)
+                            if not isinstance(loaded, dict):
+                                loaded = {}
+                            
                             # Merge loaded keys to ensure schema safety
-                            self.data["settings"] = {**DEFAULT_SETTINGS, **loaded.get("settings", {})}
-                            self.data["sessions"] = loaded.get("sessions", [])
-                            self.data["reflections"] = loaded.get("reflections", [])
-                            self.data["app_usage"] = loaded.get("app_usage", [])
+                            loaded_settings = loaded.get("settings")
+                            if not isinstance(loaded_settings, dict):
+                                loaded_settings = {}
+                            self.data["settings"] = {**DEFAULT_SETTINGS, **loaded_settings}
+                            
+                            loaded_sessions = loaded.get("sessions")
+                            self.data["sessions"] = loaded_sessions if isinstance(loaded_sessions, list) else []
+                            
+                            loaded_reflections = loaded.get("reflections")
+                            self.data["reflections"] = loaded_reflections if isinstance(loaded_reflections, list) else []
+                            
+                            loaded_app_usage = loaded.get("app_usage")
+                            self.data["app_usage"] = loaded_app_usage if isinstance(loaded_app_usage, list) else []
+                            
+                            self.data["current_goal"] = str(loaded.get("current_goal", "") or "")
+                            
+                            loaded_hydration = loaded.get("hydration")
+                            if not isinstance(loaded_hydration, dict):
+                                loaded_hydration = {"date": "", "cups": 0}
+                            self.data["hydration"] = loaded_hydration
                     except Exception as e:
                         print(f"Error loading database, resetting to default: {e}")
                         self.save(sync=True)
@@ -86,14 +124,56 @@ class MindFlowDB:
     def get_settings(self):
         return self.data["settings"]
 
+    def get_current_goal(self):
+        with self.lock:
+            return self.data.get("current_goal", "")
+
+    def set_current_goal(self, goal):
+        with self.lock:
+            self.data["current_goal"] = str(goal).strip()
+        self.save()
+
+    def get_hydration(self):
+        with self.lock:
+            today_str = datetime.today().date().isoformat()
+            hyd = self.data.setdefault("hydration", {"date": today_str, "cups": 0})
+            if hyd.get("date") != today_str:
+                hyd["date"] = today_str
+                hyd["cups"] = 0
+                self.save()
+            return hyd
+
+    def increment_hydration(self, cups=None):
+        with self.lock:
+            hyd = self.get_hydration()
+            if cups is not None:
+                hyd["cups"] = max(0, min(20, int(cups)))
+            else:
+                hyd["cups"] = min(20, hyd.get("cups", 0) + 1)
+            self.save()
+            return hyd
+
     def update_settings(self, settings_dict):
         for k, v in settings_dict.items():
             if k in DEFAULT_SETTINGS:
-                # Ensure type correctness
-                if k in ["work_duration_minutes", "idle_timeout_seconds"]:
-                    self.data["settings"][k] = int(v)
-                elif k == "adaptive_timers_enabled":
-                    self.data["settings"][k] = bool(v)
+                # Ensure type correctness and range safety to prevent application hangs/lockouts
+                if k in ["work_duration_minutes", "idle_timeout_seconds", "rest_duration_seconds"]:
+                    try:
+                        val = int(v)
+                        if k == "work_duration_minutes":
+                            val = max(10, min(180, val))
+                        elif k == "idle_timeout_seconds":
+                            val = max(10, min(3600, val))
+                        elif k == "rest_duration_seconds":
+                            val = max(5, min(600, val))
+                        self.data["settings"][k] = val
+                    except (ValueError, TypeError):
+                        pass
+                elif k in ["adaptive_timers_enabled", "eye_care_mode"]:
+                    if isinstance(v, str):
+                        self.data["settings"][k] = v.lower() in ["true", "1", "yes"]
+                    else:
+                        self.data["settings"][k] = bool(v)
                 elif isinstance(v, list):
                     # Filter, lowercase, and exclude generic browser names to prevent tracking hijacks
                     disallowed = {"chrome.exe", "chrome", "msedge.exe", "msedge", "firefox.exe", "firefox", "opera.exe", "opera", "brave.exe", "brave", "iexplore.exe", "iexplore", "browser", "explorer"}
@@ -244,7 +324,7 @@ class MindFlowDB:
             work_minutes = max(10, min(90, base_work_minutes + total_work_modifier))
             
             # Compute Rest Lockout Duration
-            base_rest_seconds = 20
+            base_rest_seconds = settings.get("rest_duration_seconds", 20)
             ref_rest_mod = 0
             if latest_refl:
                 e = latest_refl.get("energy_level", 3)
@@ -256,7 +336,7 @@ class MindFlowDB:
             deficit_rest_mod = min(deficit_rest_mod, 30)
             
             total_rest_modifier = ref_rest_mod + deficit_rest_mod
-            rest_seconds = min(60, base_rest_seconds + total_rest_modifier)
+            rest_seconds = min(600, base_rest_seconds + total_rest_modifier)
             
             # Formulate dynamic status reason text
             reasons = []

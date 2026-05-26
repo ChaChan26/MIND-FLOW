@@ -16,6 +16,7 @@ app_stdout.log
 # Temporary REPL/Step files
 app_repl_*.txt
 app_step_*.py
+tmp*.json
 
 # Data/Config files
 mind_flow_data.json

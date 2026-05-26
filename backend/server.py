@@ -48,7 +48,7 @@ def require_local_origin(f):
 
 # Adjust path to import from parent folder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from backend.database import MindFlowDB
+from backend.database import MindFlowDB, matches_keyword
 
 def get_resource_path(relative_path):
     """ Get absolute path to resource, prioritizing local disk paths before PyInstaller bundled ones """
@@ -218,7 +218,9 @@ def get_status():
         "today_bypasses": today_bypasses,
         "companion_message": companion_message,
         "last_external_window": shared_state["last_external_window"],
-        "last_external_process": shared_state["last_external_process"]
+        "last_external_process": shared_state["last_external_process"],
+        "current_goal": db.get_current_goal(),
+        "hydration": db.get_hydration()
     })
 
 @app.route("/api/status/toggle", methods=["POST"])
@@ -244,6 +246,28 @@ def manage_settings():
         return jsonify({"status": "success", "settings": db.get_settings()})
     else:
         return jsonify(db.get_settings())
+
+@app.route("/api/goal", methods=["GET", "POST"])
+@require_local_origin
+def manage_goal():
+    if request.method == "POST":
+        data = request.json or {}
+        goal = data.get("goal", "")
+        db.set_current_goal(goal)
+        return jsonify({"status": "success", "goal": db.get_current_goal()})
+    else:
+        return jsonify({"goal": db.get_current_goal()})
+
+@app.route("/api/hydration", methods=["GET", "POST"])
+@require_local_origin
+def manage_hydration():
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        cups = data.get("cups")
+        res = db.increment_hydration(cups=cups)
+        return jsonify({"status": "success", "hydration": res})
+    else:
+        return jsonify(db.get_hydration())
 
 @app.route("/api/reflections", methods=["GET", "POST"])
 @require_local_origin
@@ -276,19 +300,6 @@ def get_analytics():
     sessions = db.get_sessions()
     app_usage = db.get_app_usage()
     
-    import re
-    _route_regex_cache = {}
-    def matches_keyword(kw, text):
-        kw = kw.lower()
-        text = text.lower()
-        if kw not in _route_regex_cache:
-            if kw.isalnum():
-                pattern = rf"\b{re.escape(kw)}\b"
-            else:
-                pattern = rf"(?<![a-zA-Z0-9]){re.escape(kw)}(?![a-zA-Z0-9])"
-            _route_regex_cache[kw] = re.compile(pattern)
-        return bool(_route_regex_cache[kw].search(text))
-        
     settings = db.get_settings()
     work_keywords = settings.get("work_keywords", [])
     recharge_keywords = settings.get("recharge_keywords", [])
@@ -296,28 +307,85 @@ def get_analytics():
     # Classification cache to avoid redundant regex matching across thousands of entries
     classification_cache = {}
     
+    from datetime import timedelta
+    cutoff_date = (date.today() - timedelta(days=8)).isoformat()
+    
     processed_app_usage = []
     for entry in app_usage:
+        entry_date = entry.get("date", "")
+        if entry_date and entry_date < cutoff_date:
+            continue
+            
         process = entry.get("process", "")
         title = entry.get("title", "")
+        titles = entry.get("titles", {})
         
-        cache_key = (process, title)
-        if cache_key in classification_cache:
-            category = classification_cache[cache_key]
+        # Determine category for each title separately
+        title_categories = {}
+        work_dur = 0
+        recharge_dur = 0
+        neutral_dur = 0
+        
+        if titles:
+            for t, dur in titles.items():
+                cache_key = (process, t)
+                if cache_key in classification_cache:
+                    cat = classification_cache[cache_key]
+                else:
+                    cat = "neutral"
+                    if any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in work_keywords):
+                        cat = "work"
+                    elif any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in recharge_keywords):
+                        cat = "recharge"
+                    classification_cache[cache_key] = cat
+                
+                title_categories[t] = cat
+                if cat == "work":
+                    work_dur += dur
+                elif cat == "recharge":
+                    recharge_dur += dur
+                else:
+                    neutral_dur += dur
         else:
-            category = "neutral"
-            if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
-                category = "work"
-            elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
-                category = "recharge"
-            classification_cache[cache_key] = category
+            # Fallback if titles is empty
+            cache_key = (process, title)
+            if cache_key in classification_cache:
+                cat = classification_cache[cache_key]
+            else:
+                cat = "neutral"
+                if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
+                    cat = "work"
+                elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
+                    cat = "recharge"
+                classification_cache[cache_key] = cat
+            title_categories[title] = cat
+            dur = entry.get("duration", 0)
+            if cat == "work":
+                work_dur += dur
+            elif cat == "recharge":
+                recharge_dur += dur
+            else:
+                neutral_dur += dur
+
+        # Predominant category is the one with the maximum duration
+        if work_dur >= recharge_dur and work_dur >= neutral_dur:
+            predominant_category = "work"
+        elif recharge_dur >= work_dur and recharge_dur >= neutral_dur:
+            predominant_category = "recharge"
+        else:
+            predominant_category = "neutral"
             
         processed_app_usage.append({
             "date": entry.get("date"),
             "process": process,
             "title": title,
+            "titles": titles,
             "duration": entry.get("duration", 0),
-            "category": category
+            "category": predominant_category,
+            "work_duration": work_dur,
+            "recharge_duration": recharge_dur,
+            "neutral_duration": neutral_dur,
+            "title_categories": title_categories
         })
     
     # Calculate energy vs friction mapping
