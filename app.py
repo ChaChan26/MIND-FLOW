@@ -37,7 +37,6 @@ import winsound
 from datetime import datetime, date
 
 # Initialize and import backend components
-from backend.workspace import WorkspaceManager
 from backend.database import MindFlowDB
 db = MindFlowDB()
 
@@ -374,9 +373,8 @@ from backend.server import shared_state, db, run_server
 shared_state.setdefault("manual_lockout_requested", False)
 
 def main_state_machine(gui_process=None):
-    """Background thread checking active windows, tracking idle state, and swapping workspace."""
+    """Background thread checking active windows and tracking idle state."""
     print("MIND-FLOW Core State Machine started.")
-    workspace = WorkspaceManager()
 
     # Seed initial daily reflection if none exist for today (optimized with reverse search)
     try:
@@ -414,7 +412,7 @@ def main_state_machine(gui_process=None):
         
         # Check if standalone GUI process exited
         if gui_process and hasattr(gui_process, 'poll') and gui_process.poll() is not None:
-            print("MIND-FLOW dashboard window closed. Sweeping workspace to neutral...")
+            print("MIND-FLOW dashboard window closed.")
             
             # Flush app tracking
             last_proc = shared_state.get("last_app_process")
@@ -427,7 +425,6 @@ def main_state_machine(gui_process=None):
                     print(f"Error logging app usage on GUI close: {e}")
             
             db.log_session(current_mode, state_start_time, datetime.now())
-            workspace.swap_workspace(current_mode, "neutral")
             db.save()
             sys.exit(0)
         
@@ -449,7 +446,6 @@ def main_state_machine(gui_process=None):
             if current_mode != "neutral":
                 print(f"Companion disabled: transitioning {current_mode} -> neutral")
                 db.log_session(current_mode, state_start_time, datetime.now())
-                workspace.swap_workspace(current_mode, "neutral")
                 current_mode = "neutral"
             
             shared_state["active_window_title"] = "Companion Paused"
@@ -588,7 +584,6 @@ def main_state_machine(gui_process=None):
             now = datetime.now()
             print(f"State transition: {current_mode} -> {target_mode}")
             db.log_session(current_mode, state_start_time, now)
-            workspace.swap_workspace(current_mode, target_mode)
             
             current_mode = target_mode
             shared_state["current_mode"] = current_mode
@@ -751,10 +746,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--gui":
         run_webview_gui("http://127.0.0.1:5000")
         sys.exit(0)
-
-    # Ensure workspace profile directory exists
-    os.makedirs(r"C:\MIND\Workspace_Profiles\Work", exist_ok=True)
-    os.makedirs(r"C:\MIND\Workspace_Profiles\Recharge", exist_ok=True)
 
     # 1. Start Server in a separate daemon thread
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)

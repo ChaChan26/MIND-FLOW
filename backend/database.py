@@ -4,6 +4,7 @@ import re
 import tempfile
 import threading
 import copy
+import time
 from datetime import datetime
 
 DB_FILE = r"C:\MIND\mind_flow_data.json"
@@ -106,7 +107,16 @@ class MindFlowDB:
                     try:
                         with os.fdopen(fd, 'w', encoding='utf-8') as f:
                             json.dump(data_to_write, f, indent=4, ensure_ascii=False)
-                        os.replace(tmp_path, self.filepath)
+                        
+                        # Robust replace for Windows to handle transient locks (e.g. antivirus/indexers)
+                        for attempt in range(5):
+                            try:
+                                os.replace(tmp_path, self.filepath)
+                                break
+                            except PermissionError:
+                                if attempt == 4:
+                                    raise
+                                time.sleep(0.05)
                     except Exception:
                         try:
                             os.unlink(tmp_path)

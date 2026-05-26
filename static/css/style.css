@@ -761,135 +761,7 @@ body.resizing * {
     text-overflow: ellipsis;
 }
 
-/* Workspace Portal */
-.workspace-visual {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    margin: 1.5rem 0;
-}
-
-.portal-sphere {
-    width: 70px;
-    height: 70px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(148,163,184,0.15) 0%, rgba(148,163,184,0.02) 70%);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    box-shadow: 0 0 22px rgba(148, 163, 184, 0.12);
-    transition: all var(--transition-speed) var(--transition-bounce);
-    flex-shrink: 0;
-}
-
-.workspace-card:hover .portal-sphere {
-    transform: scale(1.08);
-    box-shadow: 0 0 32px var(--active-mode-glow, rgba(148, 163, 184, 0.22));
-    border-color: var(--active-mode-color, rgba(148, 163, 184, 0.4));
-}
-
-.workspace-card:hover .portal-sphere::before {
-    animation: rotate 2.5s linear infinite;
-    border-color: var(--active-mode-color, rgba(148, 163, 184, 0.35));
-}
-
-.workspace-card:hover .portal-sphere::after {
-    animation: rotate 4s linear infinite reverse;
-    border-color: var(--active-mode-color, rgba(148, 163, 184, 0.2));
-}
-
-.portal-sphere::before {
-    content: '';
-    position: absolute;
-    width: 92px;
-    height: 92px;
-    border: 1.5px dashed rgba(148, 163, 184, 0.18);
-    border-radius: 50%;
-    animation: rotate 8s linear infinite;
-}
-
-.portal-sphere::after {
-    content: '';
-    position: absolute;
-    width: 110px;
-    height: 110px;
-    border: 1px dotted rgba(148, 163, 184, 0.1);
-    border-radius: 50%;
-    animation: rotate 12s linear infinite reverse;
-}
-
-.portal-core {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--neutral-color);
-    box-shadow: 0 0 14px var(--neutral-color);
-    animation: pulseCore 2.5s infinite ease-in-out;
-    transition: all var(--transition-speed) ease;
-    z-index: 2;
-}
-
-.portal-node {
-    position: absolute;
-    border-radius: 50%;
-    pointer-events: none;
-    background-color: var(--active-mode-color, var(--neutral-color));
-    box-shadow: 0 0 8px var(--active-mode-color, var(--neutral-color));
-    transition: background-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
-    z-index: 3;
-}
-
-.node-1 {
-    width: 6px;
-    height: 6px;
-    animation: orbit-1 6s linear infinite;
-}
-
-.node-2 {
-    width: 4px;
-    height: 4px;
-    animation: orbit-2 10s linear infinite reverse;
-}
-
-@keyframes orbit-1 {
-    0% { transform: rotate(0deg) translate(52.5px) rotate(0deg); }
-    100% { transform: rotate(360deg) translate(52.5px) rotate(-360deg); }
-}
-
-@keyframes orbit-2 {
-    0% { transform: rotate(0deg) translate(62.5px) rotate(0deg); }
-    100% { transform: rotate(360deg) translate(62.5px) rotate(-360deg); }
-}
-
-.workspace-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.workspace-info p {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-}
-
-.workspace-info h4 {
-    font-size: 1.05rem;
-    color: var(--text-primary);
-    margin-top: 0.15rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.workspace-tip {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-}
+/* Workspace Portal styles removed */
 
 /* Forms & Reflections */
 .reflection-form {
@@ -1931,7 +1803,7 @@ body.mode-rest .portal-sphere::after {
 }
 
 @media (max-width: 1050px) {
-    .state-indicator, .workspace-visual {
+    .state-indicator {
         flex-direction: column;
         align-items: center;
         text-align: center;
@@ -3550,13 +3422,14 @@ tr.roadblock-row {
 }
 .zen-breather-text {
     position: absolute;
-    top: calc(50% + 120px);
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
     font-family: var(--font-display);
     font-weight: 700;
     font-size: 1.1rem;
     letter-spacing: 0.2em;
+    text-indent: 0.2em;
     color: #eaeaf2;
     text-transform: uppercase;
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);

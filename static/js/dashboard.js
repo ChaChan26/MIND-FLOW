@@ -29,8 +29,6 @@ const statusIcon = document.getElementById('status-icon');
 const currentModeTitle = document.getElementById('current-mode-title');
 const blockTimer = document.getElementById('block-timer');
 const activeAppName = document.getElementById('active-app-name');
-const activeProfileName = document.getElementById('active-profile-name');
-const portalSphere = document.getElementById('portal-sphere');
 const toggleShieldBtn = document.getElementById('toggle-shield-btn');
 const trackingPulse = document.getElementById('tracking-pulse');
 const trackingStatusText = document.getElementById('tracking-status-text');
@@ -411,20 +409,15 @@ async function pollStatus() {
         
         // 4. Emojis and Rings
         let emoji = '⚪';
-        let profileName = 'Neutral State (No Portal)';
         
         if (status.current_mode === 'work') {
             emoji = '💻';
-            profileName = 'Work Mode (Work Files Loaded)';
         } else if (status.current_mode === 'recharge') {
             emoji = '🎮';
-            profileName = 'Recharge Mode (Games & Shortcuts Loaded)';
         } else if (status.current_mode === 'rest') {
             emoji = '💤';
-            profileName = 'Rest Mode (Desktop Cleaned)';
         }
         statusIcon.textContent = emoji;
-        activeProfileName.textContent = profileName;
         
         // 5. Update live battery representation
         const energyPct = status.current_energy * 20; // 1-5 -> 20%-100%
@@ -2888,22 +2881,22 @@ function animateZen() {
     
     if (cycleTime < 4.0) {
         breathFactor = cycleTime / 4.0;
-        breathText = "Inhale...";
+        breathText = "Inhale";
         breathColor = "rgba(45, 212, 168, 0.35)";
         textGlowColor = "#2dd4a8";
     } else if (cycleTime < 8.0) {
         breathFactor = 1.0;
-        breathText = "Hold...";
+        breathText = "Hold";
         breathColor = "rgba(251, 191, 36, 0.35)";
         textGlowColor = "#fbbf24";
     } else if (cycleTime < 12.0) {
         breathFactor = 1.0 - (cycleTime - 8.0) / 4.0;
-        breathText = "Exhale...";
+        breathText = "Exhale";
         breathColor = "rgba(167, 139, 250, 0.35)";
         textGlowColor = "#a78bfa";
     } else {
         breathFactor = 0.0;
-        breathText = "Hold...";
+        breathText = "Hold";
         breathColor = "rgba(244, 63, 94, 0.35)";
         textGlowColor = "#f43f5e";
     }

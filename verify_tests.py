@@ -5,7 +5,6 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from backend.database import MindFlowDB
-from backend.workspace import WorkspaceManager
 import time
 import subprocess
 import webbrowser
@@ -16,30 +15,9 @@ class TestMindFlowComponents(unittest.TestCase):
     
     def setUp(self):
         self.db = MindFlowDB()
-        self.workspace = WorkspaceManager()
-        # Ensure clean state for workspaces
-        self.workspace.clean_workspace_folder()
-        self.clean_profiles()
 
     def tearDown(self):
-        self.workspace.clean_workspace_folder()
-        self.clean_profiles()
-
-    def clean_profiles(self):
-        """Helper to clear any mock files from profiles."""
-        for folder in [r"C:\MIND\Workspace_Profiles\Work", r"C:\MIND\Workspace_Profiles\Recharge"]:
-            if os.path.exists(folder):
-                for item in os.listdir(folder):
-                    path = os.path.join(folder, item)
-                    try:
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                        else:
-                            os.remove(path)
-                    except Exception:
-                        pass
-        # Restore placeholders
-        self.workspace.initialize_placeholders()
+        pass
 
     def test_database_settings_handling(self):
         """Verify settings updates work correctly and types are safe."""
@@ -202,80 +180,7 @@ class TestMindFlowComponents(unittest.TestCase):
         # Case 9: Word segmentation - "word" should match "my word doc"
         self.assertEqual(decide_mode("my word doc", "chrome.exe", 10), "work")
 
-    def test_workspace_sweeping_and_collision_resolution(self):
-        """Verify advanced workspace swapping and duplicate file collision handling."""
-        self.workspace.clean_workspace_folder()
-        self.clean_profiles()
-        
-        # 1. Create duplicate files in both Work Profile and Current_Workspace to force collision
-        work_profile_file = os.path.join(r"C:\MIND\Workspace_Profiles\Work", "collision.txt")
-        desktop_workspace_file = os.path.join(self.workspace.workspace_dir, "collision.txt")
-        
-        with open(work_profile_file, "w") as f:
-            f.write("Profile Version")
-            
-        with open(desktop_workspace_file, "w") as f:
-            f.write("Desktop Version (Modified)")
-            
-        # 2. Swap from work to recharge. This sweeps the desktop version back into the work profile,
-        # resolving the collision by replacing the profile version with the modified desktop version.
-        self.workspace.swap_workspace("work", "recharge")
-        
-        # Desktop file should be gone from active workspace
-        self.assertFalse(os.path.exists(desktop_workspace_file))
-        
-        # Work profile file should now contain the "Desktop Version (Modified)"
-        self.assertTrue(os.path.exists(work_profile_file))
-        with open(work_profile_file, "r") as f:
-            content = f.read()
-        self.assertEqual(content, "Desktop Version (Modified)")
 
-    def test_workspace_symlink_safety(self):
-        """Verify that directory junctions and symbolic links are removed without traversing or deleting their target contents."""
-        # Mock os.path.exists and islink
-        with patch.object(self.workspace, 'is_link_or_junction', return_value=True) as mock_is_link, \
-             patch('os.path.isdir', return_value=True) as mock_isdir, \
-             patch('os.rmdir') as mock_rmdir, \
-             patch('shutil.rmtree') as mock_rmtree, \
-             patch('os.remove') as mock_remove:
-             
-            # Test safe_remove on a directory symlink/junction
-            self.workspace.safe_remove("C:\\dummy\\junction_link")
-            mock_is_link.assert_called_with("C:\\dummy\\junction_link")
-            mock_isdir.assert_called_with("C:\\dummy\\junction_link")
-            # Should call os.rmdir to remove the link, NOT shutil.rmtree
-            mock_rmdir.assert_called_once_with("C:\\dummy\\junction_link")
-            mock_rmtree.assert_not_called()
-            mock_remove.assert_not_called()
-
-        # Test safe_remove on a file symlink
-        with patch.object(self.workspace, 'is_link_or_junction', return_value=True) as mock_is_link, \
-             patch('os.path.isdir', return_value=False) as mock_isdir, \
-             patch('os.rmdir') as mock_rmdir, \
-             patch('shutil.rmtree') as mock_rmtree, \
-             patch('os.remove') as mock_remove:
-             
-            self.workspace.safe_remove("C:\\dummy\\file_link")
-            mock_is_link.assert_called_with("C:\\dummy\\file_link")
-            mock_isdir.assert_called_with("C:\\dummy\\file_link")
-            # Should call os.remove to remove the link, NOT shutil.rmtree
-            mock_remove.assert_called_once_with("C:\\dummy\\file_link")
-            mock_rmdir.assert_not_called()
-            mock_rmtree.assert_not_called()
-
-    def test_is_link_or_junction_attributes(self):
-        """Verify is_link_or_junction detects reparse points using file attributes."""
-        mock_stat = MagicMock()
-        mock_stat.st_file_attributes = 1024  # Reparse point flag
-        
-        with patch('os.path.islink', return_value=False), \
-             patch('os.lstat', return_value=mock_stat):
-            self.assertTrue(self.workspace.is_link_or_junction("some_path"))
-            
-        mock_stat.st_file_attributes = 0  # No reparse point flag
-        with patch('os.path.islink', return_value=False), \
-             patch('os.lstat', return_value=mock_stat):
-            self.assertFalse(self.workspace.is_link_or_junction("some_path"))
 
     def test_ctypes_sensors_safeguard(self):
         """Verify the DLL sensor hooks return safe, correct types."""
@@ -665,21 +570,18 @@ class TestMindFlowAPI(unittest.TestCase):
 
     @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
-        # Patch swap_workspace to avoid actually moving user's desktop files during test
-        with patch('backend.workspace.WorkspaceManager.swap_workspace') as mock_swap:
-            response = self.client.post('/api/shutdown')
-            self.assertEqual(response.status_code, 200)
-            data = response.get_json()
-            self.assertEqual(data["status"], "shutdown_initiated")
-            mock_swap.assert_called_once()
-            
-            # Wait brief moment for the terminate thread to call os._exit
-            import time
-            for _ in range(10):
-                if mock_exit.called:
-                    break
-                time.sleep(0.1)
-            mock_exit.assert_called_with(0)
+        response = self.client.post('/api/shutdown')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "shutdown_initiated")
+        
+        # Wait brief moment for the terminate thread to call os._exit
+        import time
+        for _ in range(10):
+            if mock_exit.called:
+                break
+            time.sleep(0.1)
+        mock_exit.assert_called_with(0)
 
     def test_host_header_validation(self):
         # 1. Valid Host headers should be allowed
@@ -914,13 +816,8 @@ class TestMainStateMachine(unittest.TestCase):
     @patch('app.get_active_window_title')
     @patch('app.get_active_process_name')
     @patch('app.get_idle_seconds')
-    @patch('app.WorkspaceManager')
     @patch('app.db')
-    def test_state_machine_tracking_inactive(self, mock_db, mock_ws_class, mock_idle, mock_proc, mock_title, mock_sleep):
-        # Mock workspace instance
-        mock_ws = MagicMock()
-        mock_ws_class.return_value = mock_ws
-        
+    def test_state_machine_tracking_inactive(self, mock_db, mock_idle, mock_proc, mock_title, mock_sleep):
         # Setup settings mocks
         mock_db.get_settings.return_value = {
             "work_keywords": ["code.exe"],
@@ -963,21 +860,16 @@ class TestMainStateMachine(unittest.TestCase):
             main_state_machine()
             
         # Verify that because tracking was inactive and current_mode was "work",
-        # it transitioned to neutral and swept the workspace.
+        # it transitioned to neutral.
         self.assertEqual(shared_state["current_mode"], "neutral")
-        mock_ws.swap_workspace.assert_called_with("work", "neutral")
         mock_db.log_session.assert_called()
 
     @patch('app.time.sleep')
     @patch('app.get_active_window_title')
     @patch('app.get_active_process_name')
     @patch('app.get_idle_seconds')
-    @patch('app.WorkspaceManager')
     @patch('app.db')
-    def test_state_machine_work_transition(self, mock_db, mock_ws_class, mock_idle, mock_proc, mock_title, mock_sleep):
-        mock_ws = MagicMock()
-        mock_ws_class.return_value = mock_ws
-        
+    def test_state_machine_work_transition(self, mock_db, mock_idle, mock_proc, mock_title, mock_sleep):
         # Setup settings mocks
         mock_db.get_settings.return_value = {
             "work_keywords": ["code.exe"],
@@ -1014,19 +906,14 @@ class TestMainStateMachine(unittest.TestCase):
             
         # Verify transition to work occurred
         self.assertEqual(shared_state["current_mode"], "work")
-        mock_ws.swap_workspace.assert_called_with("neutral", "work")
 
     @patch('app.time.sleep')
     @patch('app.get_active_window_title')
     @patch('app.get_active_process_name')
     @patch('app.get_idle_seconds')
-    @patch('app.WorkspaceManager')
     @patch('app.db')
     @patch('app.trigger_lockout_overlay')
-    def test_state_machine_manual_lockout(self, mock_overlay, mock_db, mock_ws_class, mock_idle, mock_proc, mock_title, mock_sleep):
-        mock_ws = MagicMock()
-        mock_ws_class.return_value = mock_ws
-        
+    def test_state_machine_manual_lockout(self, mock_overlay, mock_db, mock_idle, mock_proc, mock_title, mock_sleep):
         mock_db.get_settings.return_value = {
             "work_keywords": ["code.exe"],
             "recharge_keywords": ["game.exe"],

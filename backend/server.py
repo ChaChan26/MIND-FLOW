@@ -613,12 +613,9 @@ def get_analytics():
 @app.route("/api/shutdown", methods=["POST"])
 @require_local_origin
 def shutdown_app():
-    # Sweep active files back to neutral workspace safely before closing
-    from backend.workspace import WorkspaceManager
-    workspace = WorkspaceManager()
     cur_mode = shared_state["current_mode"]
     
-    print(f"Shutdown requested via API. Sweeping workspace {cur_mode} -> neutral...")
+    print(f"Shutdown requested via API. Transitioning {cur_mode} -> neutral...")
     
     # Flush remaining app usage
     last_proc = shared_state.get("last_app_process")
@@ -631,7 +628,6 @@ def shutdown_app():
             print(f"Error logging app usage on shutdown: {e}")
             
     db.log_session(cur_mode, datetime.now(), datetime.now()) # log final block close if any
-    workspace.swap_workspace(cur_mode, "neutral")
     
     # Graceful shutdown: flush database and exit cleanly
     def terminate():
