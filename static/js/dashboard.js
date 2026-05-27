@@ -2767,17 +2767,26 @@ let currentHydrationIncrement = 1;
 let lastPresetsUnit = null;
 
 async function logHydrationDelta(delta, e) {
+    // SAFETY: Reject zero or NaN deltas to prevent no-op server calls
+    const safeDelta = parseFloat(delta);
+    if (isNaN(safeDelta) || safeDelta === 0) {
+        console.warn("[Hydration] Rejected invalid delta:", delta);
+        return;
+    }
     try {
+        const payload = { delta: safeDelta };
+        const bodyStr = JSON.stringify(payload);
+        console.log("[Hydration] Sending POST:", bodyStr);
         const res = await fetch('/api/hydration', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ delta: delta })
+            body: bodyStr
         });
         if (res.ok) {
             const data = await res.json();
             updateHydrationUI(data.hydration);
-            if (delta > 0) {
-                showToast(`Logged +${delta} water! Stay hydrated. 💧`);
+            if (safeDelta > 0) {
+                showToast(`Logged +${safeDelta} water! Stay hydrated. 💧`);
                 if (e) triggerParticleBurst(e, '#38bdf8');
                 
                 // If goal is met, do a celebratory burst at the beaker!
@@ -2792,25 +2801,29 @@ async function logHydrationDelta(delta, e) {
                     }
                 }
             } else {
-                showToast(`Subtracted ${Math.abs(delta)} water. 💧`);
+                showToast(`Subtracted ${Math.abs(safeDelta)} water. 💧`);
                 if (e) triggerParticleBurst(e, '#f43f5e');
             }
+        } else {
+            console.error("[Hydration] Server returned non-OK:", res.status);
         }
-    } catch(e) {
-        console.error("Failed to log hydration delta: ", e);
+    } catch(err) {
+        console.error("[Hydration] Failed to log delta:", err);
     }
 }
 
 function logHydrationQuick(e) {
-    console.log("logHydrationQuick clicked. currentHydrationIncrement =", currentHydrationIncrement);
-    const inc = parseFloat(currentHydrationIncrement) || 1;
+    // GUARANTEE: Always sends a POSITIVE delta for the add button
+    const inc = Math.abs(parseFloat(currentHydrationIncrement) || 1);
+    console.log("[Hydration+] Add clicked, sending delta:", inc);
     logHydrationDelta(inc, e);
 }
 
 function logHydrationQuickSub(e) {
-    console.log("logHydrationQuickSub clicked. currentHydrationIncrement =", currentHydrationIncrement);
-    const inc = parseFloat(currentHydrationIncrement) || 1;
-    logHydrationDelta(-inc, e);
+    // GUARANTEE: Always sends a NEGATIVE delta for the subtract button
+    const inc = -Math.abs(parseFloat(currentHydrationIncrement) || 1);
+    console.log("[Hydration-] Sub clicked, sending delta:", inc);
+    logHydrationDelta(inc, e);
 }
 
 // Legacy logHydration for backward compatibility

@@ -249,7 +249,7 @@ def trigger_manual_lockout():
 @require_local_origin
 def manage_settings():
     if request.method == "POST":
-        data = request.json or {}
+        data = request.get_json(force=True, silent=True) or {}
         db.update_settings(data)
         return jsonify({"status": "success", "settings": db.get_settings()})
     else:
@@ -259,29 +259,49 @@ def manage_settings():
 @require_local_origin
 def manage_goal():
     if request.method == "POST":
-        data = request.json or {}
+        data = request.get_json(force=True, silent=True) or {}
         goal = data.get("goal", "")
         db.set_current_goal(goal)
         return jsonify({"status": "success", "goal": db.get_current_goal()})
     else:
         return jsonify({"goal": db.get_current_goal()})
 
+def log_diagnostic(msg):
+    try:
+        with open("C:\\MIND\\app_diagnostics.log", "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except Exception as e:
+        print(f"Error logging diagnostic: {e}", flush=True)
+
 @app.route("/api/hydration", methods=["GET", "POST"])
 @require_local_origin
 def manage_hydration():
     if request.method == "POST":
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(force=True, silent=True) or {}
+        log_diagnostic(f"[API hydration] POST received: data={data}")
+        
+        # SAFETY: Reject malformed or invalid JSON payloads when content is sent.
+        # If the body is completely empty, we allow it to fall through to the default "+1 increment" path.
+        raw_data = request.get_data()
+        if raw_data and (not data or (data.get("cups") is None and data.get("delta") is None)):
+            log_diagnostic(f"[API hydration] REJECTED: invalid JSON or missing fields: data={data}")
+            return jsonify({"error": "Missing 'cups' or 'delta' in payload", "hydration": db.get_hydration()}), 400
+        
         cups = data.get("cups")
         delta = data.get("delta")
         if delta is not None:
             try:
+                delta_val = float(delta)
                 current_amount = db.get_hydration()["cups"]
-                new_amount = max(0, float(current_amount) + float(delta))
+                new_amount = max(0, float(current_amount) + delta_val)
                 res = db.increment_hydration(cups=new_amount)
-            except (ValueError, TypeError):
+                log_diagnostic(f"[API hydration] Delta mode: current={current_amount}, delta={delta_val}, new={new_amount}, res={res}")
+            except (ValueError, TypeError) as e:
+                log_diagnostic(f"[API hydration] Error in delta mode: {e}")
                 res = db.get_hydration()
         else:
             res = db.increment_hydration(cups=cups)
+            log_diagnostic(f"[API hydration] Direct mode: cups={cups}, res={res}")
         return jsonify({"status": "success", "hydration": res})
     else:
         return jsonify(db.get_hydration())
@@ -290,7 +310,7 @@ def manage_hydration():
 @require_local_origin
 def manage_reflections():
     if request.method == "POST":
-        data = request.json or {}
+        data = request.get_json(force=True, silent=True) or {}
         energy = data.get("energy_level")
         friction = data.get("friction_level")
         summary = data.get("summary", "")
