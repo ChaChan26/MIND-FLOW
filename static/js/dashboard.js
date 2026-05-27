@@ -2533,13 +2533,24 @@ function updateGoalUI(goal) {
     const inputField = document.getElementById('goal-input');
     
     if (goal && goal.trim() !== "") {
-        if (inputArea) inputArea.style.display = 'none';
-        if (displayArea) displayArea.style.display = 'block';
-        if (displayText) displayText.textContent = goal;
+        if (inputArea && inputArea.style.display !== 'none') {
+            inputArea.style.display = 'none';
+        }
+        if (displayArea && displayArea.style.display !== 'flex') {
+            displayArea.style.display = 'flex';
+        }
+        if (displayText && displayText.textContent !== goal) {
+            displayText.textContent = goal;
+        }
     } else {
-        if (inputArea) inputArea.style.display = 'flex';
-        if (displayArea) displayArea.style.display = 'none';
-        if (inputField) inputField.value = '';
+        // Transition from active goal display mode to input mode
+        if (displayArea && displayArea.style.display !== 'none') {
+            if (inputArea) inputArea.style.display = 'flex';
+            displayArea.style.display = 'none';
+            if (inputField) inputField.value = '';
+        }
+        // If displayArea is already hidden (meaning we are already in input mode),
+        // we do NOT touch inputArea or inputField.value to prevent overwriting user input during periodic status polls.
     }
 }
 
@@ -2582,6 +2593,10 @@ async function saveGoal() {
 }
 
 async function clearGoal() {
+    const displayText = document.getElementById('goal-display-text');
+    const inputField = document.getElementById('goal-input');
+    const goalText = displayText ? displayText.textContent : "";
+    
     try {
         const res = await fetch('/api/goal', {
             method: 'POST',
@@ -2590,6 +2605,10 @@ async function clearGoal() {
         });
         if (res.ok) {
             updateGoalUI("");
+            if (inputField) {
+                inputField.value = goalText;
+                inputField.focus();
+            }
             showToast("Focus intention cleared");
         }
     } catch(e) {
@@ -2657,6 +2676,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize grounding stepper UI
     updateGroundingUI();
 
+    // Support submitting goal with Enter key
+    const goalInput = document.getElementById('goal-input');
+    if (goalInput) {
+        goalInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                saveGoal();
+            }
+        });
+    }
 });
 
 // Prefill Gratitude Reflection Input
