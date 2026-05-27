@@ -535,8 +535,11 @@ function checkSettingsDirty() {
     const rechargeKeywords = document.getElementById('recharge-keywords-input');
     const autopilot = document.getElementById('autopilot-input');
     const eyecare = document.getElementById('eyecare-input');
+    const hydrationTarget = document.getElementById('hydration-target-input');
+    const hydrationUnit = document.getElementById('hydration-unit-input');
+    const hydrationIncrement = document.getElementById('hydration-increment-input');
     
-    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare) {
+    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare || !hydrationTarget || !hydrationUnit || !hydrationIncrement) {
         return false;
     }
     
@@ -547,7 +550,10 @@ function checkSettingsDirty() {
         work_keywords: workKeywords.value,
         recharge_keywords: rechargeKeywords.value,
         adaptive_timers_enabled: autopilot.checked,
-        eye_care_mode: eyecare.checked
+        eye_care_mode: eyecare.checked,
+        hydration_target: parseInt(hydrationTarget.value) || 8,
+        hydration_unit: hydrationUnit.value,
+        hydration_increment: parseFloat(hydrationIncrement.value) || 1
     };
     
     const isDirty = (
@@ -557,7 +563,10 @@ function checkSettingsDirty() {
         current.work_keywords !== initialSettings.work_keywords ||
         current.recharge_keywords !== initialSettings.recharge_keywords ||
         current.adaptive_timers_enabled !== initialSettings.adaptive_timers_enabled ||
-        current.eye_care_mode !== initialSettings.eye_care_mode
+        current.eye_care_mode !== initialSettings.eye_care_mode ||
+        current.hydration_target !== initialSettings.hydration_target ||
+        current.hydration_unit !== initialSettings.hydration_unit ||
+        current.hydration_increment !== initialSettings.hydration_increment
     );
     
     const banner = document.getElementById('unsaved-changes-banner');
@@ -581,6 +590,9 @@ function discardSettingsChanges() {
     const rechargeKeywords = document.getElementById('recharge-keywords-input');
     const autopilot = document.getElementById('autopilot-input');
     const eyecare = document.getElementById('eyecare-input');
+    const hydrationTarget = document.getElementById('hydration-target-input');
+    const hydrationUnit = document.getElementById('hydration-unit-input');
+    const hydrationIncrement = document.getElementById('hydration-increment-input');
     
     if (workLimit) workLimit.value = initialSettings.work_duration_minutes;
     if (idleTimeout) idleTimeout.value = initialSettings.idle_timeout_seconds;
@@ -596,6 +608,9 @@ function discardSettingsChanges() {
             document.body.classList.remove('eye-care-active');
         }
     }
+    if (hydrationTarget) hydrationTarget.value = initialSettings.hydration_target;
+    if (hydrationUnit) hydrationUnit.value = initialSettings.hydration_unit;
+    if (hydrationIncrement) hydrationIncrement.value = initialSettings.hydration_increment;
     
     checkSettingsDirty();
 }
@@ -615,7 +630,7 @@ function initSettingsDirtyTracking() {
     if (dirtyTrackingInitialized) return;
     const settingsForm = document.getElementById('settings-form');
     if (settingsForm) {
-        settingsForm.querySelectorAll('input, textarea').forEach(input => {
+        settingsForm.querySelectorAll('input, textarea, select').forEach(input => {
             input.addEventListener('input', checkSettingsDirty);
             input.addEventListener('change', checkSettingsDirty);
         });
@@ -644,6 +659,10 @@ async function loadSettings() {
             document.body.classList.remove('eye-care-active');
         }
         
+        document.getElementById('hydration-target-input').value = settings.hydration_target !== undefined ? settings.hydration_target : 8;
+        document.getElementById('hydration-unit-input').value = settings.hydration_unit || "cups";
+        document.getElementById('hydration-increment-input').value = settings.hydration_increment !== undefined ? settings.hydration_increment : 1;
+        
         // Cache initial settings
         initialSettings = {
             work_duration_minutes: settings.work_duration_minutes,
@@ -652,7 +671,10 @@ async function loadSettings() {
             work_keywords: settings.work_keywords.join(', '),
             recharge_keywords: settings.recharge_keywords.join(', '),
             adaptive_timers_enabled: settings.adaptive_timers_enabled !== false,
-            eye_care_mode: settings.eye_care_mode === true
+            eye_care_mode: settings.eye_care_mode === true,
+            hydration_target: settings.hydration_target !== undefined ? settings.hydration_target : 8,
+            hydration_unit: settings.hydration_unit || "cups",
+            hydration_increment: settings.hydration_increment !== undefined ? settings.hydration_increment : 1
         };
         
         initSettingsDirtyTracking();
@@ -674,7 +696,10 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         work_keywords: document.getElementById('work-keywords-input').value.split(',').map(k => k.trim()),
         recharge_keywords: document.getElementById('recharge-keywords-input').value.split(',').map(k => k.trim()),
         adaptive_timers_enabled: document.getElementById('autopilot-input').checked,
-        eye_care_mode: document.getElementById('eyecare-input').checked
+        eye_care_mode: document.getElementById('eyecare-input').checked,
+        hydration_target: parseInt(document.getElementById('hydration-target-input').value),
+        hydration_unit: document.getElementById('hydration-unit-input').value,
+        hydration_increment: parseFloat(document.getElementById('hydration-increment-input').value)
     };
     
     try {
@@ -701,9 +726,18 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
                 work_keywords: document.getElementById('work-keywords-input').value,
                 recharge_keywords: document.getElementById('recharge-keywords-input').value,
                 adaptive_timers_enabled: settings.adaptive_timers_enabled,
-                eye_care_mode: settings.eye_care_mode
+                eye_care_mode: settings.eye_care_mode,
+                hydration_target: settings.hydration_target,
+                hydration_unit: settings.hydration_unit,
+                hydration_increment: settings.hydration_increment
             };
             checkSettingsDirty();
+            
+            // Refresh hydration UI immediately after setting changes
+            fetch('/api/hydration')
+                .then(r => r.json())
+                .then(data => updateHydrationUI(data))
+                .catch(e => console.error("Error reloading hydration after settings save:", e));
         } else {
             showToast("Failed to save settings", true);
         }
@@ -2700,65 +2734,112 @@ function prefillGratitude() {
 }
 
 // Hydration logging controller
-async function logHydration(index) {
+let currentHydrationIncrement = 1;
+
+async function logHydrationDelta(delta) {
     try {
-        const currentCups = document.querySelectorAll('#hydration-cups-container .cup-btn.filled').length;
-        const targetCups = index + 1;
-        const newCups = (targetCups === currentCups) ? currentCups - 1 : targetCups;
-        
         const res = await fetch('/api/hydration', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cups: newCups })
+            body: JSON.stringify({ delta: delta })
         });
         if (res.ok) {
             const data = await res.json();
             updateHydrationUI(data.hydration);
-            const cupBtn = document.querySelector(`.cup-btn[data-index="${index}"]`);
-            if (cupBtn) {
-                cupBtn.classList.add('clicked');
-                setTimeout(() => cupBtn.classList.remove('clicked'), 400);
-            }
-            if (newCups > currentCups) {
-                showToast("Logged cup of water! Stay hydrated. 💧");
+            if (delta > 0) {
+                showToast(`Logged +${delta} water! Stay hydrated. 💧`);
             } else {
-                showToast("Removed logged water cup. 💧");
+                showToast(`Subtracted ${Math.abs(delta)} water. 💧`);
             }
         }
     } catch(e) {
-        console.error("Failed to log hydration: ", e);
+        console.error("Failed to log hydration delta: ", e);
     }
+}
+
+function logHydrationQuick() {
+    console.log("logHydrationQuick clicked. currentHydrationIncrement =", currentHydrationIncrement);
+    let inc = 1;
+    if (typeof currentHydrationIncrement === 'number') {
+        inc = currentHydrationIncrement;
+    } else if (typeof currentHydrationIncrement === 'string') {
+        inc = parseFloat(currentHydrationIncrement) || 1;
+    }
+    logHydrationDelta(inc);
+}
+
+function logHydrationQuickSub() {
+    console.log("logHydrationQuickSub clicked. currentHydrationIncrement =", currentHydrationIncrement);
+    let inc = 1;
+    if (typeof currentHydrationIncrement === 'number') {
+        inc = currentHydrationIncrement;
+    } else if (typeof currentHydrationIncrement === 'string') {
+        inc = parseFloat(currentHydrationIncrement) || 1;
+    }
+    logHydrationDelta(-inc);
+}
+
+// Legacy logHydration for backward compatibility
+async function logHydration(index) {
+    logHydrationDelta(1);
 }
 
 function updateHydrationUI(hydration) {
     const cups = hydration.cups || 0;
-    const pct = Math.min(100, Math.round((cups / 8) * 100));
+    const target = hydration.target || 8;
+    const unit = hydration.unit || "cups";
+    const increment = hydration.increment || 1;
+    currentHydrationIncrement = increment;
+
+    const pct = Math.min(100, Math.round((cups / target) * 100));
     
     const pctText = document.getElementById('hydration-pct-text');
     const msgText = document.getElementById('hydration-msg');
+    const liquidFill = document.getElementById('hydration-liquid-fill');
+    const quickBtn = document.getElementById('hydration-quick-add-btn');
     
     if (pctText) pctText.textContent = `${pct}%`;
     if (msgText) {
-        if (cups >= 8) {
-            msgText.textContent = "Fully hydrated! Excellent shield protection.";
+        if (cups >= target) {
+            msgText.textContent = `Goal met! (${cups}/${target} ${unit}) 💧`;
             msgText.style.color = "var(--recharge-color)";
-        } else if (cups >= 4) {
-            msgText.textContent = `${cups}/8 cups. Keep going!`;
-            msgText.style.color = "var(--work-color)";
         } else {
-            msgText.textContent = `${cups}/8 cups. Drink some water.`;
+            msgText.textContent = `${cups}/${target} ${unit} logged.`;
             msgText.style.color = "var(--text-muted)";
         }
     }
     
-    const cupButtons = document.querySelectorAll('.cup-btn');
-    cupButtons.forEach((btn, idx) => {
-        if (idx < cups) {
-            btn.classList.add('filled');
+    if (liquidFill) {
+        // Set fill height (rises from bottom)
+        liquidFill.style.height = `${pct}%`;
+        if (pct >= 100) {
+            liquidFill.classList.add('full');
         } else {
-            btn.classList.remove('filled');
+            liquidFill.classList.remove('full');
         }
-    });
+    }
+    
+    if (quickBtn) {
+        quickBtn.textContent = `+ Log ${increment} ${unit}`;
+    }
+    
+    const container = document.getElementById('hydration-presets-container');
+    if (container) {
+        container.innerHTML = '';
+        let presets = [];
+        if (unit === "cups") presets = [0.5, 1, 2];
+        else if (unit === "ml") presets = [250, 500, 750];
+        else if (unit === "oz") presets = [8, 12, 16];
+        
+        presets.forEach(p => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'hydration-preset-btn';
+            btn.textContent = `+${p} ${unit}`;
+            btn.onclick = () => logHydrationDelta(p);
+            container.appendChild(btn);
+        });
+    }
 }
 
 // Zen Space tab custom interactive canvas

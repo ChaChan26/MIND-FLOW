@@ -3213,9 +3213,11 @@ body.eye-care-active {
     display: flex;
     gap: 0.75rem;
     margin-top: 1rem;
+    flex-wrap: wrap;
 }
 #goal-input {
-    flex-grow: 1;
+    flex: 1 1 200px;
+    min-width: 0;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border-color);
     padding: 0.7rem 0.95rem;
@@ -3244,6 +3246,8 @@ body.eye-care-active {
     color: #080816;
     padding: 0.7rem 1.2rem;
     font-size: 0.85rem;
+    flex: 1 0 auto;
+    text-align: center;
 }
 .goal-set-btn:hover {
     filter: brightness(1.15);
@@ -3264,10 +3268,12 @@ body.eye-care-active {
     line-height: 1.45;
     border-left: 3px solid var(--active-mode-color, var(--work-color));
     padding-left: 0.75rem;
+    word-break: break-word;
 }
 .goal-actions {
     display: flex;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 .goal-complete-btn {
     background: rgba(16, 185, 129, 0.15);
@@ -3275,6 +3281,8 @@ body.eye-care-active {
     color: var(--recharge-color);
     padding: 0.55rem 1rem;
     font-size: 0.8rem;
+    flex: 1 1 auto;
+    text-align: center;
 }
 .goal-complete-btn:hover {
     background: rgba(16, 185, 129, 0.3);
@@ -3287,6 +3295,8 @@ body.eye-care-active {
     color: var(--text-secondary);
     padding: 0.55rem 0.85rem;
     font-size: 0.8rem;
+    flex: 1 1 auto;
+    text-align: center;
 }
 .goal-clear-btn:hover {
     background: rgba(255, 255, 255, 0.08);
@@ -3321,7 +3331,7 @@ tr.roadblock-row {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
 }
 .hydration-progress {
     text-align: right;
@@ -3341,37 +3351,175 @@ tr.roadblock-row {
     color: var(--text-muted);
     margin-top: 0.2rem;
 }
-.hydration-cups-row {
+.hydration-layout {
     display: flex;
-    justify-content: space-between;
+    gap: 1.5rem;
     align-items: center;
+    padding: 0.25rem 0;
+}
+.hydration-visual-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding-left: 0.5rem;
+}
+.hydration-beaker {
+    position: relative;
+    width: 68px;
+    height: 104px;
+    background: rgba(255, 255, 255, 0.015);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-bottom-left-radius: 20px;
+    border-bottom-right-radius: 20px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    box-shadow: inset 0 4px 12px rgba(255, 255, 255, 0.03), 
+                inset 0 -4px 12px rgba(0, 0, 0, 0.25),
+                0 8px 24px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+.hydration-liquid {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0%; /* Dynamic height sets water level */
+    background: linear-gradient(180deg, #bae6fd 0%, #38bdf8 100%);
+    box-shadow: inset 0 4px 8px rgba(255, 255, 255, 0.4), 
+                0 0 15px rgba(56, 189, 248, 0.55);
+    transition: height 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.5s ease, box-shadow 0.5s ease;
+}
+.hydration-liquid.full {
+    background: linear-gradient(180deg, #a7f3d0 0%, #10b981 100%);
+    box-shadow: inset 0 4px 8px rgba(255, 255, 255, 0.4), 
+                0 0 15px rgba(16, 185, 129, 0.55);
+}
+.beaker-gloss {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(120deg, 
+                                rgba(255, 255, 255, 0.18) 0%, 
+                                rgba(255, 255, 255, 0.03) 30%, 
+                                transparent 30%);
+    pointer-events: none;
+}
+.water-wave {
+    position: absolute;
+    top: -12px;
+    left: -50%;
+    width: 200%;
+    height: 24px;
+    background: inherit;
+    border-radius: 38%;
+}
+.water-wave.wave-1 {
+    animation: waveRotate 6s infinite linear;
+    opacity: 0.85;
+}
+.water-wave.wave-2 {
+    animation: waveRotateInverse 8s infinite linear;
+    opacity: 0.65;
+    top: -14px;
+    border-radius: 40%;
+}
+.water-wave.wave-3 {
+    animation: waveRotate 10s infinite linear;
+    opacity: 0.45;
+    top: -16px;
+    border-radius: 42%;
+}
+.hydration-controls-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    flex-grow: 1;
+}
+.hydration-quick-row {
+    display: flex;
     gap: 0.5rem;
-    padding: 0.5rem 0;
+    align-items: center;
 }
-.cup-btn {
-    background: none;
+.hydration-add-btn {
+    flex-grow: 1;
+    background: linear-gradient(135deg, #bae6fd, #38bdf8);
     border: none;
-    font-size: 2.2rem;
+    color: #0b0f19;
+    font-weight: 700;
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.65rem 1.25rem;
+    border-radius: 8px;
     cursor: pointer;
-    opacity: 0.25;
-    filter: grayscale(100%) contrast(80%);
-    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.22s var(--transition-bounce);
     outline: none;
-    padding: 0.25rem;
-    user-select: none;
+    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
 }
-.cup-btn:hover {
-    opacity: 0.6;
-    filter: grayscale(30%);
-    transform: scale(1.2);
+.hydration-add-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(56, 189, 248, 0.45);
+    filter: brightness(1.08);
 }
-.cup-btn.filled {
-    opacity: 1;
-    filter: grayscale(0%) drop-shadow(0 0 10px rgba(56, 189, 248, 0.65));
-    transform: scale(1.1);
+.hydration-add-btn:active {
+    transform: translateY(0);
 }
-.cup-btn.filled:hover {
-    transform: scale(1.3);
+.hydration-sub-btn {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 1.1rem;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.22s ease;
+    outline: none;
+}
+.hydration-sub-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+.hydration-presets-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    margin-top: 0.25rem;
+}
+.hydration-presets-row {
+    display: flex;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+}
+.hydration-preset-btn {
+    background: rgba(56, 189, 248, 0.05);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-family: inherit;
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.22s ease;
+    outline: none;
+}
+.hydration-preset-btn:hover {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: #38bdf8;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(56, 189, 248, 0.1);
+}
+.hydration-preset-btn:active {
+    transform: translateY(0);
 }
 
 /* Zen Space Tab Styling */

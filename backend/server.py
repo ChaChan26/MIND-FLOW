@@ -264,7 +264,16 @@ def manage_hydration():
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
         cups = data.get("cups")
-        res = db.increment_hydration(cups=cups)
+        delta = data.get("delta")
+        if delta is not None:
+            try:
+                current_amount = db.get_hydration()["cups"]
+                new_amount = max(0, float(current_amount) + float(delta))
+                res = db.increment_hydration(cups=new_amount)
+            except (ValueError, TypeError):
+                res = db.get_hydration()
+        else:
+            res = db.increment_hydration(cups=cups)
         return jsonify({"status": "success", "hydration": res})
     else:
         return jsonify(db.get_hydration())

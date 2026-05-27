@@ -682,7 +682,7 @@ def run_webview_gui(url):
         height=800,
         background_color="#0b0f19"
     )
-    webview.start()
+    webview.start(debug=True)
 
 # Original app window launcher restored for test suite Popen expectations
 def launch_app_window(url):

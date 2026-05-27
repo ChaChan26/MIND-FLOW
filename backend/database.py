@@ -37,7 +37,10 @@ DEFAULT_SETTINGS = {
     "idle_timeout_seconds": 180,
     "adaptive_timers_enabled": True,
     "rest_duration_seconds": 20,
-    "eye_care_mode": False
+    "eye_care_mode": False,
+    "hydration_target": 8,
+    "hydration_unit": "cups",
+    "hydration_increment": 1
 }
 
 class MindFlowDB:
@@ -147,21 +150,54 @@ class MindFlowDB:
         with self.lock:
             today_str = datetime.today().date().isoformat()
             hyd = self.data.setdefault("hydration", {"date": today_str, "cups": 0})
+            if not isinstance(hyd, dict):
+                hyd = {"date": today_str, "cups": 0}
+                self.data["hydration"] = hyd
             if hyd.get("date") != today_str:
                 hyd["date"] = today_str
                 hyd["cups"] = 0
                 self.save()
-            return hyd
+            
+            # Return enriched copy
+            settings = self.get_settings()
+            return {
+                "date": hyd["date"],
+                "cups": hyd.get("cups", 0),
+                "target": settings.get("hydration_target", 8),
+                "unit": settings.get("hydration_unit", "cups"),
+                "increment": settings.get("hydration_increment", 1)
+            }
 
     def increment_hydration(self, cups=None):
         with self.lock:
-            hyd = self.get_hydration()
+            today_str = datetime.today().date().isoformat()
+            hyd = self.data.setdefault("hydration", {"date": today_str, "cups": 0})
+            if not isinstance(hyd, dict):
+                hyd = {"date": today_str, "cups": 0}
+                self.data["hydration"] = hyd
+            if hyd.get("date") != today_str:
+                hyd["date"] = today_str
+                hyd["cups"] = 0
+            
             if cups is not None:
-                hyd["cups"] = max(0, min(20, int(cups)))
+                try:
+                    val = float(cups)
+                    if val.is_integer():
+                        val = int(val)
+                    hyd["cups"] = max(0, min(10000, val))
+                except (ValueError, TypeError):
+                    pass
             else:
-                hyd["cups"] = min(20, hyd.get("cups", 0) + 1)
+                inc = self.get_settings().get("hydration_increment", 1)
+                try:
+                    val = float(hyd.get("cups", 0)) + float(inc)
+                    if val.is_integer():
+                        val = int(val)
+                    hyd["cups"] = min(10000, val)
+                except (ValueError, TypeError):
+                    pass
             self.save()
-            return hyd
+            return self.get_hydration()
 
     def update_settings(self, settings_dict):
         for k, v in settings_dict.items():
@@ -179,6 +215,23 @@ class MindFlowDB:
                         self.data["settings"][k] = val
                     except (ValueError, TypeError):
                         pass
+                elif k in ["hydration_target", "hydration_increment"]:
+                    try:
+                        if k == "hydration_target":
+                            val = int(v)
+                            val = max(1, min(10000, val))
+                        elif k == "hydration_increment":
+                            val = float(v)
+                            val = max(0.1, min(5000.0, val))
+                            if val.is_integer():
+                                val = int(val)
+                        self.data["settings"][k] = val
+                    except (ValueError, TypeError):
+                        pass
+                elif k == "hydration_unit":
+                    val = str(v).strip().lower()
+                    if val in ["cups", "ml", "oz"]:
+                        self.data["settings"][k] = val
                 elif k in ["adaptive_timers_enabled", "eye_care_mode"]:
                     if isinstance(v, str):
                         self.data["settings"][k] = v.lower() in ["true", "1", "yes"]

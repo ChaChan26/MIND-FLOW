@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=8">
+    <link rel="stylesheet" href="/static/css/style.css?v=12">
 </head>
 <body>
     <div class="glass-bg-glow-wrapper" id="glow-1">
@@ -239,6 +239,25 @@
                     </div>
 
 
+                    <!-- Focus Intention Card -->
+                    <div class="card glass-card goal-card" id="goal-card">
+                        <h3>Current Micro-Goal</h3>
+                        <p class="card-desc">Set a single intentional micro-goal for your current focus session.</p>
+                        
+                        <div class="goal-input-area" id="goal-input-area">
+                            <input type="text" id="goal-input" placeholder="e.g., Fix the DB connection pool memory leak" maxlength="100">
+                            <button type="button" class="goal-set-btn" id="goal-set-btn" onclick="saveGoal()">Set Focus</button>
+                        </div>
+                        
+                        <div class="goal-display-area" id="goal-display-area" style="display: none;">
+                            <div class="goal-display-text" id="goal-display-text"></div>
+                            <div class="goal-actions">
+                                <button type="button" class="goal-complete-btn" onclick="completeGoal()">✓ Complete Win!</button>
+                                <button type="button" class="goal-clear-btn" onclick="clearGoal()">Edit</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Quick Check-in / Reflection Widget -->
                     <div class="card glass-card span-2 reflection-quick-card">
                         <h3>Quick Check-in</h3>
@@ -285,47 +304,42 @@
                             <button type="submit" class="submit-btn">Save Reflection</button>
                         </form>
                     </div>
-                    
-                    <!-- Focus Intention Card -->
-                    <div class="card glass-card goal-card" id="goal-card">
-                        <h3>Current Micro-Goal</h3>
-                        <p class="card-desc">Set a single intentional micro-goal for your current focus session.</p>
-                        
-                        <div class="goal-input-area" id="goal-input-area">
-                            <input type="text" id="goal-input" placeholder="e.g., Fix the DB connection pool memory leak" maxlength="100">
-                            <button type="button" class="goal-set-btn" id="goal-set-btn" onclick="saveGoal()">Set Focus</button>
-                        </div>
-                        
-                        <div class="goal-display-area" id="goal-display-area" style="display: none;">
-                            <div class="goal-display-text" id="goal-display-text"></div>
-                            <div class="goal-actions">
-                                <button type="button" class="goal-complete-btn" onclick="completeGoal()">✓ Complete Win!</button>
-                                <button type="button" class="goal-clear-btn" onclick="clearGoal()">Edit</button>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- Daily Hydration Tracker Card -->
                     <div class="card glass-card span-2 hydration-card" id="hydration-card">
                         <div class="hydration-header">
                             <div>
                                 <h3>Daily Hydration Tracker</h3>
-                                <p class="card-desc">Proper hydration helps shield your brain from fatigue and visual headaches. Log 8 cups daily.</p>
+                                <p class="card-desc">Proper hydration helps shield your brain from fatigue and visual headaches.</p>
                             </div>
                             <div class="hydration-progress">
                                 <span id="hydration-pct-text">0%</span>
                                 <span class="hydration-status-msg" id="hydration-msg">Not hydrated yet</span>
                             </div>
                         </div>
-                        <div class="hydration-cups-row" id="hydration-cups-container">
-                            <button type="button" class="cup-btn" onclick="logHydration(0)" data-index="0" title="Click to log cup 1">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(1)" data-index="1" title="Click to log cup 2">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(2)" data-index="2" title="Click to log cup 3">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(3)" data-index="3" title="Click to log cup 4">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(4)" data-index="4" title="Click to log cup 5">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(5)" data-index="5" title="Click to log cup 6">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(6)" data-index="6" title="Click to log cup 7">💧</button>
-                            <button type="button" class="cup-btn" onclick="logHydration(7)" data-index="7" title="Click to log cup 8">💧</button>
+                        <div class="hydration-layout">
+                            <!-- Left: Glassmorphic Beaker Visual -->
+                            <div class="hydration-visual-wrapper">
+                                <div class="hydration-beaker">
+                                    <div class="hydration-liquid" id="hydration-liquid-fill">
+                                        <div class="water-wave wave-1"></div>
+                                        <div class="water-wave wave-2"></div>
+                                        <div class="water-wave wave-3"></div>
+                                    </div>
+                                    <div class="beaker-gloss"></div>
+                                </div>
+                            </div>
+                            <!-- Right: Logging Controls & Presets -->
+                            <div class="hydration-controls-panel">
+                                <div class="hydration-quick-row">
+                                    <button type="button" class="hydration-add-btn" id="hydration-quick-add-btn" onclick="logHydrationQuick()" title="Log default increment amount">+ Quick Log</button>
+                                    <button type="button" class="hydration-sub-btn" onclick="logHydrationQuickSub()" title="Subtract default increment amount">−</button>
+                                </div>
+                                <div class="hydration-presets-label">Custom Presets</div>
+                                <div class="hydration-presets-row" id="hydration-presets-container">
+                                    <!-- Dynamic preset buttons loaded by JS depending on settings -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
@@ -521,6 +535,34 @@
                                 <textarea id="recharge-keywords-input" rows="3" placeholder="e.g. steam, vlc, netflix, youtube, spotify"></textarea>
                             </div>
                         </div>
+
+                        <!-- Card 3: Hydration Preferences -->
+                        <div class="card glass-card">
+                            <h3>Hydration Preferences</h3>
+                            <p class="card-desc">Configure your daily water intake goal, units, and logging sizes.</p>
+                            
+                            <div class="form-group">
+                                <label for="hydration-target-input">Daily Intake Target</label>
+                                <p class="setting-desc">The amount of water you want to drink daily.</p>
+                                <input type="number" id="hydration-target-input" min="1" max="10000" required>
+                            </div>
+                            
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label for="hydration-unit-input">Measurement Unit</label>
+                                <p class="setting-desc">Preferred unit of measurement.</p>
+                                <select id="hydration-unit-input" style="width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.95rem; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.9rem;">
+                                    <option value="cups">Cups (c)</option>
+                                    <option value="ml">Milliliters (ml)</option>
+                                    <option value="oz">Ounces (oz)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label for="hydration-increment-input">Quick Log Amount</label>
+                                <p class="setting-desc">Volume logged per quick-add click.</p>
+                                <input type="number" id="hydration-increment-input" min="1" max="5000" step="any" required>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="settings-actions">
@@ -622,6 +664,6 @@
         <div class="toast-progress" id="toast-progress"></div>
     </div>
 
-    <script src="/static/js/dashboard.js?v=7"></script>
+    <script src="/static/js/dashboard.js?v=12"></script>
 </body>
 </html>

@@ -58,6 +58,28 @@ class TestMindFlowComponents(unittest.TestCase):
         self.assertFalse(self.db.get_settings()["eye_care_mode"])
         self.assertTrue(self.db.get_settings()["adaptive_timers_enabled"])
 
+        # Test hydration settings updates
+        self.db.update_settings({
+            "hydration_target": 2000,
+            "hydration_unit": "ml",
+            "hydration_increment": 250
+        })
+        hyd_settings = self.db.get_settings()
+        self.assertEqual(hyd_settings["hydration_target"], 2000)
+        self.assertEqual(hyd_settings["hydration_unit"], "ml")
+        self.assertEqual(hyd_settings["hydration_increment"], 250)
+
+        # Test invalid values / validation clamps
+        self.db.update_settings({
+            "hydration_target": -5,          # Should clamp to 1
+            "hydration_unit": "gallons",      # Should ignore (keep ml)
+            "hydration_increment": 10000      # Should clamp to 5000
+        })
+        clamped_hyd = self.db.get_settings()
+        self.assertEqual(clamped_hyd["hydration_target"], 1)
+        self.assertEqual(clamped_hyd["hydration_unit"], "ml")
+        self.assertEqual(clamped_hyd["hydration_increment"], 5000)
+
         # Restore
         self.db.update_settings(original_settings)
 
@@ -654,6 +676,18 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.get_json()["status"], "success")
             self.assertEqual(response.get_json()["hydration"]["cups"], 5)
+
+            # 5. POST with delta increment
+            response = self.client.post('/api/hydration', json={"delta": 2.5})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["status"], "success")
+            self.assertEqual(response.get_json()["hydration"]["cups"], 7.5) # 5 + 2.5
+
+            # 6. POST with delta decrement
+            response = self.client.post('/api/hydration', json={"delta": -3.0})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["status"], "success")
+            self.assertEqual(response.get_json()["hydration"]["cups"], 4.5) # 7.5 - 3.0
         finally:
             self.db.data["hydration"] = orig_hyd
             self.db.save()
