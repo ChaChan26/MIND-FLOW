@@ -1,5 +1,14 @@
 // MIND-FLOW Dashboard Logic
 
+// Global Uncaught Error Tracker for debugging WebView2 client issues
+window.addEventListener('error', function(event) {
+    const errorMsg = `JS Error: ${event.message} at ${event.filename || 'script'}:${event.lineno}:${event.colno}`;
+    console.error(errorMsg);
+    if (typeof showToast === 'function') {
+        showToast(errorMsg, true);
+    }
+});
+
 // Security: HTML escape helper to prevent XSS in innerHTML injections
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -801,7 +810,7 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
 });
 
 // Dynamic Reflection Submission Particle Burst
-function triggerParticleBurst(e) {
+function triggerParticleBurst(e, customColor) {
     const container = document.body;
     let x, y;
     
@@ -829,9 +838,11 @@ function triggerParticleBurst(e) {
         particle.style.width = `${size}px`;
         particle.style.height = `${size}px`;
         
-        let color = '#a78bfa';
-        if (bodyEl.classList.contains('mode-recharge')) color = '#2dd4a8';
-        else if (bodyEl.classList.contains('mode-rest')) color = '#fbbf24';
+        let color = customColor || '#a78bfa';
+        if (!customColor) {
+            if (bodyEl.classList.contains('mode-recharge')) color = '#2dd4a8';
+            else if (bodyEl.classList.contains('mode-rest')) color = '#fbbf24';
+        }
         
         particle.style.backgroundColor = color;
         particle.style.color = color;
@@ -2698,7 +2709,6 @@ async function completeGoal() {
     }
 }
 
-// Call loadGoal on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadGoal();
     // Fetch initial hydration
@@ -2710,6 +2720,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize grounding stepper UI
     updateGroundingUI();
 
+    // Bind event listeners for hydration buttons dynamically
+    const hydrationAddBtn = document.getElementById('hydration-quick-add-btn');
+    const hydrationSubBtn = document.getElementById('hydration-quick-sub-btn');
+    if (hydrationAddBtn) {
+        hydrationAddBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            logHydrationQuick(e);
+        });
+    }
+    if (hydrationSubBtn) {
+        hydrationSubBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            logHydrationQuickSub(e);
+        });
+    }
+
     // Support submitting goal with Enter key
     const goalInput = document.getElementById('goal-input');
     if (goalInput) {
@@ -2720,6 +2746,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Initialize Mindful Word Recommender UI
+    updateWordRecommenderUI();
 });
 
 // Prefill Gratitude Reflection Input
@@ -2735,8 +2764,9 @@ function prefillGratitude() {
 
 // Hydration logging controller
 let currentHydrationIncrement = 1;
+let lastPresetsUnit = null;
 
-async function logHydrationDelta(delta) {
+async function logHydrationDelta(delta, e) {
     try {
         const res = await fetch('/api/hydration', {
             method: 'POST',
@@ -2748,8 +2778,22 @@ async function logHydrationDelta(delta) {
             updateHydrationUI(data.hydration);
             if (delta > 0) {
                 showToast(`Logged +${delta} water! Stay hydrated. 💧`);
+                if (e) triggerParticleBurst(e, '#38bdf8');
+                
+                // If goal is met, do a celebratory burst at the beaker!
+                if (data.hydration.cups >= data.hydration.target) {
+                    const beaker = document.querySelector('.hydration-beaker');
+                    if (beaker) {
+                        const rect = beaker.getBoundingClientRect();
+                        triggerParticleBurst({
+                            clientX: rect.left + rect.width / 2,
+                            clientY: rect.top + rect.height / 2
+                        }, '#10b981');
+                    }
+                }
             } else {
                 showToast(`Subtracted ${Math.abs(delta)} water. 💧`);
+                if (e) triggerParticleBurst(e, '#f43f5e');
             }
         }
     } catch(e) {
@@ -2757,26 +2801,16 @@ async function logHydrationDelta(delta) {
     }
 }
 
-function logHydrationQuick() {
+function logHydrationQuick(e) {
     console.log("logHydrationQuick clicked. currentHydrationIncrement =", currentHydrationIncrement);
-    let inc = 1;
-    if (typeof currentHydrationIncrement === 'number') {
-        inc = currentHydrationIncrement;
-    } else if (typeof currentHydrationIncrement === 'string') {
-        inc = parseFloat(currentHydrationIncrement) || 1;
-    }
-    logHydrationDelta(inc);
+    const inc = parseFloat(currentHydrationIncrement) || 1;
+    logHydrationDelta(inc, e);
 }
 
-function logHydrationQuickSub() {
+function logHydrationQuickSub(e) {
     console.log("logHydrationQuickSub clicked. currentHydrationIncrement =", currentHydrationIncrement);
-    let inc = 1;
-    if (typeof currentHydrationIncrement === 'number') {
-        inc = currentHydrationIncrement;
-    } else if (typeof currentHydrationIncrement === 'string') {
-        inc = parseFloat(currentHydrationIncrement) || 1;
-    }
-    logHydrationDelta(-inc);
+    const inc = parseFloat(currentHydrationIncrement) || 1;
+    logHydrationDelta(-inc, e);
 }
 
 // Legacy logHydration for backward compatibility
@@ -2812,6 +2846,11 @@ function updateHydrationUI(hydration) {
     if (liquidFill) {
         // Set fill height (rises from bottom)
         liquidFill.style.height = `${pct}%`;
+        if (pct === 0) {
+            liquidFill.style.opacity = '0';
+        } else {
+            liquidFill.style.opacity = '1';
+        }
         if (pct >= 100) {
             liquidFill.classList.add('full');
         } else {
@@ -2824,7 +2863,7 @@ function updateHydrationUI(hydration) {
     }
     
     const container = document.getElementById('hydration-presets-container');
-    if (container) {
+    if (container && unit !== lastPresetsUnit) {
         container.innerHTML = '';
         let presets = [];
         if (unit === "cups") presets = [0.5, 1, 2];
@@ -2836,9 +2875,10 @@ function updateHydrationUI(hydration) {
             btn.type = 'button';
             btn.className = 'hydration-preset-btn';
             btn.textContent = `+${p} ${unit}`;
-            btn.onclick = () => logHydrationDelta(p);
+            btn.onclick = (ev) => logHydrationDelta(p, ev);
             container.appendChild(btn);
         });
+        lastPresetsUnit = unit;
     }
 }
 

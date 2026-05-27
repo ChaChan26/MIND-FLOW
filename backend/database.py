@@ -13,8 +13,12 @@ _keyword_regex_cache = {}
 
 def matches_keyword(kw, text):
     """Check if a keyword matches a target text respecting word boundaries."""
-    kw = kw.lower()
+    if not isinstance(kw, str) or not isinstance(text, str):
+        return False
+    kw = kw.strip().lower()
     text = text.lower()
+    if not kw:
+        return False
     if kw not in _keyword_regex_cache:
         escaped_kw = re.escape(kw)
         left_boundary = r"(?<![a-zA-Z0-9])" if kw and kw[0].isalnum() else ""

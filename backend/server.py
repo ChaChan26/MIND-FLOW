@@ -96,6 +96,14 @@ def validate_host():
     if hostname not in {'localhost', '127.0.0.1', '[::1]'}:
         return jsonify({"error": "Forbidden: Invalid Host header"}), 403
 
+@app.after_request
+def disable_caching(response):
+    """Disable caching for all responses to ensure updates propagate instantly in WebView."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 # In-memory shared state between Flask thread and Background Watcher thread
 shared_state = {
     "current_mode": "neutral",

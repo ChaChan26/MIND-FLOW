@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=12">
+    <link rel="stylesheet" href="/static/css/style.css?v=14">
 </head>
 <body>
     <div class="glass-bg-glow-wrapper" id="glow-1">
@@ -332,8 +332,8 @@
                             <!-- Right: Logging Controls & Presets -->
                             <div class="hydration-controls-panel">
                                 <div class="hydration-quick-row">
-                                    <button type="button" class="hydration-add-btn" id="hydration-quick-add-btn" onclick="logHydrationQuick()" title="Log default increment amount">+ Quick Log</button>
-                                    <button type="button" class="hydration-sub-btn" onclick="logHydrationQuickSub()" title="Subtract default increment amount">−</button>
+                                    <button type="button" class="hydration-add-btn" id="hydration-quick-add-btn" title="Log default increment amount">+ Quick Log</button>
+                                    <button type="button" class="hydration-sub-btn" id="hydration-quick-sub-btn" title="Subtract default increment amount">−</button>
                                 </div>
                                 <div class="hydration-presets-label">Custom Presets</div>
                                 <div class="hydration-presets-row" id="hydration-presets-container">
@@ -593,48 +593,118 @@
                         <div class="zen-controls" style="margin-top: 1.5rem; display: flex; justify-content: center;">
                             <button type="button" class="toggle-btn" id="zen-reset-particles-btn" onclick="resetZenParticles()">Re-seed Stardust</button>
                         </div>
+                        <div class="zen-instructions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); width: 100%;">
+                            <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>💨</span> Box Breathing Guide
+                            </h4>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 1rem;">
+                                This room uses <strong>Box Breathing (4-4-4-4)</strong>: inhale for 4 seconds, hold for 4 seconds, exhale for 4 seconds, and hold for 4 seconds. This technique regulates your autonomic nervous system, clears mental fatigue, and restores directed attention capacity.
+                            </p>
+                            <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>✨</span> Interactive Stardust
+                            </h4>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 0;">
+                                Hover your mouse cursor over the canvas to interact with the stardust. The stardust will gently scatter away from your movements and expand/contract in absolute sync with your breathing rhythm.
+                            </p>
+                        </div>
                     </div>
 
-                    <!-- Right: 5-4-3-2-1 Sensory Grounding Widget (span-1) -->
-                    <div class="card glass-card grounding-card" id="grounding-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 480px;">
-                        <div>
-                            <h3 style="margin-bottom: 0.25rem;">Sensory Reset</h3>
-                            <p class="card-desc" style="margin-bottom: 1.25rem;">The 5-4-3-2-1 grounding method helps reset a fatigued nervous system.</p>
-                            
-                            <div class="grounding-step-container">
-                                <div class="grounding-step-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-                                    <span class="grounding-step-badge" id="grounding-badge" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--recharge-color); letter-spacing: 0.05em;">Step 1 of 5</span>
-                                    <span class="grounding-step-sense" id="grounding-sense" style="font-size: 0.95rem; font-weight: 600;">👀 Sight</span>
-                                </div>
+                    <!-- Right: Zen Widgets (span-1) -->
+                    <div class="span-1" style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <!-- 5-4-3-2-1 Sensory Grounding Widget -->
+                        <div class="card glass-card grounding-card" id="grounding-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 1.5rem;">
+                            <div>
+                                <h3 style="margin-bottom: 0.25rem;">Sensory Reset</h3>
+                                <p class="card-desc" style="margin-bottom: 1.25rem;">The 5-4-3-2-1 grounding method helps reset a fatigued nervous system.</p>
                                 
-                                <div class="grounding-step-body">
-                                    <h4 id="grounding-prompt-title" style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">Find 5 things you can see</h4>
-                                    <p id="grounding-prompt-desc" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 1.25rem;">Acknowledge 5 items in your visual field. Type them below to ground your focus.</p>
-                                </div>
-                                
-                                <div class="grounding-inputs-area" id="grounding-inputs-area">
-                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;">
-                                        <input type="text" class="grounding-field" id="grounding-input-0" placeholder="Acknowledge item 1..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                <div class="grounding-step-container">
+                                    <div class="grounding-step-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                                        <span class="grounding-step-badge" id="grounding-badge" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--recharge-color); letter-spacing: 0.05em;">Step 1 of 5</span>
+                                        <span class="grounding-step-sense" id="grounding-sense" style="font-size: 0.95rem; font-weight: 600;">👀 Sight</span>
                                     </div>
-                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-1">
-                                        <input type="text" class="grounding-field" id="grounding-input-1" placeholder="Acknowledge item 2..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    
+                                    <div class="grounding-step-body">
+                                        <h4 id="grounding-prompt-title" style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">Find 5 things you can see</h4>
+                                        <p id="grounding-prompt-desc" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 1.25rem;">Acknowledge 5 items in your visual field. Type them below to ground your focus.</p>
                                     </div>
-                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-2">
-                                        <input type="text" class="grounding-field" id="grounding-input-2" placeholder="Acknowledge item 3..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
-                                    </div>
-                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-3">
-                                        <input type="text" class="grounding-field" id="grounding-input-3" placeholder="Acknowledge item 4..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
-                                    </div>
-                                    <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-4">
-                                        <input type="text" class="grounding-field" id="grounding-input-4" placeholder="Acknowledge item 5..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    
+                                    <div class="grounding-inputs-area" id="grounding-inputs-area">
+                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;">
+                                            <input type="text" class="grounding-field" id="grounding-input-0" placeholder="Acknowledge item 1..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        </div>
+                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-1">
+                                            <input type="text" class="grounding-field" id="grounding-input-1" placeholder="Acknowledge item 2..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        </div>
+                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-2">
+                                            <input type="text" class="grounding-field" id="grounding-input-2" placeholder="Acknowledge item 3..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        </div>
+                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-3">
+                                            <input type="text" class="grounding-field" id="grounding-input-3" placeholder="Acknowledge item 4..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        </div>
+                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-4">
+                                            <input type="text" class="grounding-field" id="grounding-input-4" placeholder="Acknowledge item 5..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+                            
+                            <div class="grounding-actions" style="margin-top: 1.25rem; display: flex; gap: 0.5rem; justify-content: flex-end; width: 100%;">
+                                <button type="button" class="goal-clear-btn" id="grounding-prev-btn" onclick="prevGroundingStep()" style="display: none; padding: 0.45rem 0.85rem; font-size: 0.8rem; margin: 0;">Back</button>
+                                <button type="button" class="submit-btn" id="grounding-next-btn" onclick="nextGroundingStep()" style="padding: 0.45rem 1rem; font-size: 0.8rem; margin: 0; background: var(--recharge-color); border-color: var(--recharge-color); color: #0b0f19; font-weight: 600;">Next Step</button>
+                            </div>
                         </div>
-                        
-                        <div class="grounding-actions" style="margin-top: 1.25rem; display: flex; gap: 0.5rem; justify-content: flex-end; width: 100%;">
-                            <button type="button" class="goal-clear-btn" id="grounding-prev-btn" onclick="prevGroundingStep()" style="display: none; padding: 0.45rem 0.85rem; font-size: 0.8rem; margin: 0;">Back</button>
-                            <button type="button" class="submit-btn" id="grounding-next-btn" onclick="nextGroundingStep()" style="padding: 0.45rem 1rem; font-size: 0.8rem; margin: 0; background: var(--recharge-color); border-color: var(--recharge-color); color: #0b0f19; font-weight: 600;">Next Step</button>
+
+                        <!-- Mindful Word Recommender Widget -->
+                        <div class="card glass-card word-recommender-card" id="word-recommender-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 1.5rem;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.25rem;">
+                                    <h3 style="margin-bottom: 0;">Focus Themes</h3>
+                                    <span class="word-badge badge-calm" id="active-word-badge">Calm</span>
+                                </div>
+                                <p class="card-desc" style="margin-bottom: 1rem;">Select a mindful theme to anchor your focus and energy during breaks.</p>
+                                
+                                <div class="word-content-container" id="active-word-content" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; transition: opacity 0.2s ease;">
+                                    <div style="display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem;">
+                                        <h4 id="active-word-title" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0;">Stillness</h4>
+                                        <span id="active-word-pronounce" style="font-size: 0.8rem; color: var(--text-muted); font-family: 'Outfit', sans-serif;">/ˈstɪlnəs/</span>
+                                    </div>
+                                    <p id="active-word-prompt" style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">Observe the quiet space between your breaths. In this stillness, find your center.</p>
+                                </div>
+                                
+                                <div style="margin-bottom: 1rem;">
+                                    <label style="font-size: 0.7rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Select Theme</label>
+                                    <div class="words-grid">
+                                        <button type="button" class="word-pill-btn active" onclick="selectRecommendedWordByVal('Stillness')">Stillness</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Clarity')">Clarity</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Presence')">Presence</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Release')">Release</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Serenity')">Serenity</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Flow')">Flow</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Patience')">Patience</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Gratitude')">Gratitude</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Balance')">Balance</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Harmony')">Harmony</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Resilience')">Resilience</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Simplicity')">Simplicity</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Intention')">Intention</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Compassion')">Compassion</button>
+                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Acceptance')">Acceptance</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="word-reflection-section" style="margin-bottom: 0.75rem;">
+                                    <label for="word-reflection-input" style="font-size: 0.7rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Quick Reflection</label>
+                                    <input type="text" id="word-reflection-input" placeholder="Type a sentence about this theme..." class="grounding-field" style="font-size: 0.8rem; padding: 0.45rem 0.75rem;">
+                                </div>
+                            </div>
+                            
+                            <div class="word-actions" style="display: flex; gap: 0.5rem; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; margin-top: 0.5rem;">
+                                <div style="display: flex; gap: 0.35rem;">
+                                    <button type="button" class="goal-clear-btn" onclick="recommendRandomWord()" style="padding: 0.4rem 0.75rem; font-size: 0.75rem; margin: 0;" title="Shuffle to a random word">🎲 Shuffle</button>
+                                    <button type="button" class="goal-clear-btn" onclick="setAsReflectionTheme()" style="padding: 0.4rem 0.75rem; font-size: 0.75rem; margin: 0;" title="Prefill Dashboard Reflection with this theme">🧘 Set Theme</button>
+                                </div>
+                                <button type="button" class="submit-btn" id="save-word-reflection-btn" onclick="saveZenWordReflection()" style="padding: 0.4rem 0.95rem; font-size: 0.75rem; margin: 0; background: var(--recharge-color); border-color: var(--recharge-color); color: #0b0f19; font-weight: 600;">Save Reflection</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -664,6 +734,6 @@
         <div class="toast-progress" id="toast-progress"></div>
     </div>
 
-    <script src="/static/js/dashboard.js?v=12"></script>
+    <script src="/static/js/dashboard.js?v=14"></script>
 </body>
 </html>

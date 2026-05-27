@@ -106,17 +106,26 @@ def get_idle_seconds():
         print(f"Error reading idle seconds: {e}")
         return 0
 
+def play_beep_sequence(sequence):
+    """Play a sequence of beeps asynchronously in a daemon thread to prevent blocking the UI thread."""
+    def run():
+        for freq, duration in sequence:
+            try:
+                winsound.Beep(freq, duration)
+            except Exception:
+                pass
+    threading.Thread(target=run, daemon=True).start()
+
 def trigger_lockout_overlay(duration_seconds=20):
     """Enforce a fullscreen borderless Tkinter window to lockout visual focus with a Brain Dump phase."""
-    try:
-        # Play a peaceful, soft, rising wind chime arpeggio (C4, E4, G4, B4, C5)
-        winsound.Beep(262, 120)  # C4
-        winsound.Beep(330, 120)  # E4
-        winsound.Beep(392, 120)  # G4
-        winsound.Beep(494, 120)  # B4
-        winsound.Beep(523, 200)  # C5
-    except Exception:
-        pass
+    # Play a peaceful, soft, rising wind chime arpeggio (C4, E4, G4, B4, C5)
+    play_beep_sequence([
+        (262, 120),  # C4
+        (330, 120),  # E4
+        (392, 120),  # G4
+        (494, 120),  # B4
+        (523, 200)   # C5
+    ])
 
     root = tk.Tk()
     root.title("MIND-FLOW // Cognitive Shield Lockout")
@@ -362,6 +371,12 @@ def trigger_lockout_overlay(duration_seconds=20):
         else:
             nonlocal completed_fully
             completed_fully = True
+            # Play a peaceful, soft, rising success chime (G4, C5, E5) when rest period completes
+            play_beep_sequence([
+                (392, 120),  # G4
+                (523, 120),  # C5
+                (659, 250)   # E5
+            ])
             root.destroy()
 
     update_grace_countdown()
