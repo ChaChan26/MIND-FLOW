@@ -477,26 +477,6 @@ body.resizing * {
     overflow: hidden;
 }
 
-.card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    border-radius: inherit;
-    background: radial-gradient(
-        220px circle at var(--mouse-x, 0px) var(--mouse-y, 0px),
-        rgba(var(--active-mode-rgb, 148, 163, 184), 0.16),
-        rgba(var(--active-mode-secondary-rgb, 167, 139, 250), 0.05) 50%,
-        transparent 100%
-    );
-    opacity: 0;
-    transition: opacity 0.5s ease;
-    pointer-events: none;
-    z-index: 1;
-}
-
-.card:hover::before {
-    opacity: 1;
-}
 
 .card:hover {
     border-color: var(--active-mode-color, var(--border-hover));

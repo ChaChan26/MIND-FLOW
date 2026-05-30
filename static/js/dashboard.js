@@ -42,9 +42,6 @@ const toggleShieldBtn = document.getElementById('toggle-shield-btn');
 const trackingPulse = document.getElementById('tracking-pulse');
 const trackingStatusText = document.getElementById('tracking-status-text');
 
-// Glow Elements
-const glow1 = document.getElementById('glow-1');
-const glow2 = document.getElementById('glow-2');
 
 // Ratings Selectors (Quick Reflection)
 let selectedEnergy = 5;
@@ -181,29 +178,6 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// Animate BG glow slightly based on mouse move to feel organic (optimized with requestAnimationFrame & GPU acceleration)
-let glowTicking = false;
-let glowMouseX = 0;
-let glowMouseY = 0;
-
-document.addEventListener('mousemove', (e) => {
-    glowMouseX = e.clientX;
-    glowMouseY = e.clientY;
-    
-    if (!glowTicking) {
-        requestAnimationFrame(updateGlow);
-        glowTicking = true;
-    }
-});
-
-function updateGlow() {
-    const x = glowMouseX / window.innerWidth;
-    const y = glowMouseY / window.innerHeight;
-    
-    glow1.style.transform = `translate3d(${x * 30}px, ${y * 30}px, 0)`;
-    glow2.style.transform = `translate3d(${-x * 40}px, ${-y * 40}px, 0)`;
-    glowTicking = false;
-}
 
 // 3D Card Tilt Effect (Optimized with cached dimensions and requestAnimationFrame)
 document.querySelectorAll('.card').forEach(card => {
@@ -233,8 +207,6 @@ document.querySelectorAll('.card').forEach(card => {
             cardTicking = false;
             return;
         }
-        card.style.setProperty('--mouse-x', `${localMouseX}px`);
-        card.style.setProperty('--mouse-y', `${localMouseY}px`);
         
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
