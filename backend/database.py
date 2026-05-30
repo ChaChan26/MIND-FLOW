@@ -7,9 +7,10 @@ import copy
 import time
 from datetime import datetime
 
-DB_FILE = r"C:\MIND\mind_flow_data.json"
+DB_FILE = os.getenv("MINDFLOW_DB_FILE", r"C:\MIND\mind_flow_data.json")
 
 _keyword_regex_cache = {}
+_simulated_disk = {}
 
 def matches_keyword(kw, text):
     """Check if a keyword matches a target text respecting word boundaries."""
@@ -48,7 +49,7 @@ DEFAULT_SETTINGS = {
 }
 
 class MindFlowDB:
-    file_lock = threading.Lock() # Class-level lock to serialize background disk writes across all DB instances
+    file_lock = threading.RLock() # Class-level lock to serialize background disk writes across all DB instances
 
     def __init__(self):
         self.lock = threading.RLock()
@@ -61,11 +62,56 @@ class MindFlowDB:
             "current_goal": "",
             "hydration": {"date": "", "cups": 0}
         }
+        self._save_in_progress = False
+        self._save_requested = False
+        
+        # Clean up orphaned temp files from previous runs
+        if self.filepath != ":memory:":
+            try:
+                dir_path = os.path.dirname(self.filepath)
+                if os.path.exists(dir_path):
+                    for filename in os.listdir(dir_path):
+                        if filename.startswith("tmp") and filename.endswith(".json"):
+                            try:
+                                os.unlink(os.path.join(dir_path, filename))
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+                
         self.load()
 
     def load(self):
         with self.lock:
             with MindFlowDB.file_lock:
+                if self.filepath == ":memory:":
+                    loaded = _simulated_disk.get("data")
+                    if loaded is None:
+                        self.save(sync=True)
+                        return
+                    # Merge loaded keys to ensure schema safety
+                    loaded_settings = loaded.get("settings")
+                    if not isinstance(loaded_settings, dict):
+                        loaded_settings = {}
+                    self.data["settings"] = {**DEFAULT_SETTINGS, **loaded_settings}
+                    
+                    loaded_sessions = loaded.get("sessions")
+                    self.data["sessions"] = loaded_sessions if isinstance(loaded_sessions, list) else []
+                    
+                    loaded_reflections = loaded.get("reflections")
+                    self.data["reflections"] = loaded_reflections if isinstance(loaded_reflections, list) else []
+                    
+                    loaded_app_usage = loaded.get("app_usage")
+                    self.data["app_usage"] = loaded_app_usage if isinstance(loaded_app_usage, list) else []
+                    
+                    self.data["current_goal"] = str(loaded.get("current_goal", "") or "")
+                    
+                    loaded_hydration = loaded.get("hydration")
+                    if not isinstance(loaded_hydration, dict):
+                        loaded_hydration = {"date": "", "cups": 0}
+                    self.data["hydration"] = loaded_hydration
+                    return
+
                 if os.path.exists(self.filepath):
                     try:
                         with open(self.filepath, "r", encoding="utf-8") as f:
@@ -100,43 +146,70 @@ class MindFlowDB:
                 else:
                     self.save(sync=True)
 
+    def _bg_write(self, data_to_write):
+        with MindFlowDB.file_lock:
+            try:
+                dir_path = os.path.dirname(self.filepath)
+                os.makedirs(dir_path, exist_ok=True)
+                fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.json')
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        json.dump(data_to_write, f, indent=4, ensure_ascii=False)
+                    
+                    # Robust replace for Windows to handle transient locks (e.g. antivirus/indexers)
+                    for attempt in range(5):
+                        try:
+                            os.replace(tmp_path, self.filepath)
+                            break
+                        except PermissionError:
+                            if attempt == 4:
+                                raise
+                            time.sleep(0.05)
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+            except Exception as e:
+                print(f"Error saving database: {e}")
+
     def save(self, sync=False):
         """Atomic write to prevent corruption on crash (default: async background)."""
-        with self.lock:
-            data_copy = copy.deepcopy(self.data)
-        
-        def _bg_write(data_to_write):
+        if self.filepath == ":memory:":
+            with self.lock:
+                data_copy = copy.deepcopy(self.data)
             with MindFlowDB.file_lock:
-                try:
-                    dir_path = os.path.dirname(self.filepath)
-                    os.makedirs(dir_path, exist_ok=True)
-                    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.json')
-                    try:
-                        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                            json.dump(data_to_write, f, indent=4, ensure_ascii=False)
-                        
-                        # Robust replace for Windows to handle transient locks (e.g. antivirus/indexers)
-                        for attempt in range(5):
-                            try:
-                                os.replace(tmp_path, self.filepath)
-                                break
-                            except PermissionError:
-                                if attempt == 4:
-                                    raise
-                                time.sleep(0.05)
-                    except Exception:
-                        try:
-                            os.unlink(tmp_path)
-                        except OSError:
-                            pass
-                        raise
-                except Exception as e:
-                    print(f"Error saving database: {e}")
+                _simulated_disk["data"] = data_copy
+            return
 
         if sync:
-            _bg_write(data_copy)
-        else:
-            threading.Thread(target=_bg_write, args=(data_copy,), daemon=True).start()
+            with self.lock:
+                data_copy = copy.deepcopy(self.data)
+                self._save_requested = False
+            self._bg_write(data_copy)
+            return
+
+        with self.lock:
+            self._save_requested = True
+            if self._save_in_progress:
+                return
+            self._save_in_progress = True
+
+        def run_coalesced():
+            while True:
+                with self.lock:
+                    data_to_write = copy.deepcopy(self.data)
+                    self._save_requested = False
+                
+                self._bg_write(data_to_write)
+                
+                with self.lock:
+                    if not self._save_requested:
+                        self._save_in_progress = False
+                        break
+
+        threading.Thread(target=run_coalesced, daemon=False).start()
 
     def get_settings(self):
         return self.data["settings"]
@@ -297,10 +370,13 @@ class MindFlowDB:
         with self.lock:
             today_str = datetime.today().date().isoformat()
             
-            # Find if we already have an entry for this process and date
+            # Find if we already have an entry for this process and date (searching in reverse since chronological)
             found = False
-            for entry in self.data.setdefault("app_usage", []):
-                if entry.get("date") == today_str and entry.get("process") == process:
+            for entry in reversed(self.data.setdefault("app_usage", [])):
+                entry_date = entry.get("date")
+                if entry_date and entry_date < today_str:
+                    break
+                if entry_date == today_str and entry.get("process") == process:
                     entry["duration"] = entry.get("duration", 0) + duration
                     
                     # Update titles dictionary
@@ -368,6 +444,9 @@ class MindFlowDB:
                     age_hours = (datetime.now() - refl_dt).total_seconds() / 3600.0
                     if age_hours <= 3.0:
                         latest_refl = r
+                        break
+                    else:
+                        # Since list is chronological, older reflections will only be older
                         break
                 except:
                     pass

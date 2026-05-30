@@ -640,8 +640,16 @@ def main_state_machine(gui_process=None):
         try:
             today_str = date.today().isoformat()
             reflections = db.get_reflections()
-            today_reflections = [r for r in reflections if r["timestamp"].startswith(today_str)]
-            latest_refl = today_reflections[-1] if today_reflections else None
+            latest_refl = None
+            for r in reversed(reflections):
+                if r["timestamp"].startswith(today_str):
+                    latest_refl = r
+                    break
+                try:
+                    if datetime.fromisoformat(r["timestamp"]).date() < date.today():
+                        break
+                except:
+                    pass
             
             if latest_refl:
                 current_energy = latest_refl.get("energy_level", 5)
@@ -652,7 +660,17 @@ def main_state_machine(gui_process=None):
                     if elapsed_since_refl >= 300:
                         if current_energy > 1:
                             new_energy = current_energy - 1
-                            bypasses_today = sum(1 for s in db.get_sessions() if s.get("bypassed", False) and s["start"].startswith(today_str))
+                            bypasses_today = 0
+                            for s in reversed(db.get_sessions()):
+                                if s["start"].startswith(today_str):
+                                    if s.get("bypassed", False):
+                                        bypasses_today += 1
+                                else:
+                                    try:
+                                        if datetime.fromisoformat(s["start"]).date() < date.today():
+                                            break
+                                    except:
+                                        pass
                             new_friction = min(5, 2 + bypasses_today)
                             db.add_reflection(new_energy, new_friction, "[Autopilot] Continuous focus tracking")
                             print(f"Autopilot: Automatically decayed energy to {new_energy} (Friction: {new_friction})")

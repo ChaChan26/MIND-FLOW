@@ -44,79 +44,6 @@
                 </button>
             </nav>
             
-            <!-- Ambient Audio Widget -->
-            <div class="ambient-audio-card">
-                <div class="audio-header">
-                    <span class="audio-title" onclick="toggleSoundboxCollapse()" style="cursor: pointer; user-select: none;" title="Toggle Collapse">🎧 Ambient Soundbox <span id="soundbox-caret" style="font-size: 0.65rem; margin-left: 0.25rem;">▼</span></span>
-                    <button class="audio-toggle-btn" id="audio-toggle-btn" onclick="toggleAmbientAudio()">Play</button>
-                    <div class="audio-waveform" id="audio-waveform">
-                        <span class="audio-waveform-bar"></span>
-                        <span class="audio-waveform-bar"></span>
-                        <span class="audio-waveform-bar"></span>
-                        <span class="audio-waveform-bar"></span>
-                        <span class="audio-waveform-bar"></span>
-                    </div>
-                </div>
-                <div class="audio-body" id="soundbox-body">
-                    <div class="audio-presets-grid">
-                        <button type="button" class="audio-preset-btn active" data-sound="brown" onclick="selectAmbientSound('brown')" title="Brown Noise: Deep, warm focus rumble">
-                            <span class="preset-icon">🟫</span>
-                            <span class="preset-name">Brown</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="pink" onclick="selectAmbientSound('pink')" title="Pink Noise: Balanced, smooth focus static">
-                            <span class="preset-icon">🌸</span>
-                            <span class="preset-name">Pink</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="white" onclick="selectAmbientSound('white')" title="White Noise: Bright, blocks harsh external noise">
-                            <span class="preset-icon">🌬️</span>
-                            <span class="preset-name">White</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="rain" onclick="selectAmbientSound('rain')" title="Deep Rain: Soothing pitter-patter & wind gusts">
-                            <span class="preset-icon">🌧️</span>
-                            <span class="preset-name">Rain</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="fire" onclick="selectAmbientSound('fire')" title="Cozy Fire: Crackles & pops of a burning campfire">
-                            <span class="preset-icon">🔥</span>
-                            <span class="preset-name">Fire</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="waves" onclick="selectAmbientSound('waves')" title="Ocean Waves: Natural swell and ebb of beach tides">
-                            <span class="preset-icon">🌊</span>
-                            <span class="preset-name">Waves</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="drone" onclick="selectAmbientSound('drone')" title="Cosmic Space: Resonant celestial synth sweeps">
-                            <span class="preset-icon">🪐</span>
-                            <span class="preset-name">Space</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="focus" onclick="selectAmbientSound('focus')" title="Theta Waves: Binaural beats for deep cognitive work">
-                            <span class="preset-icon">🧠</span>
-                            <span class="preset-name">Focus</span>
-                        </button>
-                        <button type="button" class="audio-preset-btn" data-sound="alpha" onclick="selectAmbientSound('alpha')" title="Alpha Waves: 10Hz binaural beats for calm focus & stress relief">
-                            <span class="preset-icon">🧘</span>
-                            <span class="preset-name">Alpha</span>
-                        </button>
-                    </div>
-                    
-                    <!-- Hidden select for backwards compatibility, just in case -->
-                    <select id="ambient-sound-select" style="display: none;">
-                        <option value="brown">Brown Noise</option>
-                        <option value="pink">Pink Noise</option>
-                        <option value="white">White Noise</option>
-                        <option value="rain">Deep Rain Synth</option>
-                        <option value="fire">Cozy Fire</option>
-                        <option value="waves">Ocean Waves</option>
-                        <option value="drone">Cosmic Space</option>
-                        <option value="focus">Theta Waves</option>
-                        <option value="alpha">Alpha Waves</option>
-                    </select>
-
-                    <div class="audio-volume-row">
-                        <span class="volume-icon" id="volume-icon-btn" onclick="toggleMuteAmbient()" style="cursor: pointer; user-select: none;" title="Toggle Mute">🔊</span>
-                        <input type="range" id="audio-volume-slider" min="0" max="1" step="0.05" value="0.5" oninput="adjustAmbientVolume(this.value)">
-                    </div>
-                </div>
-            </div>
-
             <div class="system-status">
                 <div class="status-indicator-container">
                     <span class="status-pulse" id="tracking-pulse"></span>
@@ -321,10 +248,24 @@
                             <!-- Left: Glassmorphic Beaker Visual -->
                             <div class="hydration-visual-wrapper">
                                 <div class="hydration-beaker">
+                                    <div class="beaker-markings">
+                                        <span class="marking-line" style="bottom: 25%;"></span>
+                                        <span class="marking-line" style="bottom: 50%;"></span>
+                                        <span class="marking-line" style="bottom: 75%;"></span>
+                                    </div>
+                                    <div class="water-stream" id="water-stream"></div>
+                                    <div class="beaker-effects-container" id="beaker-effects-container"></div>
                                     <div class="hydration-liquid" id="hydration-liquid-fill">
-                                        <div class="water-wave wave-1"></div>
-                                        <div class="water-wave wave-2"></div>
-                                        <div class="water-wave wave-3"></div>
+                                        <svg class="water-wave wave-1" viewBox="0 0 200 20" preserveAspectRatio="none">
+                                            <path d="M 0 10 Q 25 6, 50 10 T 100 10 Q 125 6, 150 10 T 200 10 L 200 20 L 0 20 Z" />
+                                        </svg>
+                                        <svg class="water-wave wave-2" viewBox="0 0 200 20" preserveAspectRatio="none">
+                                            <path d="M 0 10 Q 25 14, 50 10 T 100 10 Q 125 14, 150 10 T 200 10 L 200 20 L 0 20 Z" />
+                                        </svg>
+                                        <svg class="water-wave wave-3" viewBox="0 0 200 20" preserveAspectRatio="none">
+                                            <path d="M 0 10 Q 25 8, 50 10 T 100 10 Q 125 8, 150 10 T 200 10 L 200 20 L 0 20 Z" />
+                                        </svg>
+                                        <div class="hydration-bubbles-container" id="hydration-bubbles"></div>
                                     </div>
                                     <div class="beaker-gloss"></div>
                                 </div>
@@ -353,9 +294,12 @@
                             <span class="timeline-summary-pill" id="timeline-summary-pill">0h 0m total track</span>
                         </div>
                         <div class="timeline-wrapper">
-                            <div class="timeline-progress-bar-container">
-                                <div class="timeline-progress-bar" id="timeline-progress-bar">
-                                    <!-- Dynamic segments filled by JS -->
+                            <div class="timeline-track-outer">
+                                <div class="timeline-track" id="timeline-track">
+                                    <!-- Floating segments filled by JS -->
+                                </div>
+                                <div class="timeline-axis" id="timeline-axis">
+                                    <!-- Ticks filled by JS -->
                                 </div>
                             </div>
                             <div class="timeline-legend">

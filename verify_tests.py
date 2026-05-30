@@ -1,4 +1,5 @@
 import os
+os.environ["MINDFLOW_DB_FILE"] = ":memory:"
 import shutil
 import unittest
 from datetime import datetime

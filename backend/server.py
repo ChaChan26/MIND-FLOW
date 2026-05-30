@@ -348,10 +348,10 @@ def get_analytics():
     cutoff_date = (date.today() - timedelta(days=8)).isoformat()
     
     processed_app_usage = []
-    for entry in app_usage:
+    for entry in reversed(app_usage):
         entry_date = entry.get("date", "")
         if entry_date and entry_date < cutoff_date:
-            continue
+            break
             
         process = entry.get("process", "")
         title = entry.get("title", "")
@@ -424,6 +424,7 @@ def get_analytics():
             "neutral_duration": neutral_dur,
             "title_categories": title_categories
         })
+    processed_app_usage.reverse()
     
     # Calculate energy vs friction mapping
     energy_levels = [r["energy_level"] for r in reflections]
@@ -634,7 +635,17 @@ def get_analytics():
         })
         
     today_str = date.today().isoformat()
-    today_sessions = [s for s in sessions if s["start"].startswith(today_str)]
+    today_sessions = []
+    for s in reversed(sessions):
+        if s["start"].startswith(today_str):
+            today_sessions.append(s)
+        else:
+            try:
+                if datetime.fromisoformat(s["start"]).date() < date.today():
+                    break
+            except:
+                pass
+    today_sessions.reverse()
 
     return jsonify({
         "reflections": reflections[-15:], # Send last 15 for recent list

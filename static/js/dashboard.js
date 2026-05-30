@@ -781,7 +781,7 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
     lastSubmitClick = null;
 });
 
-// Dynamic Reflection Submission Particle Burst
+// Dynamic Reflection Submission Particle Burst (Remade Optimized Splash Effect)
 function triggerParticleBurst(e, customColor) {
     const container = document.body;
     let x, y;
@@ -801,47 +801,106 @@ function triggerParticleBurst(e, customColor) {
         }
     }
     
-    const particleCount = 24;
+    // 1. Create a Ripple effect at the click location (glowing ring)
+    const colors = {
+        water: ['#38bdf8', '#0284c7', '#7dd3fc'],
+        sub: ['#f43f5e', '#be123c', '#fda4af'],
+        default: ['#a78bfa', '#7c3aed', '#c084fc'],
+        recharge: ['#2dd4a8', '#059669', '#34d399'],
+        rest: ['#fbbf24', '#d97706', '#fcd34d']
+    };
+    
+    let activePalette = colors.default;
+    let isWater = false;
+    
+    if (customColor === '#38bdf8') {
+        activePalette = colors.water;
+        isWater = true;
+    } else if (customColor === '#f43f5e') {
+        activePalette = colors.sub;
+        isWater = true;
+    } else if (customColor === '#10b981') {
+        activePalette = colors.recharge;
+        isWater = true;
+    } else if (customColor) {
+        activePalette = [customColor];
+    } else {
+        const bodyEl = document.body;
+        if (bodyEl.classList.contains('mode-recharge')) activePalette = colors.recharge;
+        else if (bodyEl.classList.contains('mode-rest')) activePalette = colors.rest;
+    }
+    
+    // Spawn 1 expanding wave ring (optimized)
+    const wave = document.createElement('div');
+    wave.className = 'click-ripple-ring';
+    wave.style.left = `${x}px`;
+    wave.style.top = `${y}px`;
+    wave.style.color = activePalette[0];
+    wave.style.borderColor = 'currentColor';
+    wave.style.boxShadow = `0 0 8px ${activePalette[0]}`;
+    container.appendChild(wave);
+    setTimeout(() => wave.remove(), 500);
+    
+    // 2. Spawn Splash Particles (Optimized count: 10 for water, 12 for default)
+    const particleCount = isWater ? 10 : 12;
     for (let i = 0; i < particleCount; i++) {
         const particle = document.createElement('div');
         particle.className = 'burst-particle';
         
-        const size = Math.random() * 8 + 4;
+        // Randomize sizes
+        const size = Math.random() * (isWater ? 5 : 6) + (isWater ? 2.5 : 3);
         particle.style.width = `${size}px`;
         particle.style.height = `${size}px`;
         
-        let color = customColor || '#a78bfa';
-        if (!customColor) {
-            if (bodyEl.classList.contains('mode-recharge')) color = '#2dd4a8';
-            else if (bodyEl.classList.contains('mode-rest')) color = '#fbbf24';
-        }
-        
+        // Pick a color from active palette
+        const color = activePalette[Math.floor(Math.random() * activePalette.length)];
         particle.style.backgroundColor = color;
         particle.style.color = color;
-        particle.style.left = `${x}px`;
-        particle.style.top = `${y}px`;
         
+        // Position at absolute 0,0 and translate using transform to prevent layout recalculations
+        particle.style.left = '0px';
+        particle.style.top = '0px';
+        
+        if (isWater) {
+            particle.style.borderRadius = '0 50% 50% 50%';
+        } else {
+            particle.style.borderRadius = Math.random() > 0.4 ? '50%' : '2px';
+        }
+        
+        // Physics variables
         const angle = Math.random() * Math.PI * 2;
-        const velocity = Math.random() * 8 + 4;
+        const velocity = Math.random() * 6 + (isWater ? 3 : 4);
         let vx = Math.cos(angle) * velocity;
-        let vy = Math.sin(angle) * velocity - 2;
+        let vy = Math.sin(angle) * velocity - (isWater ? 2.5 : 1);
         
         container.appendChild(particle);
         
         let posX = x;
         let posY = y;
         let opacity = 1;
+        let rotation = Math.random() * 360;
+        const spinSpeed = (Math.random() - 0.5) * 8;
         
         const updateParticle = () => {
             posX += vx;
             posY += vy;
-            vy += 0.25; // gravity
-            vx *= 0.97; // air resistance
-            opacity -= 0.022; // fade
+            vy += isWater ? 0.3 : 0.2; // gravity
+            vx *= 0.95; // drag
+            opacity -= isWater ? 0.03 : 0.022; // fade
+            rotation += spinSpeed;
             
-            particle.style.left = `${posX}px`;
-            particle.style.top = `${posY}px`;
+            // Motion blur / stretch effect
+            const speed = Math.sqrt(vx * vx + vy * vy);
+            const stretch = 1 + speed * 0.08;
+            
             particle.style.opacity = opacity;
+            
+            if (isWater) {
+                const travelAngle = Math.atan2(vy, vx) * 180 / Math.PI;
+                particle.style.transform = `translate3d(${posX}px, ${posY}px, 0) rotate(${travelAngle + 45}deg) scale(${stretch}, ${2 - stretch / 2})`;
+            } else {
+                particle.style.transform = `translate3d(${posX}px, ${posY}px, 0) rotate(${rotation}deg) scale(${stretch}, 1)`;
+            }
             
             if (opacity > 0) {
                 requestAnimationFrame(updateParticle);
@@ -852,6 +911,78 @@ function triggerParticleBurst(e, customColor) {
         
         requestAnimationFrame(updateParticle);
     }
+}
+
+// Coalesce/Smooth rapid window-switching sessions on Focus Timeline to prevent a fragmented/messy barcode look
+function smoothSessions(sessions) {
+    if (!sessions || sessions.length === 0) return [];
+    
+    // 1. Map to raw times and sort chronologically
+    let list = [...sessions]
+        .map(s => ({
+            ...s,
+            startMs: new Date(s.start).getTime(),
+            endMs: new Date(s.end).getTime()
+        }))
+        .sort((a, b) => a.startMs - b.startMs);
+        
+    // 2. Pass 1: Merge consecutive segments of the EXACT SAME mode separated by < 60s
+    let pass1 = [];
+    list.forEach(s => {
+        if (pass1.length === 0) {
+            pass1.push(s);
+            return;
+        }
+        let last = pass1[pass1.length - 1];
+        if (last.mode === s.mode && (s.startMs - last.endMs) < 60000) {
+            last.endMs = Math.max(last.endMs, s.endMs);
+            last.end = new Date(last.endMs).toISOString();
+            last.duration = (last.endMs - last.startMs) / 1000;
+            if (s.brain_dump) {
+                last.brain_dump = last.brain_dump ? `${last.brain_dump} | ${s.brain_dump}` : s.brain_dump;
+            }
+            last.bypassed = last.bypassed || s.bypassed;
+        } else {
+            pass1.push(s);
+        }
+    });
+    
+    // 3. Pass 2: Absorb micro-neutral/idle gaps (< 60s) sandwiched between the same modes (e.g. Work -> Neutral -> Work)
+    let pass2 = [];
+    for (let i = 0; i < pass1.length; i++) {
+        let s = pass1[i];
+        if (s.mode === 'neutral' && s.duration < 60 && i > 0 && i < pass1.length - 1) {
+            let prev = pass2[pass2.length - 1];
+            let next = pass1[i + 1];
+            if (prev.mode === next.mode && (s.startMs - prev.endMs) < 60000 && (next.startMs - s.endMs) < 60000) {
+                // Merge everything into prev
+                prev.endMs = next.endMs;
+                prev.end = next.end;
+                prev.duration = (prev.endMs - prev.startMs) / 1000;
+                if (s.brain_dump) {
+                    prev.brain_dump = prev.brain_dump ? `${prev.brain_dump} | ${s.brain_dump}` : s.brain_dump;
+                }
+                if (next.brain_dump) {
+                    prev.brain_dump = prev.brain_dump ? `${prev.brain_dump} | ${next.brain_dump}` : next.brain_dump;
+                }
+                prev.bypassed = prev.bypassed || s.bypassed || next.bypassed;
+                i++; // skip next as it is absorbed
+                continue;
+            }
+        }
+        pass2.push(s);
+    }
+    
+    // 4. Pass 3: Discard leftover transient neutral micro-ticks (< 15 seconds) to clean up noise
+    let pass3 = [];
+    pass2.forEach(s => {
+        if (s.mode === 'neutral' && s.duration < 15 && !s.brain_dump && !s.bypassed) {
+            return;
+        }
+        pass3.push(s);
+    });
+    
+    return pass3;
 }
 
 // Load Analytics & Draw SVG Line Chart
@@ -949,13 +1080,16 @@ async function loadAnalytics() {
         }
         
         // 2.5. Render Today's Focus Timeline Widget
-        const todaySessions = data.today_sessions || [];
-        const timelineProgress = document.getElementById('timeline-progress-bar');
+        const rawSessions = data.today_sessions || [];
+        const todaySessions = smoothSessions(rawSessions);
+        const timelineTrack = document.getElementById('timeline-track');
+        const timelineAxis = document.getElementById('timeline-axis');
         const timelineEvents = document.getElementById('timeline-events-list');
         const timelinePill = document.getElementById('timeline-summary-pill');
         
-        if (timelineProgress && timelineEvents && timelinePill) {
-            timelineProgress.innerHTML = '';
+        if (timelineTrack && timelineAxis && timelineEvents && timelinePill) {
+            timelineTrack.innerHTML = '';
+            timelineAxis.innerHTML = '';
             timelineEvents.innerHTML = '';
             
             const totalDuration = todaySessions.reduce((sum, s) => sum + s.duration, 0);
@@ -965,13 +1099,41 @@ async function loadAnalytics() {
             timelinePill.textContent = `${trackedH}h ${trackedM}m total track`;
             
             if (todaySessions.length === 0) {
-                timelineProgress.innerHTML = `<div class="timeline-segment neutral-seg" style="width: 100%;" data-tooltip="No sessions tracked yet today."></div>`;
+                timelineTrack.innerHTML = `<div class="timeline-segment neutral-seg" style="width: 100%; top: 5px; text-align: center; color: var(--text-muted); font-size: 0.75rem; line-height: 20px; cursor: default; box-shadow: none;" data-tooltip="No sessions tracked yet today.">No sessions tracked yet today.</div>`;
                 timelineEvents.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 1.25rem 0;">No focus sessions or breaks logged yet today.</div>`;
             } else {
-                // Populate progress bar segments
-                todaySessions.forEach(session => {
-                    const pct = totalDuration > 0 ? (session.duration / totalDuration) * 100 : 0;
-                    if (pct <= 0) return;
+                // Find chronological bounds
+                let minStart = Infinity;
+                let maxEnd = -Infinity;
+                todaySessions.forEach(s => {
+                    const startMs = s.startMs || new Date(s.start).getTime();
+                    const endMs = s.endMs || new Date(s.end).getTime();
+                    if (startMs < minStart) minStart = startMs;
+                    if (endMs > maxEnd) maxEnd = endMs;
+                });
+                
+                // Add some padding (e.g. 30 minutes on each side)
+                const paddingMs = 30 * 60 * 1000;
+                let startBound = minStart - paddingMs;
+                let endBound = maxEnd + paddingMs;
+                
+                // Keep a minimum range of 4 hours
+                if (endBound - startBound < 4 * 60 * 60 * 1000) {
+                    endBound = startBound + 4 * 60 * 60 * 1000;
+                }
+                
+                const totalRangeMs = endBound - startBound;
+                
+                // Populate progress track segments
+                todaySessions.forEach((session, index) => {
+                    const sessionStartMs = session.startMs || new Date(session.start).getTime();
+                    const sessionEndMs = session.endMs || new Date(session.end).getTime();
+                    
+                    const leftPct = ((sessionStartMs - startBound) / totalRangeMs) * 100;
+                    let widthPct = ((sessionEndMs - sessionStartMs) / totalRangeMs) * 100;
+                    
+                    if (widthPct <= 0) return;
+                    widthPct = Math.max(widthPct, 0.75);
                     
                     const seg = document.createElement('div');
                     let modeClass = 'neutral-seg';
@@ -979,36 +1141,91 @@ async function loadAnalytics() {
                     else if (session.mode === 'recharge') modeClass = 'recharge-seg';
                     else if (session.mode === 'rest') modeClass = 'rest-seg';
                     
-                    seg.className = `timeline-segment ${modeClass}`;
-                    seg.style.width = `${pct}%`;
+                    seg.className = `timeline-segment ${modeClass} timeline-seg-index-${index}`;
+                    seg.style.left = `${leftPct}%`;
+                    seg.style.width = `${widthPct}%`;
                     
                     const startDt = new Date(session.start);
                     const endDt = new Date(session.end);
                     const startTimeStr = startDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     const endTimeStr = endDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                    const durationMin = Math.round(session.duration / 60);
                     
-                    const tooltipText = `${session.mode.toUpperCase()}: ${startTimeStr} - ${endTimeStr} (${durationMin} min)`;
+                    const durationSec = Math.round(session.duration);
+                    const durationText = durationSec < 60 ? `${durationSec} sec` : `${Math.round(durationSec / 60)} min`;
+                    
+                    const tooltipText = `${session.mode.toUpperCase()}: ${startTimeStr} - ${endTimeStr} (${durationText})`;
                     seg.setAttribute('data-tooltip', tooltipText);
-                    timelineProgress.appendChild(seg);
+                    
+                    // Link hover effects (track seg -> list card)
+                    seg.addEventListener('mouseenter', () => {
+                        const eventItem = timelineEvents.querySelector(`.timeline-event-index-${index}`);
+                        if (eventItem) {
+                            eventItem.classList.add('highlighted');
+                            eventItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    });
+                    seg.addEventListener('mouseleave', () => {
+                        const eventItem = timelineEvents.querySelector(`.timeline-event-index-${index}`);
+                        if (eventItem) eventItem.classList.remove('highlighted');
+                    });
+                    
+                    timelineTrack.appendChild(seg);
                 });
+                
+                // Draw hour ticks on timeline axis
+                const startHourDate = new Date(startBound);
+                startHourDate.setMinutes(0, 0, 0);
+                startHourDate.setHours(startHourDate.getHours() + 1); // Move to next whole hour
+                
+                let currentTick = startHourDate.getTime();
+                while (currentTick < endBound) {
+                    const pct = ((currentTick - startBound) / totalRangeMs) * 100;
+                    if (pct >= 0 && pct <= 100) {
+                        const tickDate = new Date(currentTick);
+                        const label = tickDate.toLocaleTimeString([], { hour: 'numeric', hour12: true });
+                        
+                        const tickEl = document.createElement('div');
+                        tickEl.className = 'timeline-tick';
+                        tickEl.style.left = `${pct}%`;
+                        tickEl.innerHTML = `
+                            <span class="tick-line"></span>
+                            <span class="tick-label">${label}</span>
+                        `;
+                        timelineAxis.appendChild(tickEl);
+                    }
+                    currentTick += 60 * 60 * 1000; // Next hour
+                }
                 
                 // Populate event list (sorted newest first)
                 const sortedTodaySessions = [...todaySessions].sort((a, b) => new Date(b.start) - new Date(a.start));
                 sortedTodaySessions.forEach(session => {
+                    // Find original index to link correctly
+                    const originalIndex = todaySessions.indexOf(session);
+                    
                     const item = document.createElement('div');
-                    item.className = 'timeline-event-item';
+                    let modeClass = 'neutral-item';
+                    if (session.mode === 'work') modeClass = 'work-item';
+                    else if (session.mode === 'recharge') modeClass = 'recharge-item';
+                    else if (session.mode === 'rest') modeClass = 'rest-item';
+                    
+                    item.className = `timeline-event-item ${modeClass} timeline-event-index-${originalIndex}`;
                     
                     const startDt = new Date(session.start);
-                    const timeStr = startDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const endDt = new Date(session.end);
+                    const startTimeStr = startDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const endTimeStr = endDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const timeStr = `${startTimeStr} - ${endTimeStr}`;
                     
                     let badgeClass = 'neutral-badge';
                     if (session.mode === 'work') badgeClass = 'work-badge';
                     else if (session.mode === 'recharge') badgeClass = 'recharge-badge';
                     else if (session.mode === 'rest') badgeClass = 'rest-badge';
                     
-                    const durationMin = Math.round(session.duration / 60);
-                    let summaryText = `${durationMin} mins of focus/rest`;
+                    const durationSec = Math.round(session.duration);
+                    const durationText = durationSec < 60 ? `${durationSec} sec` : `${Math.round(durationSec / 60)} min`;
+                    let modeName = session.mode;
+                    if (modeName === 'work') modeName = 'focus';
+                    let summaryText = `${durationText} of ${modeName}`;
                     if (session.brain_dump) {
                         summaryText += ` — Save-State: "${escapeHtml(session.brain_dump)}"`;
                     }
@@ -1021,6 +1238,23 @@ async function loadAnalytics() {
                         <span class="event-badge ${escapeHtml(badgeClass)}">${escapeHtml(session.mode)}</span>
                         <span class="event-summary">${summaryText}</span>
                     `;
+                    
+                    // Link hover effects (list card -> track seg)
+                    item.addEventListener('mouseenter', () => {
+                        const trackSeg = timelineTrack.querySelector(`.timeline-seg-index-${originalIndex}`);
+                        if (trackSeg) {
+                            trackSeg.style.transform = 'scaleY(1.25)';
+                            trackSeg.style.filter = 'brightness(1.1)';
+                        }
+                    });
+                    item.addEventListener('mouseleave', () => {
+                        const trackSeg = timelineTrack.querySelector(`.timeline-seg-index-${originalIndex}`);
+                        if (trackSeg) {
+                            trackSeg.style.transform = '';
+                            trackSeg.style.filter = '';
+                        }
+                    });
+                    
                     timelineEvents.appendChild(item);
                 });
             }
@@ -2683,6 +2917,7 @@ async function completeGoal() {
 
 document.addEventListener('DOMContentLoaded', () => {
     loadGoal();
+    loadAnalytics();
     // Fetch initial hydration
     fetch('/api/hydration')
         .then(r => r.json())
@@ -2721,6 +2956,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize Mindful Word Recommender UI
     updateWordRecommenderUI();
+
+    // Start idle water dripping simulation
+    startIdleDripping();
 });
 
 // Prefill Gratitude Reflection Input
@@ -2803,6 +3041,243 @@ async function logHydration(index) {
     logHydrationDelta(1);
 }
 
+let hydrationBubbleInterval = null;
+let lastHydrationPct = null;
+let isPouring = false;
+let idleDripInterval = null;
+
+function updateHydrationBubbles(hasWater) {
+    const container = document.getElementById('hydration-bubbles');
+    if (!container) return;
+    
+    if (!hasWater) {
+        if (hydrationBubbleInterval) {
+            clearInterval(hydrationBubbleInterval);
+            hydrationBubbleInterval = null;
+        }
+        container.innerHTML = '';
+        return;
+    }
+    
+    if (hydrationBubbleInterval) return; // already active
+    
+    hydrationBubbleInterval = setInterval(() => {
+        if (isPouring) return; // skip normal bubbles during active pour
+        const bubble = document.createElement('div');
+        bubble.className = 'hydration-bubble';
+        
+        const size = Math.random() * 4 + 2; // 2px to 6px
+        bubble.style.width = `${size}px`;
+        bubble.style.height = `${size}px`;
+        bubble.style.left = `${Math.random() * 85 + 5}%`;
+        
+        const wobble = (Math.random() - 0.5) * 20; // -10px to 10px drift
+        bubble.style.setProperty('--wobble', `${wobble}px`);
+        
+        const duration = Math.random() * 1.5 + 2.0; // 2.0s to 3.5s
+        bubble.style.animation = `hydrationBubbleFloat ${duration}s ease-in forwards`;
+        
+        container.appendChild(bubble);
+        
+        setTimeout(() => {
+            bubble.remove();
+        }, duration * 1000);
+    }, 600);
+}
+
+function createSplash(surfaceY, container) {
+    if (!container) return;
+    const count = 3 + Math.floor(Math.random() * 2); // 3 to 4 particles (optimized)
+    for (let i = 0; i < count; i++) {
+        const drop = document.createElement('div');
+        drop.className = 'splash-droplet';
+        drop.style.left = `50%`;
+        drop.style.top = `${surfaceY}px`;
+
+        // Random horizontal and vertical movements
+        const dx = (Math.random() - 0.5) * 20; // -10px to 10px
+        const dy = -(Math.random() * 12 + 6);  // -18px to -6px (upwards)
+        
+        drop.style.setProperty('--dx', `${dx}px`);
+        drop.style.setProperty('--dy', `${dy}px`);
+
+        const size = Math.random() * 1.5 + 1.5; // 1.5px to 3px
+        drop.style.width = `${size}px`;
+        drop.style.height = `${size}px`;
+
+        container.appendChild(drop);
+        setTimeout(() => drop.remove(), 400);
+    }
+}
+
+function createRipple(surfaceY, container) {
+    if (!container) return;
+    const ripple = document.createElement('div');
+    ripple.className = 'surface-ripple';
+    ripple.style.top = `${surfaceY}px`;
+    container.appendChild(ripple);
+    setTimeout(() => ripple.remove(), 500);
+}
+
+function spawnPourBubbles(count, container) {
+    if (!container) return;
+    for (let i = 0; i < count; i++) {
+        const bubble = document.createElement('div');
+        bubble.className = 'hydration-bubble pour-bubble';
+        
+        const size = Math.random() * 5 + 2.5; // 2.5px to 7.5px
+        bubble.style.width = `${size}px`;
+        bubble.style.height = `${size}px`;
+        bubble.style.left = `${Math.random() * 80 + 10}%`;
+        
+        const wobble = (Math.random() - 0.5) * 16;
+        bubble.style.setProperty('--wobble', `${wobble}px`);
+        
+        container.appendChild(bubble);
+        setTimeout(() => bubble.remove(), 1200);
+    }
+}
+
+function playSingleDrip(currentPct, effectsContainer, bubblesContainer) {
+    if (!effectsContainer) return;
+    const beakerHeight = 104;
+    const surfaceY = beakerHeight * (1 - currentPct / 100);
+
+    // Create a dripping droplet that falls from the top rim
+    const drip = document.createElement('div');
+    drip.className = 'splash-droplet';
+    drip.style.left = '50%';
+    drip.style.top = '0px';
+    drip.style.width = '4px';
+    drip.style.height = '6px';
+    drip.style.borderRadius = '50% 50% 40% 40%';
+    drip.style.transform = 'translateX(-50%)';
+    drip.style.transition = 'top 0.3s cubic-bezier(0.55, 0.055, 0.675, 0.19)';
+    
+    effectsContainer.appendChild(drip);
+
+    // Trigger fall
+    setTimeout(() => {
+        drip.style.top = `${surfaceY}px`;
+        
+        // When it hits
+        setTimeout(() => {
+            drip.remove();
+            
+            // Create a small splash and ripple
+            createSplash(surfaceY, effectsContainer);
+            createRipple(surfaceY, effectsContainer);
+
+            // Spawn a few final bubbles
+            spawnPourBubbles(2, bubblesContainer);
+        }, 300);
+    }, 50);
+}
+
+function triggerPourAnimation(oldPct, newPct) {
+    if (isPouring) return; // prevent overlapping pour animations if clicked rapidly
+    isPouring = true;
+
+    const stream = document.getElementById('water-stream');
+    const liquidFill = document.getElementById('hydration-liquid-fill');
+    const effectsContainer = document.getElementById('beaker-effects-container');
+    const bubblesContainer = document.getElementById('hydration-bubbles');
+
+    if (!stream || !liquidFill) {
+        isPouring = false;
+        return;
+    }
+
+    // 1. Calculate the surface level where stream hits the water initially
+    const beakerHeight = 104;
+    const startSurfaceY = beakerHeight * (1 - oldPct / 100);
+    const streamStartHeight = Math.max(0, startSurfaceY);
+
+    // 2. Show and extend the stream
+    stream.style.height = '0px';
+    stream.classList.add('pouring');
+    void stream.offsetWidth; // force reflow
+    stream.style.height = `${streamStartHeight}px`;
+
+    // 3. Set timeout for the stream to hit the surface (150ms)
+    setTimeout(() => {
+        if (!isPouring) return;
+
+        // Start liquid rising animation
+        liquidFill.style.height = `${newPct}%`;
+        if (newPct === 0) {
+            liquidFill.style.opacity = '0';
+        } else {
+            liquidFill.style.opacity = '1';
+        }
+        if (newPct >= 100) {
+            liquidFill.classList.add('full');
+        } else {
+            liquidFill.classList.remove('full');
+        }
+
+        // Generate splash and ripples at the surface (optimized to 140ms intervals)
+        let splashInterval = setInterval(() => {
+            if (!isPouring) {
+                clearInterval(splashInterval);
+                return;
+            }
+            const currentFillPct = parseFloat(liquidFill.style.height) || oldPct;
+            const currentSurfaceY = beakerHeight * (1 - currentFillPct / 100);
+
+            // Dynamically adjust stream height to meet the rising liquid
+            stream.style.height = `${Math.max(0, currentSurfaceY)}px`;
+
+            createSplash(currentSurfaceY, effectsContainer);
+            createRipple(currentSurfaceY, effectsContainer);
+        }, 140);
+
+        // Generate turbulent bubbles rising from the bottom (optimized to 200ms intervals)
+        let bubbleInterval = setInterval(() => {
+            if (!isPouring) {
+                clearInterval(bubbleInterval);
+                return;
+            }
+            spawnPourBubbles(2, bubblesContainer);
+        }, 200);
+
+        // Clean up intervals and stream after animation completes
+        setTimeout(() => {
+            clearInterval(splashInterval);
+            clearInterval(bubbleInterval);
+
+            // Fade out the stream
+            stream.classList.remove('pouring');
+            
+            // Let the stream shrink down to 0
+            setTimeout(() => {
+                stream.style.height = '0px';
+                isPouring = false;
+
+                // Play a final single drip after stream stops
+                setTimeout(() => {
+                    playSingleDrip(newPct, effectsContainer, bubblesContainer);
+                }, 200);
+            }, 100);
+        }, 700);
+
+    }, 150);
+}
+
+function startIdleDripping() {
+    if (idleDripInterval) clearInterval(idleDripInterval);
+    idleDripInterval = setInterval(() => {
+        const dashboardTab = document.getElementById('tab-dashboard');
+        const isTabActive = dashboardTab && dashboardTab.classList.contains('active');
+        if (!document.hidden && isTabActive && lastHydrationPct > 0 && !isPouring) {
+            const effectsContainer = document.getElementById('beaker-effects-container');
+            const bubblesContainer = document.getElementById('hydration-bubbles');
+            
+            playSingleDrip(lastHydrationPct, effectsContainer, bubblesContainer);
+        }
+    }, 15000);
+}
+
 function updateHydrationUI(hydration) {
     const cups = hydration.cups || 0;
     const target = hydration.target || 8;
@@ -2829,19 +3304,30 @@ function updateHydrationUI(hydration) {
     }
     
     if (liquidFill) {
-        // Set fill height (rises from bottom)
-        liquidFill.style.height = `${pct}%`;
-        if (pct === 0) {
-            liquidFill.style.opacity = '0';
+        if (lastHydrationPct !== null && pct > lastHydrationPct) {
+            // Trigger pour animation (it updates liquidFill styles inside)
+            triggerPourAnimation(lastHydrationPct, pct);
         } else {
-            liquidFill.style.opacity = '1';
-        }
-        if (pct >= 100) {
-            liquidFill.classList.add('full');
-        } else {
-            liquidFill.classList.remove('full');
+            // Set fill height immediately
+            liquidFill.style.height = `${pct}%`;
+            if (pct === 0) {
+                liquidFill.style.opacity = '0';
+            } else {
+                liquidFill.style.opacity = '1';
+            }
+            if (pct >= 100) {
+                liquidFill.classList.add('full');
+            } else {
+                liquidFill.classList.remove('full');
+            }
+            
+            if (!isPouring) {
+                updateHydrationBubbles(cups > 0);
+            }
         }
     }
+    
+    lastHydrationPct = pct;
     
     if (quickBtn) {
         quickBtn.textContent = `+ Log ${increment} ${unit}`;
