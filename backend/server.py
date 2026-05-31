@@ -192,21 +192,21 @@ def get_status():
     if not shared_state["tracking_active"]:
         companion_message = "Companion is paused. Take care of yourself out there!"
     elif today_bypasses > 1:
-        companion_message = f"That's {today_bypasses} breaks skipped today. Your code can wait; your health shouldn't."
+        companion_message = f"🚨 That's {today_bypasses} breaks skipped today! Your health comes first: Rest more, step away from the keyboard, and take a physical break."
     elif today_bypasses == 1:
-        companion_message = "I noticed you skipped a break earlier. No judgment, but let's try to take the next 20-second pause together."
+        companion_message = "⚠️ I noticed you skipped a break earlier. Rest more during the next cycle: stretch your arms and rest your eyes."
     elif current_energy <= 2:
-        companion_message = "Battery critical! Focus blocks are blocked. Please start your recharge/rest."
+        companion_message = "🔋 Battery critical! Focus blocks are blocked. Rest more, start your rest cycle, and let your mind drift in Zen Space."
     elif current_energy == 3:
-        companion_message = "Medium energy. Be careful not to push yourself into a hyperfocus trap."
+        companion_message = "🌿 Medium energy. Rest more before you reach exhaustion. Pace yourself and take a deep, mindful breath."
     elif cur_mode == "work":
-        companion_message = "Deep work block active. Stay focused, but don't ignore the warning beeps."
+        companion_message = "💻 Focus session active. Remember: to sustain this, plan to rest more during upcoming recharge blocks!"
     elif cur_mode == "recharge":
-        companion_message = "Recharging active. Enjoy the break and clear your head!"
+        companion_message = "🎮 Recharging active. Rest more by looking away from all screens, stretching, or drinking water."
     elif cur_mode == "rest":
-        companion_message = "Rest block. Remember to look 20 feet away to relax your eyes."
+        companion_message = "💤 Rest block. Close your eyes, rest more, and follow the 20-20-20 rule to relax your eyes."
     else:
-        companion_message = "Battery optimal. Keep going, but remember to look away occasionally!"
+        companion_message = "🌳 Energy optimal. Maintain your stamina by remembering to stretch, hydrate, and rest more periodically."
 
     return jsonify({
         "current_mode": cur_mode,

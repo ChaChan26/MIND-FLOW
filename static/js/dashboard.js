@@ -290,7 +290,7 @@ async function pollStatus() {
         // 1. Update Body classes for mode specific glows (only on changes to prevent layout thrashing)
         const activeMode = status.current_mode || 'neutral';
         if (!bodyEl.classList.contains(`mode-${activeMode}`)) {
-            bodyEl.className = '';
+            bodyEl.classList.remove('mode-work', 'mode-recharge', 'mode-rest', 'mode-neutral');
             bodyEl.classList.add(`mode-${activeMode}`);
             requestAnimationFrame(() => {
                 updateNavIndicator();
@@ -337,31 +337,65 @@ async function pollStatus() {
             }
         }
         
-        // 3. Block Timer (Enforce counts up or counts down visually) and Radial Progress
+        // 3. Block Timer (Enforce counts up visually) and Radial Progress
         let progress = 0;
+        const timeLeftTitle = document.getElementById('time-left-title');
+        
         if (status.current_mode === 'work') {
             const limit = status.adaptive_work_limit_seconds || 2700;
-            const remaining = Math.max(0, limit - status.elapsed_seconds);
-            blockTimer.textContent = formatTime(remaining);
+            const elapsed = status.elapsed_seconds || 0;
+            const remaining = Math.max(0, limit - elapsed);
+            
+            // Show elapsed time as primary timer (how much time i did after switching)
+            blockTimer.textContent = formatTime(elapsed);
             if (remaining < 60) {
                 blockTimer.style.color = '#ef4444'; // Red alarm for last minute
             } else {
                 blockTimer.style.color = 'var(--work-color)';
             }
-            progress = Math.max(0, Math.min(1, remaining / limit));
+            
+            // Show remaining time until switch in title
+            if (timeLeftTitle) {
+                timeLeftTitle.textContent = `Switches in ${formatTime(remaining)}`;
+            }
+            
+            // Progress ring fills up as elapsed time increases (until it switches)
+            progress = Math.max(0, Math.min(1, elapsed / limit));
+            
         } else if (status.current_mode === 'recharge') {
-            blockTimer.textContent = formatTime(status.elapsed_seconds);
+            const limit = status.adaptive_rest_limit_seconds || 20;
+            const elapsed = status.elapsed_seconds || 0;
+            const remaining = Math.max(0, limit - elapsed);
+            
+            blockTimer.textContent = formatTime(elapsed);
             blockTimer.style.color = 'var(--recharge-color)';
-            const limit = status.adaptive_rest_limit_seconds || 20;
-            progress = Math.max(0, Math.min(1, status.elapsed_seconds / limit));
+            
+            if (timeLeftTitle) {
+                timeLeftTitle.textContent = `Switches in ${formatTime(remaining)}`;
+            }
+            
+            progress = Math.max(0, Math.min(1, elapsed / limit));
+            
         } else if (status.current_mode === 'rest') {
-            blockTimer.textContent = formatTime(status.idle_seconds);
-            blockTimer.style.color = 'var(--rest-color)';
             const limit = status.adaptive_rest_limit_seconds || 20;
-            progress = Math.max(0, Math.min(1, status.idle_seconds / limit));
+            const elapsed = status.idle_seconds || 0;
+            const remaining = Math.max(0, limit - elapsed);
+            
+            blockTimer.textContent = formatTime(elapsed);
+            blockTimer.style.color = 'var(--rest-color)';
+            
+            if (timeLeftTitle) {
+                timeLeftTitle.textContent = `Switches in ${formatTime(remaining)}`;
+            }
+            
+            progress = Math.max(0, Math.min(1, elapsed / limit));
+            
         } else {
             blockTimer.textContent = "00:00";
             blockTimer.style.color = 'var(--text-secondary)';
+            if (timeLeftTitle) {
+                timeLeftTitle.textContent = "Block Timer";
+            }
             progress = 0;
         }
 
@@ -401,11 +435,46 @@ async function pollStatus() {
         statusIcon.textContent = emoji;
         
         // 5. Update live battery representation
-        const energyPct = status.current_energy * 20; // 1-5 -> 20%-100%
-        batteryFill.style.width = `${energyPct}%`;
+        const energyLevel = status.current_energy; // 1 to 5
+        const energyPct = energyLevel * 20;
+        
+        // Backward compatibility
+        if (batteryFill) {
+            batteryFill.style.width = `${energyPct}%`;
+        }
+        
         const prevPct = parseInt(batteryPct.textContent) || 0;
         if (prevPct !== energyPct) {
             animateValue(batteryPct, prevPct, energyPct, '%', 800);
+        }
+        
+        // Update 5 segments active/neon color states
+        const segments = document.querySelectorAll('.battery-segment');
+        segments.forEach((seg, idx) => {
+            const activeIdx = idx + 1;
+            if (activeIdx <= energyLevel) {
+                seg.classList.add('active');
+                if (energyLevel <= 2) {
+                    seg.className = 'battery-segment active active-low';
+                } else if (energyLevel === 3) {
+                    seg.className = 'battery-segment active active-mid';
+                } else {
+                    seg.className = 'battery-segment active active-high';
+                }
+            } else {
+                seg.className = 'battery-segment';
+            }
+        });
+        
+        // Toggle charging layout state
+        const batteryOuter = document.querySelector('.battery-outer');
+        const isCharging = (status.current_mode === 'recharge' || status.current_mode === 'rest');
+        if (batteryOuter) {
+            if (isCharging) {
+                batteryOuter.classList.add('charging');
+            } else {
+                batteryOuter.classList.remove('charging');
+            }
         }
         
         // Update battery charge/discharge label
@@ -413,7 +482,7 @@ async function pollStatus() {
         if (status.current_mode === 'work') {
             chargeIndicator.textContent = '❌ discharging';
             chargeIndicator.style.color = '#ef4444';
-        } else if (status.current_mode === 'recharge' || status.current_mode === 'rest') {
+        } else if (isCharging) {
             chargeIndicator.textContent = '⚡ charging';
             chargeIndicator.style.color = 'var(--recharge-color)';
         } else {
@@ -422,7 +491,7 @@ async function pollStatus() {
         }
 
         // Trigger dynamic liquid battery bubbles
-        updateBatteryBubbles(status.current_mode === 'recharge' || status.current_mode === 'rest');
+        updateBatteryBubbles(isCharging);
 
         // Update session duration statistics
         const formatDuration = (seconds) => {
@@ -434,21 +503,41 @@ async function pollStatus() {
         document.getElementById('stat-recharge-time').textContent = formatDuration(status.today_recharge_seconds);
         document.getElementById('stat-rest-time').textContent = formatDuration(status.today_rest_seconds);
         
-        // Change battery color background based on percentage
-        if (status.current_energy <= 2) {
-            batteryFill.style.backgroundColor = '#ef4444';
-            batteryFill.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.4)';
-            batteryStatusMsg.textContent = 'You\'re running low. Time for a gentle break to recharge.';
+        // Change battery status message color and direct advice based on level
+        if (energyLevel === 1) {
+            if (batteryFill) {
+                batteryFill.style.backgroundColor = '#ef4444';
+                batteryFill.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.4)';
+            }
+            batteryStatusMsg.textContent = 'CRITICAL ENERGY: Rest more. Stop coding immediately, step away from your screen, stretch your body, and drink water!';
             batteryStatusMsg.style.color = '#ef4444';
-        } else if (status.current_energy === 3) {
-            batteryFill.style.backgroundColor = '#f59e0b';
-            batteryFill.style.boxShadow = '0 0 15px rgba(245, 158, 11, 0.4)';
-            batteryStatusMsg.textContent = 'Moderate energy. A short break soon would feel nice.';
+        } else if (energyLevel === 2) {
+            if (batteryFill) {
+                batteryFill.style.backgroundColor = '#ef4444';
+                batteryFill.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.4)';
+            }
+            batteryStatusMsg.textContent = 'LOW ENERGY: Rest more. Wind down your current task, start Zen Space, and relax your eyes in Forest Light.';
+            batteryStatusMsg.style.color = '#ef4444';
+        } else if (energyLevel === 3) {
+            if (batteryFill) {
+                batteryFill.style.backgroundColor = '#f59e0b';
+                batteryFill.style.boxShadow = '0 0 15px rgba(245, 158, 11, 0.4)';
+            }
+            batteryStatusMsg.textContent = 'MODERATE ENERGY: Pace yourself. Take a 2-minute break, stand up, take a deep breath, and rest more before continuing.';
             batteryStatusMsg.style.color = '#f59e0b';
+        } else if (energyLevel === 4) {
+            if (batteryFill) {
+                batteryFill.style.backgroundColor = '#10b981';
+                batteryFill.style.boxShadow = '0 0 15px rgba(16, 185, 129, 0.4)';
+            }
+            batteryStatusMsg.textContent = 'GOOD ENERGY: Steady flow. Keep up the good work, but schedule a short physical break to rest more and protect your battery.';
+            batteryStatusMsg.style.color = 'var(--text-secondary)';
         } else {
-            batteryFill.style.backgroundColor = '#10b981';
-            batteryFill.style.boxShadow = '0 0 15px rgba(16, 185, 129, 0.4)';
-            batteryStatusMsg.textContent = 'Feeling great! Keep going, and remember to rest when you need it.';
+            if (batteryFill) {
+                batteryFill.style.backgroundColor = '#10b981';
+                batteryFill.style.boxShadow = '0 0 15px rgba(16, 185, 129, 0.4)';
+            }
+            batteryStatusMsg.textContent = 'FULLY CHARGED: High energy! Safe for deep focus, but remember to stand up, stretch, and rest more at regular intervals.';
             batteryStatusMsg.style.color = 'var(--text-secondary)';
         }
         
@@ -1156,17 +1245,28 @@ async function loadAnalytics() {
                     const tooltipText = `${session.mode.toUpperCase()}: ${startTimeStr} - ${endTimeStr} (${durationText})`;
                     seg.setAttribute('data-tooltip', tooltipText);
                     
-                    // Link hover effects (track seg -> list card)
+                    // Attach dataset properties for shared tooltip styling
+                    seg.dataset.leftPct = leftPct;
+                    seg.dataset.widthPct = widthPct;
+                    seg.dataset.startTime = startTimeStr;
+                    seg.dataset.endTime = endTimeStr;
+                    seg.dataset.duration = durationText;
+                    seg.dataset.mode = session.mode;
+                    seg.dataset.brainDump = session.brain_dump || '';
+                    
+                    // Link hover effects (track seg -> list card) and tooltip
                     seg.addEventListener('mouseenter', () => {
                         const eventItem = timelineEvents.querySelector(`.timeline-event-index-${index}`);
                         if (eventItem) {
                             eventItem.classList.add('highlighted');
-                            eventItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                            eventItem.scrollIntoView({ behavior: 'auto', block: 'nearest' });
                         }
+                        showTooltipForSegment(seg);
                     });
                     seg.addEventListener('mouseleave', () => {
                         const eventItem = timelineEvents.querySelector(`.timeline-event-index-${index}`);
                         if (eventItem) eventItem.classList.remove('highlighted');
+                        hideTooltip();
                     });
                     
                     timelineTrack.appendChild(seg);
@@ -1243,15 +1343,15 @@ async function loadAnalytics() {
                     item.addEventListener('mouseenter', () => {
                         const trackSeg = timelineTrack.querySelector(`.timeline-seg-index-${originalIndex}`);
                         if (trackSeg) {
-                            trackSeg.style.transform = 'scaleY(1.25)';
-                            trackSeg.style.filter = 'brightness(1.1)';
+                            trackSeg.classList.add('highlighted');
+                            showTooltipForSegment(trackSeg);
                         }
                     });
                     item.addEventListener('mouseleave', () => {
                         const trackSeg = timelineTrack.querySelector(`.timeline-seg-index-${originalIndex}`);
                         if (trackSeg) {
-                            trackSeg.style.transform = '';
-                            trackSeg.style.filter = '';
+                            trackSeg.classList.remove('highlighted');
+                            hideTooltip();
                         }
                     });
                     
@@ -2916,6 +3016,7 @@ async function completeGoal() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    initAppTheme();
     loadGoal();
     loadAnalytics();
     // Fetch initial hydration
@@ -3361,7 +3462,618 @@ let zenParticles = [];
 const MAX_ZEN_PARTICLES = 120;
 let zenMouse = { x: null, y: null, active: false };
 let zenStartTime = 0;
+let zenVisualizerMode = 'cosmic';
+let zenRipples = [];
+let lastBreathPhase = "";
+let lightningFlashAlpha = 0;
 
+// Soundscape states
+let zenMasterVolume = 0.5;
+let zenMasterGain = null;
+let zenOscL = null;
+let zenOscR = null;
+let zenDroneGain = null;
+let zenDroneFilter = null;
+let zenPadOscs = [];
+let zenPadFilter = null;
+let zenPadGain = null;
+let zenRainSource = null;
+let zenRainFilter = null;
+let zenRainGain = null;
+let zenRainLfo = null;
+let zenRainLfoGain = null;
+let zenWindSource = null;
+let zenWindFilter = null;
+let zenWindGain = null;
+let zenWindLfo = null;
+let zenWindLfoGain = null;
+let zenThunderTimer = null;
+let thunderActive = false;
+let zenChimesTimer = null;
+let chimesActive = false;
+let activeZenSounds = {
+    drone: false,
+    rain: false,
+    chimes: false
+};
+
+// ==========================================
+// Ambient Soundscapes Synthesizer (Web Audio API)
+// ==========================================
+function initAudioCtx() {
+    if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContextClass();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+}
+
+function getZenMasterGain() {
+    initAudioCtx();
+    if (!zenMasterGain) {
+        zenMasterGain = audioCtx.createGain();
+        zenMasterGain.gain.setValueAtTime(zenMasterVolume, audioCtx.currentTime);
+        zenMasterGain.connect(audioCtx.destination);
+    }
+    return zenMasterGain;
+}
+
+function getPinkNoiseBuffer() {
+    if (pinkNoiseBuffer) return pinkNoiseBuffer;
+    initAudioCtx();
+    const bufferSize = audioCtx.sampleRate * 2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < bufferSize; i++) {
+        let white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        let pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+        b6 = white * 0.115926;
+        data[i] = pink * 0.11;
+    }
+    pinkNoiseBuffer = buffer;
+    return buffer;
+}
+
+function toggleSynthSound(soundType) {
+    initAudioCtx();
+    
+    const active = !activeZenSounds[soundType];
+    activeZenSounds[soundType] = active;
+    
+    const btn = document.getElementById(`sound-btn-${soundType}`);
+    const statusText = document.getElementById(`status-${soundType}`);
+    
+    if (active) {
+        if (btn) btn.classList.add('active');
+        if (statusText) statusText.textContent = "Playing";
+        
+        if (soundType === 'drone') {
+            startDrone();
+        } else if (soundType === 'rain') {
+            startRain();
+        } else if (soundType === 'chimes') {
+            startChimes();
+        }
+    } else {
+        if (btn) btn.classList.remove('active');
+        if (statusText) statusText.textContent = "Muted";
+        
+        if (soundType === 'drone') {
+            stopDrone();
+        } else if (soundType === 'rain') {
+            stopRain();
+        } else if (soundType === 'chimes') {
+            stopChimes();
+        }
+    }
+    
+    checkSoundPlayingState();
+}
+
+function checkSoundPlayingState() {
+    const eq = document.getElementById('soundscape-eq');
+    if (eq) {
+        const anyPlaying = activeZenSounds['drone'] || activeZenSounds['rain'] || activeZenSounds['chimes'];
+        if (anyPlaying) {
+            eq.classList.add('playing');
+        } else {
+            eq.classList.remove('playing');
+        }
+    }
+}
+
+function updateMasterVolume(val) {
+    zenMasterVolume = parseFloat(val) / 100;
+    
+    const label = document.getElementById('master-volume-label');
+    if (label) label.textContent = `${val}%`;
+    
+    if (zenMasterGain) {
+        zenMasterGain.gain.setValueAtTime(zenMasterVolume, audioCtx ? audioCtx.currentTime : 0);
+    }
+}
+
+function startDrone() {
+    initAudioCtx();
+    
+    zenOscL = audioCtx.createOscillator();
+    zenOscR = audioCtx.createOscillator();
+    zenDroneGain = audioCtx.createGain();
+    zenDroneFilter = audioCtx.createBiquadFilter();
+    
+    const merger = audioCtx.createChannelMerger(2);
+    
+    zenOscL.type = 'sine';
+    zenOscL.frequency.setValueAtTime(150, audioCtx.currentTime);
+    
+    zenOscR.type = 'sine';
+    zenOscR.frequency.setValueAtTime(160, audioCtx.currentTime);
+    
+    zenDroneFilter.type = 'lowpass';
+    zenDroneFilter.frequency.setValueAtTime(120, audioCtx.currentTime);
+    zenDroneFilter.Q.setValueAtTime(1, audioCtx.currentTime);
+    
+    zenDroneGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    zenDroneGain.gain.linearRampToValueAtTime(0.22, audioCtx.currentTime + 1.5);
+    
+    zenOscL.connect(merger, 0, 0);
+    zenOscR.connect(merger, 0, 1);
+    
+    merger.connect(zenDroneFilter);
+    zenDroneFilter.connect(zenDroneGain);
+    zenDroneGain.connect(getZenMasterGain());
+    
+    zenOscL.start();
+    zenOscR.start();
+
+    // Swelling Ambient Major 7th Pad Chord
+    const pitches = [82.41, 123.47, 164.81, 207.65]; // E2, B2, E3, G#3 (soothing meditative harmony)
+    zenPadOscs = [];
+    zenPadFilter = audioCtx.createBiquadFilter();
+    zenPadFilter.type = 'lowpass';
+    zenPadFilter.frequency.setValueAtTime(200, audioCtx.currentTime);
+    zenPadFilter.Q.setValueAtTime(1.5, audioCtx.currentTime);
+    
+    zenPadGain = audioCtx.createGain();
+    zenPadGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    
+    pitches.forEach(freq => {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.detune.setValueAtTime((Math.random() - 0.5) * 6, audioCtx.currentTime);
+        osc.connect(zenPadFilter);
+        osc.start();
+        zenPadOscs.push(osc);
+    });
+    
+    zenPadFilter.connect(zenPadGain);
+    zenPadGain.connect(getZenMasterGain());
+    zenPadGain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 3.0);
+}
+
+function stopDrone() {
+    if (zenOscL) {
+        try { zenOscL.stop(); zenOscL.disconnect(); } catch(e) {}
+        zenOscL = null;
+    }
+    if (zenOscR) {
+        try { zenOscR.stop(); zenOscR.disconnect(); } catch(e) {}
+        zenOscR = null;
+    }
+    if (zenDroneGain) {
+        try { zenDroneGain.disconnect(); } catch(e) {}
+        zenDroneGain = null;
+    }
+    if (zenDroneFilter) {
+        try { zenDroneFilter.disconnect(); } catch(e) {}
+        zenDroneFilter = null;
+    }
+    if (zenPadOscs) {
+        zenPadOscs.forEach(osc => {
+            try { osc.stop(); osc.disconnect(); } catch(e) {}
+        });
+        zenPadOscs = [];
+    }
+    if (zenPadGain) {
+        try { zenPadGain.disconnect(); } catch(e) {}
+        zenPadGain = null;
+    }
+    if (zenPadFilter) {
+        try { zenPadFilter.disconnect(); } catch(e) {}
+        zenPadFilter = null;
+    }
+}
+
+function startRain() {
+    initAudioCtx();
+    
+    zenRainSource = audioCtx.createBufferSource();
+    zenRainSource.buffer = getPinkNoiseBuffer();
+    zenRainSource.loop = true;
+    
+    zenRainFilter = audioCtx.createBiquadFilter();
+    zenRainFilter.type = 'lowpass';
+    zenRainFilter.frequency.setValueAtTime(600, audioCtx.currentTime);
+    
+    zenRainGain = audioCtx.createGain();
+    zenRainGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    zenRainGain.gain.linearRampToValueAtTime(0.35, audioCtx.currentTime + 1.0);
+    
+    zenRainLfo = audioCtx.createOscillator();
+    zenRainLfo.type = 'sine';
+    zenRainLfo.frequency.setValueAtTime(0.15, audioCtx.currentTime);
+    
+    zenRainLfoGain = audioCtx.createGain();
+    zenRainLfoGain.gain.setValueAtTime(250, audioCtx.currentTime);
+    
+    zenRainLfo.connect(zenRainLfoGain);
+    zenRainLfoGain.connect(zenRainFilter.frequency);
+    
+    zenRainSource.connect(zenRainFilter);
+    zenRainFilter.connect(zenRainGain);
+    zenRainGain.connect(getZenMasterGain());
+    
+    zenRainLfo.start();
+    zenRainSource.start();
+
+    // Synthesized Howling Wind Gusts
+    zenWindSource = audioCtx.createBufferSource();
+    zenWindSource.buffer = getPinkNoiseBuffer();
+    zenWindSource.loop = true;
+    
+    zenWindFilter = audioCtx.createBiquadFilter();
+    zenWindFilter.type = 'bandpass';
+    zenWindFilter.frequency.setValueAtTime(400, audioCtx.currentTime);
+    zenWindFilter.Q.setValueAtTime(3.0, audioCtx.currentTime);
+    
+    zenWindGain = audioCtx.createGain();
+    zenWindGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    zenWindGain.gain.linearRampToValueAtTime(0.06, audioCtx.currentTime + 2.0);
+    
+    zenWindLfo = audioCtx.createOscillator();
+    zenWindLfo.type = 'sine';
+    zenWindLfo.frequency.setValueAtTime(0.07, audioCtx.currentTime); // 14s cycle
+    
+    zenWindLfoGain = audioCtx.createGain();
+    zenWindLfoGain.gain.setValueAtTime(220, audioCtx.currentTime); // sweeps between 180Hz and 620Hz
+    
+    zenWindLfo.connect(zenWindLfoGain);
+    zenWindLfoGain.connect(zenWindFilter.frequency);
+    
+    zenWindSource.connect(zenWindFilter);
+    zenWindFilter.connect(zenWindGain);
+    zenWindGain.connect(getZenMasterGain());
+    
+    zenWindLfo.start();
+    zenWindSource.start();
+
+    // Start random thunder schedule
+    thunderActive = true;
+    scheduleNextThunder();
+}
+
+function stopRain() {
+    if (zenRainSource) {
+        try { zenRainSource.stop(); zenRainSource.disconnect(); } catch(e) {}
+        zenRainSource = null;
+    }
+    if (zenRainLfo) {
+        try { zenRainLfo.stop(); zenRainLfo.disconnect(); } catch(e) {}
+        zenRainLfo = null;
+    }
+    if (zenRainLfoGain) {
+        try { zenRainLfoGain.disconnect(); } catch(e) {}
+        zenRainLfoGain = null;
+    }
+    if (zenRainFilter) {
+        try { zenRainFilter.disconnect(); } catch(e) {}
+        zenRainFilter = null;
+    }
+    if (zenRainGain) {
+        try { zenRainGain.disconnect(); } catch(e) {}
+        zenRainGain = null;
+    }
+    if (zenWindSource) {
+        try { zenWindSource.stop(); zenWindSource.disconnect(); } catch(e) {}
+        zenWindSource = null;
+    }
+    if (zenWindLfo) {
+        try { zenWindLfo.stop(); zenWindLfo.disconnect(); } catch(e) {}
+        zenWindLfo = null;
+    }
+    if (zenWindLfoGain) {
+        try { zenWindLfoGain.disconnect(); } catch(e) {}
+        zenWindLfoGain = null;
+    }
+    if (zenWindFilter) {
+        try { zenWindFilter.disconnect(); } catch(e) {}
+        zenWindFilter = null;
+    }
+    if (zenWindGain) {
+        try { zenWindGain.disconnect(); } catch(e) {}
+        zenWindGain = null;
+    }
+    
+    thunderActive = false;
+    if (zenThunderTimer) {
+        clearTimeout(zenThunderTimer);
+        zenThunderTimer = null;
+    }
+}
+
+function scheduleNextThunder() {
+    if (!thunderActive) return;
+    const delay = 25000 + Math.random() * 30000; // 25s - 55s
+    zenThunderTimer = setTimeout(() => {
+        if (!thunderActive) return;
+        triggerThunder();
+        scheduleNextThunder();
+    }, delay);
+}
+
+function triggerThunder() {
+    initAudioCtx();
+    const now = audioCtx.currentTime;
+    
+    const thunderGain = audioCtx.createGain();
+    thunderGain.gain.setValueAtTime(0, now);
+    const peak = 0.22 + Math.random() * 0.18;
+    thunderGain.gain.linearRampToValueAtTime(peak, now + 0.35);
+    thunderGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.5 + Math.random() * 3.0);
+    
+    const thunderFilter = audioCtx.createBiquadFilter();
+    thunderFilter.type = 'lowpass';
+    thunderFilter.frequency.setValueAtTime(75, now);
+    
+    const thunderSource = audioCtx.createBufferSource();
+    if (!brownNoiseBuffer) {
+        const bufferSize = audioCtx.sampleRate * 2;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let lastOut = 0.0;
+        for (let i = 0; i < bufferSize; i++) {
+            let white = Math.random() * 2 - 1;
+            data[i] = (lastOut + (0.02 * white)) / 1.02;
+            lastOut = data[i];
+            data[i] *= 3.5;
+        }
+        brownNoiseBuffer = buffer;
+    }
+    thunderSource.buffer = brownNoiseBuffer;
+    
+    thunderSource.connect(thunderFilter);
+    thunderFilter.connect(thunderGain);
+    thunderGain.connect(getZenMasterGain());
+    
+    thunderSource.start(now);
+    thunderSource.stop(now + 9.0);
+    
+    // Trigger visual lightning flash on canvas
+    lightningFlashAlpha = 0.55;
+    
+    setTimeout(() => {
+        try {
+            thunderSource.disconnect();
+            thunderFilter.disconnect();
+            thunderGain.disconnect();
+        } catch(e) {}
+    }, 9500);
+}
+
+function startChimes() {
+    chimesActive = true;
+    scheduleNextChime();
+}
+
+function stopChimes() {
+    chimesActive = false;
+    if (zenChimesTimer) {
+        clearTimeout(zenChimesTimer);
+        zenChimesTimer = null;
+    }
+}
+
+function scheduleNextChime() {
+    if (!chimesActive) return;
+    const delay = 3000 + Math.random() * 5000;
+    zenChimesTimer = setTimeout(() => {
+        if (!chimesActive) return;
+        strikeChime();
+        if (Math.random() < 0.4) {
+            setTimeout(() => {
+                if (chimesActive) strikeChime();
+            }, 150 + Math.random() * 250);
+        }
+        scheduleNextChime();
+    }, delay);
+}
+
+function strikeChime() {
+    initAudioCtx();
+    const now = audioCtx.currentTime;
+    const pitches = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50, 1174.66, 1318.51, 1567.98];
+    const baseFreq = pitches[Math.floor(Math.random() * pitches.length)];
+    
+    const harmonics = [1, 1.45, 2.18, 3.12];
+    const strikeGain = audioCtx.createGain();
+    strikeGain.gain.setValueAtTime(0, now);
+    
+    const peakVol = 0.035 + Math.random() * 0.035;
+    strikeGain.gain.linearRampToValueAtTime(peakVol, now + 0.005);
+    strikeGain.gain.exponentialRampToValueAtTime(0.0001, now + 3.0 + Math.random() * 2.0);
+    
+    // Stereo panning
+    const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+    if (panner) {
+        panner.pan.setValueAtTime((Math.random() - 0.5) * 1.7, now); // randomly pan chimes
+        strikeGain.connect(panner);
+        panner.connect(getZenMasterGain());
+    } else {
+        strikeGain.connect(getZenMasterGain());
+    }
+    
+    const oscillators = [];
+    harmonics.forEach((h, index) => {
+        const osc = audioCtx.createOscillator();
+        const oscGain = audioCtx.createGain();
+        
+        osc.type = index === 0 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(baseFreq * h, now);
+        osc.detune.setValueAtTime((Math.random() - 0.5) * 8, now);
+        
+        const vol = 0.8 / (index * 1.5 + 1);
+        oscGain.gain.setValueAtTime(vol, now);
+        
+        osc.connect(oscGain);
+        oscGain.connect(strikeGain);
+        osc.start(now);
+        osc.stop(now + 5.5);
+        oscillators.push({ osc, oscGain });
+    });
+    
+    setTimeout(() => {
+        oscillators.forEach(o => {
+            try { o.osc.disconnect(); o.oscGain.disconnect(); } catch(e) {}
+        });
+        try {
+            strikeGain.disconnect();
+            if (panner) panner.disconnect();
+        } catch(e) {}
+    }, 6000);
+}
+
+function strikeSingingBowl() {
+    initAudioCtx();
+    const now = audioCtx.currentTime;
+    const baseFreq = 220;
+    
+    const bowlGain = audioCtx.createGain();
+    bowlGain.gain.setValueAtTime(0, now);
+    bowlGain.gain.linearRampToValueAtTime(0.25, now + 0.05);
+    bowlGain.gain.exponentialRampToValueAtTime(0.0001, now + 7.5);
+    
+    // Slow stereo sweep wash
+    const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+    if (panner) {
+        panner.pan.setValueAtTime(-0.75, now);
+        panner.pan.linearRampToValueAtTime(0.75, now + 6.0);
+        bowlGain.connect(panner);
+        panner.connect(getZenMasterGain());
+    } else {
+        bowlGain.connect(getZenMasterGain());
+    }
+    
+    const components = [
+        { ratio: 1.0, type: 'sine', vol: 1.0 },
+        { ratio: 1.006, type: 'sine', vol: 0.85 },
+        { ratio: 1.5, type: 'sine', vol: 0.55 },
+        { ratio: 2.2, type: 'sine', vol: 0.45 },
+        { ratio: 2.76, type: 'sine', vol: 0.35 },
+        { ratio: 3.8, type: 'sine', vol: 0.25 }
+    ];
+    
+    const tremoloLfo = audioCtx.createOscillator();
+    tremoloLfo.type = 'sine';
+    tremoloLfo.frequency.setValueAtTime(1.5, now);
+    
+    const tremoloGain = audioCtx.createGain();
+    tremoloGain.gain.setValueAtTime(0.7, now);
+    
+    const lfoDepth = audioCtx.createGain();
+    lfoDepth.gain.setValueAtTime(0.3, now);
+    tremoloLfo.connect(lfoDepth);
+    lfoDepth.connect(tremoloGain.gain);
+    
+    tremoloGain.connect(bowlGain);
+    
+    const nodes = [];
+    components.forEach(comp => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = comp.type;
+        osc.frequency.setValueAtTime(baseFreq * comp.ratio, now);
+        osc.detune.setValueAtTime((Math.random() - 0.5) * 5, now);
+        
+        gain.gain.setValueAtTime(comp.vol, now);
+        
+        osc.connect(gain);
+        gain.connect(tremoloGain);
+        
+        osc.start(now);
+        osc.stop(now + 8.5);
+        
+        nodes.push({ osc, gain });
+    });
+    
+    tremoloLfo.start(now);
+    tremoloLfo.stop(now + 8.5);
+    
+    const bowlBtn = document.getElementById('sound-btn-bowl');
+    if (bowlBtn) {
+        bowlBtn.classList.add('striking');
+        setTimeout(() => {
+            bowlBtn.classList.remove('striking');
+        }, 800);
+    }
+    
+    const eq = document.getElementById('soundscape-eq');
+    if (eq) {
+        eq.classList.add('striking');
+        setTimeout(() => {
+            eq.classList.remove('striking');
+        }, 800);
+    }
+    
+    if (zenCanvas) {
+        const w = zenCanvas.width;
+        const h = zenCanvas.height;
+        zenRipples.push({
+            x: w / 2,
+            y: h / 2,
+            radius: 10,
+            maxRadius: Math.max(w, h) * 0.9,
+            speed: 3.5,
+            alpha: 0.9,
+            isBowlPulse: true
+        });
+    }
+    
+    const breatherBubble = document.getElementById('zen-breather-bubble');
+    if (breatherBubble) {
+        breatherBubble.classList.add('bowl-pulse');
+        setTimeout(() => {
+            breatherBubble.classList.remove('bowl-pulse');
+        }, 2000);
+    }
+    
+    setTimeout(() => {
+        nodes.forEach(n => {
+            try { n.osc.disconnect(); n.gain.disconnect(); } catch(e) {}
+        });
+        try {
+            tremoloLfo.disconnect();
+            lfoDepth.disconnect();
+            tremoloGain.disconnect();
+            bowlGain.disconnect();
+            if (panner) panner.disconnect();
+        } catch(e) {}
+    }, 9500);
+}
+
+// ==========================================
+// Canvas Interactive Modes
+// ==========================================
 class ZenParticle {
     constructor(w, h) {
         this.reset(w, h);
@@ -3369,46 +4081,172 @@ class ZenParticle {
     reset(w, h) {
         this.x = Math.random() * w;
         this.y = Math.random() * h;
-        this.vx = (Math.random() - 0.5) * 0.4;
-        this.vy = (Math.random() - 0.5) * 0.4;
-        this.baseSize = Math.random() * 2 + 1;
-        this.size = this.baseSize;
-        this.colorVal = Math.random();
-        this.alpha = Math.random() * 0.5 + 0.3;
-    }
-    update(w, h, breathFactor) {
-        this.x += this.vx;
-        this.y += this.vy;
         
-        if (this.x < 0 || this.x > w) this.vx *= -1;
-        if (this.y < 0 || this.y > h) this.vy *= -1;
-        
-        if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
-            const dx = zenMouse.x - this.x;
-            const dy = zenMouse.y - this.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 120) {
-                const force = (120 - dist) / 120;
-                this.x -= (dx / dist) * force * 1.5;
-                this.y -= (dy / dist) * force * 1.5;
+        if (zenVisualizerMode === 'forest') {
+            this.x = Math.random() * w;
+            this.isMote = Math.random() < 0.45; // 45% are micro dust motes
+            if (this.isMote) {
+                this.y = Math.random() * h;
+                this.vx = (Math.random() - 0.5) * 0.15;
+                this.vy = -0.1 - Math.random() * 0.2; // slow drift
+                this.baseSize = Math.random() * 1.2 + 0.8;
+                this.alpha = Math.random() * 0.4 + 0.1;
+            } else {
+                this.y = h + Math.random() * 50;
+                this.vx = (Math.random() - 0.5) * 0.3;
+                this.vy = -0.4 - Math.random() * 0.6;
+                this.baseSize = Math.random() * 2 + 1;
+                this.alpha = Math.random() * 0.6 + 0.2;
             }
+        } else if (zenVisualizerMode === 'ocean') {
+            this.x = Math.random() * w;
+            this.y = Math.random() * h;
+            this.vx = (Math.random() - 0.5) * 0.2;
+            this.vy = -0.2 - Math.random() * 0.3;
+            this.alpha = Math.random() * 0.4 + 0.1;
+            this.baseSize = Math.random() * 3 + 1.5;
+        } else {
+            this.x = Math.random() * w;
+            this.y = Math.random() * h;
+            this.vx = (Math.random() - 0.5) * 0.4;
+            this.vy = (Math.random() - 0.5) * 0.4;
+            this.alpha = Math.random() * 0.5 + 0.3;
+            this.baseSize = Math.random() * 2 + 1;
         }
         
-        this.size = this.baseSize * (1 + breathFactor * 1.2);
+        this.size = this.baseSize;
+        this.colorVal = Math.random();
+        this.glowSpeed = 0.02 + Math.random() * 0.03;
+        this.glowPhase = Math.random() * Math.PI * 2;
+    }
+    update(w, h, breathFactor) {
+        if (zenVisualizerMode === 'cosmic') {
+            const cx = w / 2;
+            const cy = h / 2;
+            const dx = cx - this.x;
+            const dy = cy - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            
+            const gravity = 0.02 * (1 + breathFactor * 1.5);
+            this.vx += (dx / dist) * gravity;
+            this.vy += (dy / dist) * gravity;
+            
+            const ox = -dy;
+            const oy = dx;
+            const orbit = 0.05 * (1 + breathFactor * 0.8);
+            this.vx += (ox / dist) * orbit;
+            this.vy += (oy / dist) * orbit;
+            
+            this.vx *= 0.98;
+            this.vy *= 0.98;
+            
+            this.x += this.vx;
+            this.y += this.vy;
+            
+            if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
+                const mdx = zenMouse.x - this.x;
+                const mdy = zenMouse.y - this.y;
+                const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                if (mdist < 100) {
+                    const force = (100 - mdist) / 100;
+                    this.x -= (mdx / mdist) * force * 2.0;
+                    this.y -= (mdy / mdist) * force * 2.0;
+                }
+            }
+            this.size = this.baseSize * (1 + breathFactor * 1.2);
+            
+        } else if (zenVisualizerMode === 'forest') {
+            if (this.isMote) {
+                this.y += this.vy;
+                this.x += this.vx + Math.sin(Date.now() / 1500 + this.colorVal * 5) * 0.08;
+                this.alpha = 0.1 + Math.sin(Date.now() * this.glowSpeed + this.glowPhase) * 0.25;
+                if (this.y < -10) this.reset(w, h);
+            } else {
+                this.y += this.vy * (1 + breathFactor * 0.5);
+                this.x += this.vx + Math.sin(Date.now() / 1000 + this.colorVal * 10) * 0.15;
+                
+                if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
+                    const mdx = zenMouse.x - this.x;
+                    const mdy = zenMouse.y - this.y;
+                    const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                    if (mdist < 120) {
+                        const force = (120 - mdist) / 120;
+                        this.x -= (mdx / mdist) * force * 2.5;
+                        this.y -= (mdy / mdist) * force * 2.5;
+                    }
+                }
+                
+                if (this.y < -10 || this.x < -10 || this.x > w + 10) {
+                    this.reset(w, h);
+                }
+            }
+            this.size = this.baseSize * (1 + breathFactor * 0.8);
+            
+        } else if (zenVisualizerMode === 'ocean') {
+            this.y += this.vy * (1 + breathFactor * 0.3);
+            this.x += this.vx;
+            this.x += Math.sin(Date.now() / 2000 + this.y * 0.01) * 0.1;
+            
+            if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
+                const mdx = zenMouse.x - this.x;
+                const mdy = zenMouse.y - this.y;
+                const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                if (mdist < 150) {
+                    const force = (150 - mdist) / 150;
+                    this.x += (mdx / mdist) * force * 0.5;
+                    this.y += (mdy / mdist) * force * 0.5;
+                }
+            }
+            
+            if (this.y < -20 || this.x < -20 || this.x > w + 20) {
+                this.reset(w, h);
+            }
+            this.size = this.baseSize * (1 + breathFactor * 0.5);
+        }
     }
     draw(ctx) {
         let r, g, b;
-        if (this.colorVal < 0.4) {
-            r = 45; g = 212; b = 168;
-        } else if (this.colorVal < 0.8) {
-            r = 167; g = 139; b = 250;
-        } else {
-            r = 251; g = 191; b = 36;
+        if (zenVisualizerMode === 'cosmic') {
+            if (this.colorVal < 0.4) {
+                r = 45; g = 212; b = 168;
+            } else if (this.colorVal < 0.8) {
+                r = 167; g = 139; b = 250;
+            } else {
+                r = 251; g = 191; b = 36;
+            }
+        } else if (zenVisualizerMode === 'forest') {
+            if (this.isMote) {
+                r = 253; g = 230; b = 138;
+            } else {
+                if (this.colorVal < 0.5) {
+                    r = 16; g = 185; b = 129;
+                } else if (this.colorVal < 0.85) {
+                    r = 245; g = 158; b = 11;
+                } else {
+                    r = 253; g = 230; b = 138;
+                }
+            }
+        } else if (zenVisualizerMode === 'ocean') {
+            if (this.colorVal < 0.5) {
+                r = 56; g = 189; b = 248;
+            } else if (this.colorVal < 0.85) {
+                r = 14; g = 165; b = 233;
+            } else {
+                r = 45; g = 212; b = 168;
+            }
         }
+        
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        
+        if (zenVisualizerMode === 'forest') {
+            ctx.shadowBlur = this.size * 3.5;
+            ctx.shadowColor = `rgba(${r}, ${g}, ${b}, ${this.alpha * 0.9})`;
+        }
+        
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${this.alpha})`;
         ctx.fill();
+        ctx.shadowBlur = 0;
     }
 }
 
@@ -3427,6 +4265,7 @@ function initZenCanvas() {
     zenCanvas.addEventListener('mousemove', handleZenMouseMove);
     zenCanvas.addEventListener('mouseleave', handleZenMouseLeave);
     zenCanvas.addEventListener('mouseenter', handleZenMouseEnter);
+    zenCanvas.addEventListener('mousedown', handleZenCanvasClick);
     window.addEventListener('resize', resizeZenCanvas);
     
     zenStartTime = Date.now();
@@ -3444,7 +4283,10 @@ function stopZenCanvas() {
         zenCanvas.removeEventListener('mousemove', handleZenMouseMove);
         zenCanvas.removeEventListener('mouseleave', handleZenMouseLeave);
         zenCanvas.removeEventListener('mouseenter', handleZenMouseEnter);
+        zenCanvas.removeEventListener('mousedown', handleZenCanvasClick);
+        zenCanvas = null;
     }
+    zenCtx = null;
     window.removeEventListener('resize', resizeZenCanvas);
 }
 
@@ -3455,7 +4297,7 @@ function resizeZenCanvas() {
     zenCanvas.height = rect.height;
     
     zenParticles.forEach(p => {
-        if (p.x > zenCanvas.width || p.y > zenCanvas.height) {
+        if (p.reset && (p.x > zenCanvas.width || p.y > zenCanvas.height)) {
             p.reset(zenCanvas.width, zenCanvas.height);
         }
     });
@@ -3478,10 +4320,321 @@ function handleZenMouseEnter() {
     zenMouse.active = true;
 }
 
+function handleZenCanvasClick(e) {
+    if (!zenCanvas) return;
+    const rect = zenCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    zenRipples.push({
+        x: x,
+        y: y,
+        radius: 0,
+        maxRadius: 180 + Math.random() * 70,
+        speed: 3 + Math.random() * 2,
+        alpha: 1.0
+    });
+    
+    if (zenRipples.length > 8) {
+        zenRipples.shift();
+    }
+
+    // Spark visual bursts in Cosmic and foam in Ocean
+    if (zenVisualizerMode === 'cosmic') {
+        for (let i = 0; i < 18; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 1.2 + Math.random() * 2.8;
+            zenParticles.push({
+                x: x,
+                y: y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                baseSize: Math.random() * 2.2 + 1.2,
+                size: 0,
+                colorVal: Math.random(),
+                alpha: 1.0,
+                isTemp: true,
+                life: 1.0,
+                update(w, h, breathFactor) {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.vx *= 0.96;
+                    this.vy *= 0.96;
+                    this.life -= 0.022;
+                    this.alpha = this.life;
+                    this.size = this.baseSize * this.life;
+                },
+                draw(ctx) {
+                    let r, g, b;
+                    if (this.colorVal < 0.4) {
+                        r = 45; g = 212; b = 168;
+                    } else if (this.colorVal < 0.8) {
+                        r = 167; g = 139; b = 250;
+                    } else {
+                        r = 251; g = 191; b = 36;
+                    }
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${this.alpha})`;
+                    ctx.fill();
+                }
+            });
+        }
+    } else if (zenVisualizerMode === 'ocean') {
+        for (let i = 0; i < 12; i++) {
+            zenParticles.push({
+                x: x + (Math.random() - 0.5) * 20,
+                y: y + (Math.random() - 0.5) * 10,
+                vx: (Math.random() - 0.5) * 0.8,
+                vy: -0.8 - Math.random() * 1.2,
+                baseSize: Math.random() * 3.5 + 2.0,
+                size: 0,
+                colorVal: Math.random(),
+                alpha: 0.8,
+                isTemp: true,
+                life: 1.0,
+                update(w, h, breathFactor) {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.vy *= 0.97;
+                    this.life -= 0.015;
+                    this.alpha = this.life * 0.65;
+                    this.size = this.baseSize * (0.5 + this.life * 0.5);
+                },
+                draw(ctx) {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${this.alpha})`;
+                    ctx.lineWidth = 1.0;
+                    ctx.stroke();
+                }
+            });
+        }
+    }
+}
+
+function setZenVisualizerMode(mode) {
+    zenVisualizerMode = mode;
+    
+    document.querySelectorAll('.zen-visualizer-bar .filter-pill').forEach(btn => {
+        if (btn.id === `zen-mode-${mode}`) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    const container = document.querySelector('.zen-canvas-container');
+    if (container) {
+        container.classList.remove('visualizer-cosmic', 'visualizer-ocean', 'visualizer-forest');
+        container.classList.add(`visualizer-${mode}`);
+    }
+    
+    if (zenCanvas) {
+        resizeZenCanvas();
+        zenParticles = [];
+        for (let i = 0; i < MAX_ZEN_PARTICLES; i++) {
+            zenParticles.push(new ZenParticle(zenCanvas.width, zenCanvas.height));
+        }
+    }
+    
+    showToast(`Visualizer mode set to ${mode.toUpperCase()} ✨`);
+}
+
 function resetZenParticles() {
     if (!zenCanvas) return;
-    zenParticles.forEach(p => p.reset(zenCanvas.width, zenCanvas.height));
+    zenParticles = [];
+    for (let i = 0; i < MAX_ZEN_PARTICLES; i++) {
+        zenParticles.push(new ZenParticle(zenCanvas.width, zenCanvas.height));
+    }
     showToast("Stardust regenerated ✨");
+}
+
+function drawForestLightBeams(ctx, w, h, elapsed, breathFactor) {
+    // 1. Golden Sunburst Glow & Lens Flare Ring
+    ctx.save();
+    const sunGrad = ctx.createRadialGradient(w * 0.85, 0, 5, w * 0.85, 0, Math.max(120, w * 0.35 * (0.8 + breathFactor * 0.4)));
+    sunGrad.addColorStop(0, `rgba(253, 230, 138, ${0.18 + breathFactor * 0.12})`);
+    sunGrad.addColorStop(0.4, `rgba(245, 158, 11, ${0.06 + breathFactor * 0.04})`);
+    sunGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(w * 0.85, 0, w * 0.35 * (0.8 + breathFactor * 0.4), 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Lens flare ring
+    if (breathFactor > 0.15) {
+        ctx.beginPath();
+        ctx.arc(w * 0.85, 0, w * 0.48 * (0.85 + breathFactor * 0.15), 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(253, 230, 138, ${(breathFactor - 0.15) * 0.045})`;
+        ctx.lineWidth = 2.5 + breathFactor * 5.0;
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // 2. Crepuscular Light Beams (God Rays)
+    const numBeams = 5;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    
+    for (let i = 0; i < numBeams; i++) {
+        const timeScale = elapsed * 0.1 + i * 0.7;
+        const angleOffset = Math.sin(timeScale) * (w * 0.12) + Math.cos(timeScale * 0.55) * (w * 0.035);
+        
+        const startX = (w / (numBeams + 1)) * (i + 1) + Math.cos(timeScale * 0.65) * (w * 0.03);
+        const topWidth = 25 + Math.sin(timeScale) * 8;
+        const bottomWidth = 160 + Math.cos(timeScale * 0.95) * 45;
+        
+        const endX = startX + angleOffset;
+        
+        const baseAlpha = 0.025 + 0.02 * Math.sin(timeScale * 0.4);
+        const breathAlpha = breathFactor * 0.085;
+        const alpha = Math.max(0.012, baseAlpha + breathAlpha);
+        
+        const grad = ctx.createLinearGradient(startX, 0, endX, h);
+        grad.addColorStop(0, `rgba(253, 230, 138, ${alpha})`);
+        grad.addColorStop(0.22, `rgba(251, 191, 36, ${alpha * 0.8})`);
+        grad.addColorStop(0.65, `rgba(16, 185, 129, ${alpha * 0.45})`);
+        grad.addColorStop(1, `rgba(16, 185, 129, 0)`);
+        
+        ctx.beginPath();
+        ctx.moveTo(startX - topWidth / 2, 0);
+        ctx.lineTo(startX + topWidth / 2, 0);
+        ctx.lineTo(endX + bottomWidth / 2, h);
+        ctx.lineTo(endX - bottomWidth / 2, h);
+        ctx.closePath();
+        
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
+    ctx.restore();
+
+    // 3. Dynamic Swaying Leaf Canopy Silhouette
+    ctx.save();
+    ctx.fillStyle = 'rgba(6, 20, 10, 0.45)';
+    if (document.body.classList.contains('theme-light')) {
+        ctx.fillStyle = 'rgba(16, 85, 49, 0.08)'; // Soft translucent green in light theme
+    }
+    
+    // Wind soughing offset
+    const wind = Math.sin(elapsed * 0.07) * 14;
+    
+    // Top-left clump
+    ctx.beginPath();
+    ctx.moveTo(-40, -40);
+    ctx.quadraticCurveTo(w * 0.22 + wind, h * 0.18 + wind * 0.3, w * 0.38 + wind, -40);
+    ctx.quadraticCurveTo(w * 0.18 + wind * 0.5, h * 0.06, -40, -40);
+    ctx.fill();
+    
+    // Top-right clump sifting sun shafts
+    ctx.beginPath();
+    ctx.moveTo(w + 40, -40);
+    ctx.quadraticCurveTo(w * 0.62 + wind * 0.8, h * 0.24 + wind * 0.4, w * 0.42 + wind * 0.6, -40);
+    ctx.quadraticCurveTo(w * 0.78 + wind * 0.3, h * 0.08, w + 40, -40);
+    ctx.fill();
+    
+    // Helper function to draw organic hanging leaves soughing in wind
+    const drawLeaf = (lx, ly, lsize, langle) => {
+        ctx.save();
+        ctx.translate(lx, ly);
+        ctx.rotate(langle * Math.PI / 180);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(lsize * 0.5, -lsize * 0.35, lsize, 0);
+        ctx.quadraticCurveTo(lsize * 0.5, lsize * 0.35, 0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    };
+    
+    // Soughing leaves
+    drawLeaf(w * 0.15 + wind, h * 0.08, 28, 40 + wind * 0.15);
+    drawLeaf(w * 0.28 + wind * 1.1, h * 0.13, 20, -30 + wind * 0.2);
+    drawLeaf(w * 0.52 + wind * 0.8, h * 0.15, 24, 20 - wind * 0.1);
+    drawLeaf(w * 0.75 + wind * 0.6, h * 0.19, 30, -60 + wind * 0.08);
+    
+    ctx.restore();
+}
+
+function drawOceanWaves(ctx, w, h, elapsed, breathFactor) {
+    // Under water light shafts sifting caustics
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const numShafts = 2;
+    for (let i = 0; i < numShafts; i++) {
+        const time = elapsed * 0.1 + i * 1.2;
+        const startX = w * 0.1 + Math.sin(time) * 40;
+        const endX = w * 0.6 + Math.cos(time) * 100;
+        const alpha = 0.02 + 0.02 * Math.sin(time * 0.5) + breathFactor * 0.03;
+        
+        const grad = ctx.createLinearGradient(startX, 0, endX, h);
+        grad.addColorStop(0, `rgba(56, 189, 248, ${alpha})`);
+        grad.addColorStop(0.7, `rgba(45, 212, 168, ${alpha * 0.3})`);
+        grad.addColorStop(1, 'transparent');
+        
+        ctx.beginPath();
+        ctx.moveTo(startX - 20, 0);
+        ctx.lineTo(startX + 20, 0);
+        ctx.lineTo(endX + 80, h * 0.7);
+        ctx.lineTo(endX - 80, h * 0.7);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
+    ctx.restore();
+
+    const waveLayers = [
+        { amp: 35, waveLen: 0.005, speed: 1.2, color: '56, 189, 248', baseHeight: h * 0.65 },
+        { amp: 25, waveLen: 0.008, speed: 1.8, color: '14, 165, 233', baseHeight: h * 0.72 },
+        { amp: 18, waveLen: 0.012, speed: 2.3, color: '45, 212, 168', baseHeight: h * 0.80 }
+    ];
+    
+    ctx.save();
+    waveLayers.forEach(layer => {
+        ctx.beginPath();
+        
+        for (let x = 0; x <= w + 8; x += 8) {
+            const timeTerm = (elapsed * layer.speed);
+            const rawAmp = layer.amp * (1 + breathFactor * 0.8);
+            let y = layer.baseHeight + Math.sin(x * layer.waveLen + timeTerm) * rawAmp;
+            
+            zenRipples.forEach(rip => {
+                const dx = x - rip.x;
+                const dist = Math.abs(dx);
+                if (dist < rip.radius && dist > rip.radius - 40) {
+                    const factor = (40 - (rip.radius - dist)) / 40;
+                    const rippleDisplacement = Math.sin((rip.radius - dist) * 0.2) * 15 * rip.alpha * factor;
+                    y += rippleDisplacement;
+                }
+            });
+            
+            if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
+                const distToCursor = Math.abs(x - zenMouse.x);
+                if (distToCursor < 120) {
+                    const depth = (120 - distToCursor) / 120;
+                    y += Math.sin(elapsed * 5) * 8 * depth;
+                }
+            }
+            
+            if (x === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        
+        ctx.fillStyle = `rgba(${layer.color}, 0.25)`;
+        ctx.fill();
+        
+        ctx.strokeStyle = `rgba(${layer.color}, 0.75)`;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+    });
+    ctx.restore();
 }
 
 function animateZen() {
@@ -3490,8 +4643,6 @@ function animateZen() {
     const w = zenCanvas.width;
     const h = zenCanvas.height;
     
-    zenCtx.clearRect(0, 0, w, h);
-    
     const elapsed = (Date.now() - zenStartTime) / 1000;
     const cycleTime = elapsed % 16.0;
     
@@ -3499,50 +4650,149 @@ function animateZen() {
     let breathText = "";
     let breathColor = "rgba(45, 212, 168, 0.4)";
     let textGlowColor = "#2dd4a8";
+    let breathPhase = "";
     
     if (cycleTime < 4.0) {
         breathFactor = cycleTime / 4.0;
         breathText = "Inhale";
         breathColor = "rgba(45, 212, 168, 0.35)";
         textGlowColor = "#2dd4a8";
+        breathPhase = "inhale";
     } else if (cycleTime < 8.0) {
         breathFactor = 1.0;
         breathText = "Hold";
         breathColor = "rgba(251, 191, 36, 0.35)";
         textGlowColor = "#fbbf24";
+        breathPhase = "hold-in";
     } else if (cycleTime < 12.0) {
         breathFactor = 1.0 - (cycleTime - 8.0) / 4.0;
         breathText = "Exhale";
         breathColor = "rgba(167, 139, 250, 0.35)";
         textGlowColor = "#a78bfa";
+        breathPhase = "exhale";
     } else {
         breathFactor = 0.0;
         breathText = "Hold";
         breathColor = "rgba(244, 63, 94, 0.35)";
         textGlowColor = "#f43f5e";
+        breathPhase = "hold-out";
     }
+
+    // Real-time Audio Synth breathing integration
+    try {
+        if (audioCtx && activeZenSounds.drone) {
+            if (zenPadFilter && zenPadGain) {
+                const targetFreq = 200 + breathFactor * 450; // sweeps cutoff 200Hz to 650Hz
+                zenPadFilter.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.1);
+                
+                const targetVol = 0.08 + breathFactor * 0.12;
+                zenPadGain.gain.setTargetAtTime(targetVol * zenMasterVolume, audioCtx.currentTime, 0.15);
+            }
+            if (zenDroneGain) {
+                const targetDroneVol = 0.22 + breathFactor * 0.18;
+                zenDroneGain.gain.setTargetAtTime(targetDroneVol * zenMasterVolume, audioCtx.currentTime, 0.1);
+            }
+        }
+    } catch (e) {
+        console.warn("Web Audio breathing parameters update failed:", e);
+    }
+    
+    if (zenVisualizerMode === 'cosmic') {
+        zenCtx.fillStyle = 'rgba(5, 5, 11, 0.18)';
+        zenCtx.fillRect(0, 0, w, h);
+        
+        // Draw cosmic breathing nebula glow
+        const nebulaGrad = zenCtx.createRadialGradient(w/2, h/2, 10, w/2, h/2, Math.max(100, (w+h)/4.2 * (0.85 + breathFactor * 0.35)));
+        nebulaGrad.addColorStop(0, `rgba(167, 139, 250, ${0.08 + breathFactor * 0.05})`);
+        nebulaGrad.addColorStop(0.4, `rgba(45, 212, 168, ${0.04 + breathFactor * 0.03})`);
+        nebulaGrad.addColorStop(1, 'transparent');
+        zenCtx.fillStyle = nebulaGrad;
+        zenCtx.fillRect(0, 0, w, h);
+    } else {
+        zenCtx.clearRect(0, 0, w, h);
+    }
+    
+    if (zenVisualizerMode === 'forest') {
+        drawForestLightBeams(zenCtx, w, h, elapsed, breathFactor);
+    } else if (zenVisualizerMode === 'ocean') {
+        drawOceanWaves(zenCtx, w, h, elapsed, breathFactor);
+    }
+
+    // Trigger visual phase ripple when breathing shifts phases
+    if (lastBreathPhase !== breathPhase) {
+        let rippleColor = '56, 189, 248';
+        if (breathPhase === 'hold-in') rippleColor = '251, 191, 36';
+        else if (breathPhase === 'exhale') rippleColor = '167, 139, 250';
+        else if (breathPhase === 'hold-out') rippleColor = '244, 63, 94';
+        
+        zenRipples.push({
+            x: w / 2,
+            y: h / 2,
+            radius: 40,
+            maxRadius: Math.max(w, h) * 0.85,
+            speed: 2.5,
+            alpha: 0.7,
+            isBowlPulse: false,
+            color: rippleColor
+        });
+        lastBreathPhase = breathPhase;
+    }
+
+    // Draw general expansion ripples in all modes
+    zenCtx.save();
+    zenRipples.forEach(rip => {
+        rip.radius += rip.speed;
+        rip.alpha = 1.0 - (rip.radius / rip.maxRadius);
+        
+        if (rip.alpha <= 0) return;
+        
+        zenCtx.beginPath();
+        zenCtx.arc(rip.x, rip.y, rip.radius, 0, Math.PI * 2);
+        if (rip.isBowlPulse) {
+            zenCtx.strokeStyle = `rgba(251, 191, 36, ${rip.alpha * 0.65})`;
+            zenCtx.lineWidth = 3.5;
+        } else if (rip.color) {
+            zenCtx.strokeStyle = `rgba(${rip.color}, ${rip.alpha * 0.45})`;
+            zenCtx.lineWidth = 2.5;
+        } else {
+            zenCtx.strokeStyle = `rgba(56, 189, 248, ${rip.alpha * 0.4})`;
+            zenCtx.lineWidth = 2;
+        }
+        zenCtx.stroke();
+    });
+    zenCtx.restore();
+
+    // Clean up expired ripples
+    zenRipples = zenRipples.filter(rip => rip.alpha > 0);
+
+    // Memory clean dead temp particles
+    zenParticles = zenParticles.filter(p => !p.isTemp || p.life > 0);
     
     zenParticles.forEach(p => {
         p.update(w, h, breathFactor);
         p.draw(zenCtx);
     });
     
-    for (let i = 0; i < zenParticles.length; i++) {
-        for (let j = i + 1; j < zenParticles.length; j++) {
-            const p1 = zenParticles[i];
-            const p2 = zenParticles[j];
-            const dx = p1.x - p2.x;
-            const dy = p1.y - p2.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            
-            if (dist < 60) {
-                const alpha = (60 - dist) / 60 * 0.15;
-                zenCtx.beginPath();
-                zenCtx.moveTo(p1.x, p1.y);
-                zenCtx.lineTo(p2.x, p2.y);
-                zenCtx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
-                zenCtx.lineWidth = 0.5;
-                zenCtx.stroke();
+    if (zenVisualizerMode === 'cosmic') {
+        for (let i = 0; i < zenParticles.length; i++) {
+            if (zenParticles[i].isTemp) continue;
+            for (let j = i + 1; j < zenParticles.length; j++) {
+                if (zenParticles[j].isTemp) continue;
+                const p1 = zenParticles[i];
+                const p2 = zenParticles[j];
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 60) {
+                    const alpha = (60 - dist) / 60 * 0.15;
+                    zenCtx.beginPath();
+                    zenCtx.moveTo(p1.x, p1.y);
+                    zenCtx.lineTo(p2.x, p2.y);
+                    zenCtx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                    zenCtx.lineWidth = 0.5;
+                    zenCtx.stroke();
+                }
             }
         }
     }
@@ -3552,11 +4802,27 @@ function animateZen() {
     if (breatherBubble && breatherText) {
         const scaleVal = 1 + breathFactor * 0.8;
         breatherBubble.style.transform = `translate(-50%, -50%) scale(${scaleVal})`;
-        breatherBubble.style.borderColor = breathColor;
-        breatherBubble.style.boxShadow = `0 0 ${20 + breathFactor * 25}px ${breathColor}`;
+        
+        const phases = ["inhale", "hold-in", "exhale", "hold-out"];
+        phases.forEach(p => {
+            if (p === breathPhase) {
+                breatherBubble.classList.add(p);
+            } else {
+                breatherBubble.classList.remove(p);
+            }
+        });
         
         breatherText.textContent = breathText;
         breatherText.style.color = textGlowColor;
+    }
+
+    // Draw visual lightning flashes overlay
+    if (lightningFlashAlpha > 0) {
+        zenCtx.save();
+        zenCtx.fillStyle = `rgba(255, 255, 255, ${lightningFlashAlpha})`;
+        zenCtx.fillRect(0, 0, w, h);
+        zenCtx.restore();
+        lightningFlashAlpha -= 0.045; // decays over 12 frames
     }
     
     zenAnimFrame = requestAnimationFrame(animateZen);
@@ -3892,6 +5158,110 @@ async function saveZenWordReflection() {
         }
     } catch(e) {
         showToast("Network error saving reflection.", true);
+    }
+}
+
+// Global App Theme Switcher
+function initAppTheme() {
+    const savedTheme = localStorage.getItem('mindflow-theme') || 'cosmic';
+    setAppTheme(savedTheme, false); // Apply theme on boot without visual toast
+}
+
+function setAppTheme(themeName, showNotification = true) {
+    // 1. Clean theme body classes
+    document.body.classList.remove('theme-cosmic', 'theme-ocean', 'theme-forest', 'theme-light');
+    
+    // 2. Add current theme class
+    document.body.classList.add('theme-' + themeName);
+    
+    // 3. Save choice in local storage
+    localStorage.setItem('mindflow-theme', themeName);
+    
+    // 4. Highlight active indicator button in the sidebar
+    const btns = document.querySelectorAll('.theme-select-btn');
+    btns.forEach(btn => {
+        if (btn.id === `theme-btn-${themeName}`) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // 5. Auto-sync Zen visualizer mode for maximum aesthetic immersion
+    if (typeof setZenVisualizerMode === 'function') {
+        if (themeName === 'cosmic' && typeof zenVisualizerMode !== 'undefined' && zenVisualizerMode !== 'cosmic') {
+            setZenVisualizerMode('cosmic');
+        } else if (themeName === 'ocean' && typeof zenVisualizerMode !== 'undefined' && zenVisualizerMode !== 'ocean') {
+            setZenVisualizerMode('ocean');
+        } else if (themeName === 'forest' && typeof zenVisualizerMode !== 'undefined' && zenVisualizerMode !== 'forest') {
+            setZenVisualizerMode('forest');
+        } else if (themeName === 'light' && typeof zenVisualizerMode !== 'undefined' && zenVisualizerMode !== 'forest') {
+            setZenVisualizerMode('forest');
+        }
+    }
+    
+    // 6. Show premium transition confirmation toast
+    if (showNotification) {
+        const themeNamesMap = {
+            'cosmic': 'Cosmic Flow',
+            'ocean': 'Ocean Waves',
+            'forest': 'Forest Light',
+            'light': 'Solar Breeze'
+        };
+        showToast(`Theme switched to ${themeNamesMap[themeName]}! 🎨`);
+    }
+}
+
+// Focus Timeline Hover Tooltip Helpers
+function showTooltipForSegment(seg) {
+    const tooltip = document.getElementById('timeline-tooltip');
+    if (!tooltip || !seg) return;
+    
+    const mode = seg.dataset.mode;
+    const startTimeStr = seg.dataset.startTime;
+    const endTimeStr = seg.dataset.endTime;
+    const durationText = seg.dataset.duration;
+    const brainDump = seg.dataset.brainDump;
+    const leftPct = parseFloat(seg.dataset.leftPct);
+    const widthPct = parseFloat(seg.dataset.widthPct);
+    
+    let modeColorVar = 'var(--neutral-color)';
+    let modeLabel = 'Neutral';
+    if (mode === 'work') {
+        modeColorVar = 'var(--work-color)';
+        modeLabel = 'Focus';
+    } else if (mode === 'recharge') {
+        modeColorVar = 'var(--recharge-color)';
+        modeLabel = 'Recharge';
+    } else if (mode === 'rest') {
+        modeColorVar = 'var(--rest-color)';
+        modeLabel = 'Rest';
+    }
+    
+    let tooltipHtml = `
+        <strong style="color: ${modeColorVar}; text-transform: uppercase; font-size: 0.8rem; display: block; margin-bottom: 0.25rem; font-weight: 700; letter-spacing: 0.05em;">${modeLabel} Session</strong>
+        <span style="display: block; color: var(--text-secondary); margin-bottom: 0.15rem; font-weight: 500;">🕒 ${startTimeStr} - ${endTimeStr} (${durationText})</span>
+    `;
+    
+    if (brainDump) {
+        tooltipHtml += `
+            <div style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 0.35rem; padding-top: 0.35rem; display: flex; flex-direction: column; gap: 0.1rem;">
+                <span style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em;">Save-State:</span>
+                <span style="color: var(--text-primary); font-style: italic; font-size: 0.72rem; white-space: normal; max-width: 260px; line-height: 1.3;">"${escapeHtml(brainDump)}"</span>
+            </div>
+        `;
+    }
+    
+    tooltip.innerHTML = tooltipHtml;
+    tooltip.style.borderColor = modeColorVar;
+    tooltip.style.left = `${leftPct + (widthPct / 2)}%`;
+    tooltip.style.opacity = '1';
+}
+
+function hideTooltip() {
+    const tooltip = document.getElementById('timeline-tooltip');
+    if (tooltip) {
+        tooltip.style.opacity = '0';
     }
 }
 
