@@ -395,7 +395,8 @@ body.resizing * {
     padding: 2.75rem 3rem;
     overflow-y: auto;
     scroll-behavior: smooth;
-    max-height: 100%; /* Constraint main content within grid row height */
+    height: 100%;
+    min-height: 0;
     width: 100%;
     max-width: 1440px;
     margin: 0 auto;
@@ -1799,7 +1800,6 @@ body.mode-rest .battery-charging-indicator {
 .rate-btn:focus-visible,
 .ref-tag:focus-visible,
 .app-action-btn:focus-visible,
-.manual-lockout-btn:focus-visible,
 .audio-toggle-btn:focus-visible {
     outline: 2px solid var(--active-mode-color, var(--work-color));
     outline-offset: 2px;
@@ -2499,30 +2499,6 @@ body.mode-rest .portal-sphere::after {
 
 /* [Liquid Battery Waves & Spark Particles removed - replaced with Segmented neon Capsule Cell blocks] */
 
-/* 3. Manual Lockout Button Styling */
-.manual-lockout-btn {
-    width: 100%;
-    background: rgba(251, 191, 36, 0.06);
-    border: 1px solid rgba(251, 191, 36, 0.22);
-    color: var(--rest-color);
-    padding: 0.65rem 0.85rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.75rem;
-    cursor: pointer;
-    font-weight: 600;
-    margin-top: 0.85rem;
-    transition: all 0.25s var(--transition-bounce);
-    box-shadow: 0 4px 15px rgba(251, 191, 36, 0.05);
-}
-.manual-lockout-btn:hover {
-    background: rgba(251, 191, 36, 0.12);
-    border-color: rgba(251, 191, 36, 0.5);
-    box-shadow: 0 4px 20px rgba(251, 191, 36, 0.2);
-    transform: translateY(-2px);
-}
-.manual-lockout-btn:active {
-    transform: translateY(0) scale(0.97);
-}
 
 /* 4. Focus Timeline Widget Styling */
 .timeline-card {
@@ -2616,7 +2592,7 @@ body.mode-rest .portal-sphere::after {
     content: '';
     position: absolute;
     bottom: -6px;
-    left: 50%;
+    left: var(--arrow-left, 50%);
     transform: translateX(-50%);
     border-width: 6px 6px 0;
     border-style: solid;
@@ -2677,7 +2653,7 @@ body.mode-rest .portal-sphere::after {
 /* Timeline Details Grid Layout */
 .timeline-details-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 2rem;
     margin-top: 0.5rem;
 }
@@ -2708,7 +2684,7 @@ body.mode-rest .portal-sphere::after {
     display: flex;
     flex-direction: column;
     gap: 0px; /* Stream connectors */
-    max-height: 280px;
+    max-height: 200px;
     overflow-y: auto;
     scroll-behavior: smooth;
     padding-right: 0.5rem;
@@ -3116,7 +3092,7 @@ body.mode-rest .portal-sphere::after {
 .app-stats-list-wrapper {
     flex: 1;
     overflow-y: auto;
-    max-height: 280px;
+    max-height: 200px;
     padding-right: 0.25rem;
 }
 
@@ -3979,7 +3955,7 @@ tr.roadblock-row {
     background: radial-gradient(circle at center, #0a1f2e 0%, #02070c 100%);
 }
 .zen-canvas-container.visualizer-forest {
-    background: radial-gradient(circle at center, #0c2013 0%, #030a06 100%);
+    background: radial-gradient(circle at center, #0a3d1c 0%, #021a0c 100%);
 }
 
 /* Light theme visualizer canvas container overrides */
@@ -3990,7 +3966,7 @@ body.theme-light .zen-canvas-container.visualizer-ocean {
     background: radial-gradient(circle at center, #ecfeff 0%, #d5f5f6 100%);
 }
 body.theme-light .zen-canvas-container.visualizer-forest {
-    background: radial-gradient(circle at center, #f0fdf4 0%, #def7e7 100%);
+    background: radial-gradient(circle at center, #e8f5e9 0%, #c8e6c9 100%);
 }
 body.theme-light .zen-breather {
     border-color: rgba(15, 23, 42, 0.15);

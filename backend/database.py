@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import re
 import tempfile
@@ -7,7 +8,19 @@ import copy
 import time
 from datetime import datetime
 
-DB_FILE = os.getenv("MINDFLOW_DB_FILE", r"C:\MIND\mind_flow_data.json")
+def get_default_data_dir():
+    legacy_dir = r"C:\MIND"
+    if os.path.exists(legacy_dir) and os.path.isdir(legacy_dir):
+        return legacy_dir
+    if sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            return os.path.join(appdata, "MIND")
+    home = os.path.expanduser("~")
+    return os.path.join(home, ".mindflow")
+
+DEFAULT_DATA_DIR = get_default_data_dir()
+DB_FILE = os.getenv("MINDFLOW_DB_FILE", os.path.join(DEFAULT_DATA_DIR, "mind_flow_data.json"))
 
 _keyword_regex_cache = {}
 _simulated_disk = {}
@@ -64,6 +77,14 @@ class MindFlowDB:
         }
         self._save_in_progress = False
         self._save_requested = False
+        self._adaptive_cache = {
+            "last_settings": None,
+            "last_sessions_len": -1,
+            "last_reflections_len": -1,
+            "last_checked_date": None,
+            "last_check_time": 0.0,
+            "result": None
+        }
         
         # Clean up orphaned temp files from previous runs
         if self.filepath != ":memory:":
@@ -212,7 +233,8 @@ class MindFlowDB:
         threading.Thread(target=run_coalesced, daemon=False).start()
 
     def get_settings(self):
-        return self.data["settings"]
+        with self.lock:
+            return self.data["settings"].copy()
 
     def get_current_goal(self):
         with self.lock:
@@ -277,52 +299,54 @@ class MindFlowDB:
             return self.get_hydration()
 
     def update_settings(self, settings_dict):
-        for k, v in settings_dict.items():
-            if k in DEFAULT_SETTINGS:
-                # Ensure type correctness and range safety to prevent application hangs/lockouts
-                if k in ["work_duration_minutes", "idle_timeout_seconds", "rest_duration_seconds"]:
-                    try:
-                        val = int(v)
-                        if k == "work_duration_minutes":
-                            val = max(10, min(180, val))
-                        elif k == "idle_timeout_seconds":
-                            val = max(10, min(3600, val))
-                        elif k == "rest_duration_seconds":
-                            val = max(5, min(600, val))
-                        self.data["settings"][k] = val
-                    except (ValueError, TypeError):
-                        pass
-                elif k in ["hydration_target", "hydration_increment"]:
-                    try:
-                        if k == "hydration_target":
+        with self.lock:
+            for k, v in settings_dict.items():
+                if k in DEFAULT_SETTINGS:
+                    # Ensure type correctness and range safety to prevent application hangs/lockouts
+                    if k in ["work_duration_minutes", "idle_timeout_seconds", "rest_duration_seconds"]:
+                        try:
                             val = int(v)
-                            val = max(1, min(10000, val))
-                        elif k == "hydration_increment":
-                            val = float(v)
-                            val = max(0.1, min(5000.0, val))
-                            if val.is_integer():
-                                val = int(val)
-                        self.data["settings"][k] = val
-                    except (ValueError, TypeError):
-                        pass
-                elif k == "hydration_unit":
-                    val = str(v).strip().lower()
-                    if val in ["cups", "ml", "oz"]:
-                        self.data["settings"][k] = val
-                elif k in ["adaptive_timers_enabled", "eye_care_mode"]:
-                    if isinstance(v, str):
-                        self.data["settings"][k] = v.lower() in ["true", "1", "yes"]
-                    else:
-                        self.data["settings"][k] = bool(v)
-                elif isinstance(v, list):
-                    # Filter, lowercase, and exclude generic browser names to prevent tracking hijacks
-                    disallowed = {"chrome.exe", "chrome", "msedge.exe", "msedge", "firefox.exe", "firefox", "opera.exe", "opera", "brave.exe", "brave", "iexplore.exe", "iexplore", "browser", "explorer"}
-                    filtered = [
-                        str(x).strip().lower() for x in v 
-                        if x and str(x).strip().lower() not in disallowed
-                    ]
-                    self.data["settings"][k] = filtered[:50]  # Cap keyword count
-        self.save()
+                            if k == "work_duration_minutes":
+                                val = max(10, min(180, val))
+                            elif k == "idle_timeout_seconds":
+                                val = max(10, min(3600, val))
+                            elif k == "rest_duration_seconds":
+                                val = max(5, min(600, val))
+                            self.data["settings"][k] = val
+                        except (ValueError, TypeError):
+                            pass
+                    elif k in ["hydration_target", "hydration_increment"]:
+                        try:
+                            if k == "hydration_target":
+                                val = int(v)
+                                val = max(1, min(10000, val))
+                            elif k == "hydration_increment":
+                                val = float(v)
+                                val = max(0.1, min(5000.0, val))
+                                if val.is_integer():
+                                    val = int(val)
+                            self.data["settings"][k] = val
+                        except (ValueError, TypeError):
+                            pass
+                    elif k == "hydration_unit":
+                        val = str(v).strip().lower()
+                        if val in ["cups", "ml", "oz"]:
+                            self.data["settings"][k] = val
+                    elif k in ["adaptive_timers_enabled", "eye_care_mode"]:
+                        if isinstance(v, str):
+                            self.data["settings"][k] = v.lower() in ["true", "1", "yes"]
+                        else:
+                            self.data["settings"][k] = bool(v)
+                    elif isinstance(v, list):
+                        # Filter, lowercase, and exclude generic browser names to prevent tracking hijacks
+                        disallowed = {"chrome.exe", "chrome", "msedge.exe", "msedge", "firefox.exe", "firefox", "opera.exe", "opera", "brave.exe", "brave", "iexplore.exe", "iexplore", "browser", "explorer"}
+                        filtered = [
+                            str(x).strip().lower() for x in v 
+                            if x and str(x).strip().lower() not in disallowed
+                        ]
+                        self.data["settings"][k] = filtered[:50]  # Cap keyword count
+            self.save()
+
 
     def log_session(self, mode, start_time, end_time, brain_dump=None, bypassed=False):
         """
@@ -355,10 +379,12 @@ class MindFlowDB:
         return reflection_entry
 
     def get_reflections(self):
-        return self.data["reflections"]
+        with self.lock:
+            return self.data["reflections"].copy()
 
     def get_sessions(self):
-        return self.data["sessions"]
+        with self.lock:
+            return self.data["sessions"].copy()
 
     def log_app_usage(self, process, title, duration):
         """
@@ -405,26 +431,46 @@ class MindFlowDB:
 
     def get_app_usage(self):
         with self.lock:
-            return self.data.setdefault("app_usage", [])
+            return self.data.setdefault("app_usage", []).copy()
 
     def get_adaptive_times(self):
         """Calculate dynamic work minutes and rest seconds based on reflections and bypasses."""
         with self.lock:
             settings = self.get_settings()
+            
+            # Check cache validity
+            today_date = datetime.today().date()
+            now_time = time.time()
+            cache = self._adaptive_cache
+            
+            if (cache["result"] is not None and
+                cache["last_settings"] == settings and
+                cache["last_sessions_len"] == len(self.data["sessions"]) and
+                cache["last_reflections_len"] == len(self.data["reflections"]) and
+                cache["last_checked_date"] == today_date and
+                (now_time - cache["last_check_time"]) < 10.0):
+                return cache["result"]
+
             base_work_minutes = settings.get("work_duration_minutes", 45)
             
             if not settings.get("adaptive_timers_enabled", True):
-                return {
+                result = {
                     "work_minutes": base_work_minutes,
                     "work_modifier": 0,
                     "rest_seconds": 20,
                     "rest_modifier": 0,
                     "reason": "Autopilot Off"
                 }
+                cache["last_settings"] = settings
+                cache["last_sessions_len"] = len(self.data["sessions"])
+                cache["last_reflections_len"] = len(self.data["reflections"])
+                cache["last_checked_date"] = today_date
+                cache["last_check_time"] = now_time
+                cache["result"] = result
+                return result
             
             # Count bypasses today (short-circuiting reverse search since sessions are chronological)
             bypasses_today = 0
-            today_date = datetime.today().date()
             for s in reversed(self.data.get("sessions", [])):
                 try:
                     start_dt = datetime.fromisoformat(s["start"])
@@ -502,11 +548,20 @@ class MindFlowDB:
                 
             reason_str = " | ".join(reasons) if reasons else "Default"
             
-            return {
+            result = {
                 "work_minutes": work_minutes,
                 "work_modifier": total_work_modifier,
                 "rest_seconds": rest_seconds,
                 "rest_modifier": total_rest_modifier,
                 "reason": reason_str
             }
+            
+            cache["last_settings"] = settings
+            cache["last_sessions_len"] = len(self.data["sessions"])
+            cache["last_reflections_len"] = len(self.data["reflections"])
+            cache["last_checked_date"] = today_date
+            cache["last_check_time"] = now_time
+            cache["result"] = result
+            
+            return result
 

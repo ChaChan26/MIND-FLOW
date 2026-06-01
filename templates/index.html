@@ -198,7 +198,6 @@
                                 <button type="button" class="app-action-btn work-add-btn" onclick="addCurrentAppToKeywords('work')">+ Work</button>
                                 <button type="button" class="app-action-btn recharge-add-btn" onclick="addCurrentAppToKeywords('recharge')">+ Recharge</button>
                             </div>
-                            <button type="button" class="manual-lockout-btn" id="manual-lockout-btn" onclick="triggerManualLockout()">🌿 Start Mindful Rest Break</button>
                         </div>
                     </div>
 
@@ -404,10 +403,18 @@
                 </header>
 
                 <div class="grid-layout">
-                    <!-- SVG Chart Card -->
                     <div class="card glass-card span-3 chart-card">
-                        <h3>Weekly Fatigue & Friction Analysis</h3>
-                        <p class="card-desc">Comparison of task friction against mental energy levels throughout the week.</p>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.5rem;">
+                            <div>
+                                <h3>Weekly Fatigue & Friction Analysis</h3>
+                                <p class="card-desc">Comparison of task friction against mental energy levels throughout the week.</p>
+                            </div>
+                            <div class="week-navigation" style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); align-self: flex-start;">
+                                <button type="button" class="week-nav-btn" id="prev-week-btn" onclick="navigateWeek(1)" style="background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0.5rem; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='none'" title="Previous Week">◀</button>
+                                <span id="current-week-label" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); min-width: 145px; text-align: center; white-space: nowrap; user-select: none;">Loading week...</span>
+                                <button type="button" class="week-nav-btn" id="next-week-btn" onclick="navigateWeek(-1)" style="background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0.5rem; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; opacity: 0.4;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='none'" title="Next Week" disabled>▶</button>
+                            </div>
+                        </div>
                         <div class="chart-container" id="chart-container">
                             <!-- Loading skeleton shown before data loads -->
                             <div class="skeleton-container" id="chart-skeleton">

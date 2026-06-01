@@ -48,7 +48,7 @@ def require_local_origin(f):
 
 # Adjust path to import from parent folder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from backend.database import MindFlowDB, matches_keyword
+from backend.database import MindFlowDB, matches_keyword, get_default_data_dir
 
 def get_resource_path(relative_path):
     """ Get absolute path to resource, prioritizing local disk paths before PyInstaller bundled ones """
@@ -56,8 +56,8 @@ def get_resource_path(relative_path):
         exe_dir = os.path.abspath(os.path.dirname(sys.executable))
         parent_dir = os.path.abspath(os.path.join(exe_dir, ".."))
         
-        # Check parent folder, executable folder, or hardcoded C:\MIND folder
-        for base in [parent_dir, exe_dir, r"C:\MIND"]:
+        # Check parent folder, executable folder, or portable data folder
+        for base in [parent_dir, exe_dir, get_default_data_dir()]:
             local_path = os.path.join(base, relative_path)
             if os.path.exists(local_path):
                 return local_path
@@ -104,8 +104,59 @@ def disable_caching(response):
     response.headers["Expires"] = "0"
     return response
 
+import threading
+
+class ThreadSafeDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._lock = threading.Lock()
+
+    def __getitem__(self, key):
+        with self._lock:
+            return super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        with self._lock:
+            super().__delitem__(key)
+
+    def __contains__(self, key):
+        with self._lock:
+            return super().__contains__(key)
+
+    def get(self, key, default=None):
+        with self._lock:
+            return super().get(key, default)
+
+    def setdefault(self, key, default=None):
+        with self._lock:
+            return super().setdefault(key, default)
+
+    def update(self, *args, **kwargs):
+        with self._lock:
+            super().update(*args, **kwargs)
+
+    def pop(self, *args):
+        with self._lock:
+            return super().pop(*args)
+
+    def clear(self):
+        with self._lock:
+            super().clear()
+
+    def copy(self):
+        with self._lock:
+            return super().copy()
+
+    @property
+    def lock(self):
+        return self._lock
+
 # In-memory shared state between Flask thread and Background Watcher thread
-shared_state = {
+shared_state = ThreadSafeDict({
     "current_mode": "neutral",
     "active_window_title": "Detecting...",
     "active_process_name": "Detecting...",
@@ -118,7 +169,8 @@ shared_state = {
     "last_app_process": None,
     "last_app_title": None,
     "app_accumulated_seconds": 0
-}
+})
+
 
 @app.route("/")
 def index():
@@ -185,7 +237,7 @@ def get_status():
     elif cur_mode == "recharge":
         today_recharge += elapsed
     elif cur_mode == "rest":
-        today_rest += idle
+        today_rest += elapsed
         
     # Dynamic companion advice generation
     companion_message = "Your cognitive shield is active. Looking good!"
@@ -239,11 +291,6 @@ def toggle_tracking():
     shared_state["tracking_active"] = enable
     return jsonify({"tracking_active": shared_state["tracking_active"]})
 
-@app.route("/api/status/lockout", methods=["POST"])
-@require_local_origin
-def trigger_manual_lockout():
-    shared_state["manual_lockout_requested"] = True
-    return jsonify({"status": "success", "message": "Manual lockout triggered"})
 
 @app.route("/api/settings", methods=["GET", "POST"])
 @require_local_origin
@@ -266,25 +313,19 @@ def manage_goal():
     else:
         return jsonify({"goal": db.get_current_goal()})
 
-def log_diagnostic(msg):
-    try:
-        with open("C:\\MIND\\app_diagnostics.log", "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
-    except Exception as e:
-        print(f"Error logging diagnostic: {e}", flush=True)
+
 
 @app.route("/api/hydration", methods=["GET", "POST"])
 @require_local_origin
 def manage_hydration():
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
-        log_diagnostic(f"[API hydration] POST received: data={data}")
+
         
         # SAFETY: Reject malformed or invalid JSON payloads when content is sent.
         # If the body is completely empty, we allow it to fall through to the default "+1 increment" path.
         raw_data = request.get_data()
         if raw_data and (not data or (data.get("cups") is None and data.get("delta") is None)):
-            log_diagnostic(f"[API hydration] REJECTED: invalid JSON or missing fields: data={data}")
             return jsonify({"error": "Missing 'cups' or 'delta' in payload", "hydration": db.get_hydration()}), 400
         
         cups = data.get("cups")
@@ -295,13 +336,13 @@ def manage_hydration():
                 current_amount = db.get_hydration()["cups"]
                 new_amount = max(0, float(current_amount) + delta_val)
                 res = db.increment_hydration(cups=new_amount)
-                log_diagnostic(f"[API hydration] Delta mode: current={current_amount}, delta={delta_val}, new={new_amount}, res={res}")
+
             except (ValueError, TypeError) as e:
-                log_diagnostic(f"[API hydration] Error in delta mode: {e}")
+
                 res = db.get_hydration()
         else:
             res = db.increment_hydration(cups=cups)
-            log_diagnostic(f"[API hydration] Direct mode: cups={cups}, res={res}")
+
         return jsonify({"status": "success", "hydration": res})
     else:
         return jsonify(db.get_hydration())
@@ -341,100 +382,133 @@ def get_analytics():
     work_keywords = settings.get("work_keywords", [])
     recharge_keywords = settings.get("recharge_keywords", [])
     
+    # Parse week offset
+    week_offset = 0
+    try:
+        week_offset = int(request.args.get("week_offset", 0))
+    except (ValueError, TypeError):
+        pass
+        
+    from datetime import date, timedelta, datetime
+    today = date.today()
+    # Monday of the current week (today.weekday() is 0 for Monday)
+    current_monday = today - timedelta(days=today.weekday())
+    
+    # Target week's Monday and Sunday
+    target_monday = current_monday - timedelta(weeks=week_offset)
+    target_sunday = target_monday + timedelta(days=6)
+    
+    start_dt = datetime.combine(target_monday, datetime.min.time())
+    end_dt = datetime.combine(target_sunday, datetime.max.time())
+    
+    start_date_str = target_monday.isoformat()
+    end_date_str = target_sunday.isoformat()
+    
+    # Filter reflections for this week
+    filtered_reflections = []
+    for r in reflections:
+        try:
+            dt = datetime.fromisoformat(r["timestamp"])
+            # Strip timezone if present to make comparisons offset-naive
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            if start_dt <= dt <= end_dt:
+                filtered_reflections.append(r)
+        except Exception:
+            pass
+
     # Classification cache to avoid redundant regex matching across thousands of entries
     classification_cache = {}
     
-    from datetime import timedelta
-    cutoff_date = (date.today() - timedelta(days=8)).isoformat()
-    
     processed_app_usage = []
-    for entry in reversed(app_usage):
+    # Filter app usage by target week start and end dates
+    for entry in app_usage:
         entry_date = entry.get("date", "")
-        if entry_date and entry_date < cutoff_date:
-            break
+        if entry_date and start_date_str <= entry_date <= end_date_str:
+            process = entry.get("process", "")
+            title = entry.get("title", "")
+            titles = entry.get("titles", {})
             
-        process = entry.get("process", "")
-        title = entry.get("title", "")
-        titles = entry.get("titles", {})
-        
-        # Determine category for each title separately
-        title_categories = {}
-        work_dur = 0
-        recharge_dur = 0
-        neutral_dur = 0
-        
-        if titles:
-            for t, dur in titles.items():
-                cache_key = (process, t)
+            # Determine category for each title separately
+            title_categories = {}
+            work_dur = 0
+            recharge_dur = 0
+            neutral_dur = 0
+            
+            if titles:
+                for t, dur in titles.items():
+                    cache_key = (process, t)
+                    if cache_key in classification_cache:
+                        cat = classification_cache[cache_key]
+                    else:
+                        cat = "neutral"
+                        if any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in work_keywords):
+                            cat = "work"
+                        elif any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in recharge_keywords):
+                            cat = "recharge"
+                        classification_cache[cache_key] = cat
+                    
+                    title_categories[t] = cat
+                    if cat == "work":
+                        work_dur += dur
+                    elif cat == "recharge":
+                        recharge_dur += dur
+                    else:
+                        neutral_dur += dur
+            else:
+                # Fallback if titles is empty
+                cache_key = (process, title)
                 if cache_key in classification_cache:
                     cat = classification_cache[cache_key]
                 else:
                     cat = "neutral"
-                    if any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in work_keywords):
+                    if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
                         cat = "work"
-                    elif any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in recharge_keywords):
+                    elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
                         cat = "recharge"
                     classification_cache[cache_key] = cat
-                
-                title_categories[t] = cat
+                title_categories[title] = cat
+                dur = entry.get("duration", 0)
                 if cat == "work":
                     work_dur += dur
                 elif cat == "recharge":
                     recharge_dur += dur
                 else:
                     neutral_dur += dur
-        else:
-            # Fallback if titles is empty
-            cache_key = (process, title)
-            if cache_key in classification_cache:
-                cat = classification_cache[cache_key]
-            else:
-                cat = "neutral"
-                if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
-                    cat = "work"
-                elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
-                    cat = "recharge"
-                classification_cache[cache_key] = cat
-            title_categories[title] = cat
-            dur = entry.get("duration", 0)
-            if cat == "work":
-                work_dur += dur
-            elif cat == "recharge":
-                recharge_dur += dur
-            else:
-                neutral_dur += dur
 
-        # Predominant category is the one with the maximum duration
-        if work_dur >= recharge_dur and work_dur >= neutral_dur:
-            predominant_category = "work"
-        elif recharge_dur >= work_dur and recharge_dur >= neutral_dur:
-            predominant_category = "recharge"
-        else:
-            predominant_category = "neutral"
-            
-        processed_app_usage.append({
-            "date": entry.get("date"),
-            "process": process,
-            "title": title,
-            "titles": titles,
-            "duration": entry.get("duration", 0),
-            "category": predominant_category,
-            "work_duration": work_dur,
-            "recharge_duration": recharge_dur,
-            "neutral_duration": neutral_dur,
-            "title_categories": title_categories
-        })
+            # Predominant category is the one with the maximum duration
+            if work_dur >= recharge_dur and work_dur >= neutral_dur:
+                predominant_category = "work"
+            elif recharge_dur >= work_dur and recharge_dur >= neutral_dur:
+                predominant_category = "recharge"
+            else:
+                predominant_category = "neutral"
+                
+            processed_app_usage.append({
+                "date": entry.get("date"),
+                "process": process,
+                "title": title,
+                "titles": titles,
+                "duration": entry.get("duration", 0),
+                "category": predominant_category,
+                "work_duration": work_dur,
+                "recharge_duration": recharge_dur,
+                "neutral_duration": neutral_dur,
+                "title_categories": title_categories
+            })
     processed_app_usage.reverse()
     
-    # Calculate energy vs friction mapping
-    energy_levels = [r["energy_level"] for r in reflections]
-    friction_levels = [r["friction_level"] for r in reflections]
+    # Calculate energy vs friction mapping for target week
+    energy_levels = [r["energy_level"] for r in filtered_reflections]
+    friction_levels = [r["friction_level"] for r in filtered_reflections]
     
-    # Compute average energy and friction per weekday
+    # Compute average energy and friction per weekday based on target week
     weekday_data = {i: {"energy": [], "friction": [], "count": 0} for i in range(7)}
-    for r in reflections:
+    for r in filtered_reflections:
         try:
             dt = datetime.fromisoformat(r["timestamp"])
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
             w = dt.weekday() # 0 = Monday, 6 = Sunday
             weekday_data[w]["energy"].append(r["energy_level"])
             weekday_data[w]["friction"].append(r["friction_level"])
@@ -453,6 +527,14 @@ def get_analytics():
             "avg_friction": round(friction_avg, 2),
             "count": weekday_data[w]["count"]
         })
+
+    # Format a human-readable week label
+    start_label = target_monday.strftime("%b %d")
+    end_label = target_sunday.strftime("%b %d, %Y")
+    if week_offset == 0:
+        week_label = f"Current Week ({start_label} - {end_label})"
+    else:
+        week_label = f"{start_label} - {end_label}"
 
     # Find correlations and recommendations
     recommendations = []
@@ -647,15 +729,36 @@ def get_analytics():
                 pass
     today_sessions.reverse()
 
+    # Add ongoing session in real-time to the timeline
+    if shared_state["tracking_active"]:
+        cur_mode = shared_state["current_mode"]
+        elapsed = shared_state["elapsed_seconds"]
+        idle = shared_state["idle_seconds"]
+        duration = elapsed
+        if duration >= 5:
+            from datetime import timedelta
+            start_time = datetime.now() - timedelta(seconds=duration)
+            end_time = datetime.now()
+            ongoing_session = {
+                "mode": cur_mode,
+                "start": start_time.isoformat(),
+                "end": end_time.isoformat(),
+                "duration": duration,
+                "brain_dump": None,
+                "bypassed": False
+            }
+            today_sessions.append(ongoing_session)
+
     return jsonify({
-        "reflections": reflections[-15:], # Send last 15 for recent list
+        "reflections": filtered_reflections[-15:], # Send last 15 filtered reflections for recent list
         "weekday_summary": weekday_summary,
         "recommendations": recommendations,
         "insights": insights,
         "total_reflections": len(reflections),
         "total_sessions": len(sessions),
         "today_sessions": today_sessions,
-        "app_usage": processed_app_usage
+        "app_usage": processed_app_usage,
+        "week_label": week_label
     })
 
 @app.route("/api/shutdown", methods=["POST"])

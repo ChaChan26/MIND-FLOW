@@ -2,6 +2,10 @@ import os
 import sys
 import io
 
+# Force high-performance discrete GPU (dGPU) for hardware accelerated rendering in WebView2/Chromium
+os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--force-high-performance-gpu --gpu-preference=2"
+
+
 class Unbuffered:
     def __init__(self, stream):
         self.stream = stream
@@ -14,20 +18,32 @@ class Unbuffered:
     def __getattr__(self, attr):
         return getattr(self.stream, attr)
 
+def get_default_data_dir():
+    legacy_dir = r"C:\MIND"
+    if os.path.exists(legacy_dir) and os.path.isdir(legacy_dir):
+        return legacy_dir
+    if sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            return os.path.join(appdata, "MIND")
+    home = os.path.expanduser("~")
+    return os.path.join(home, ".mindflow")
+
 # Redirect standard logs for PyInstaller executable runs
 if getattr(sys, 'frozen', False):
     is_gui = "--gui" in sys.argv
     log_suffix = "_gui" if is_gui else ""
     try:
-        os.makedirs("C:\\MIND", exist_ok=True)
-        sys.stdout = Unbuffered(open(f"C:\\MIND\\app{log_suffix}_stdout.log", "w", encoding="utf-8"))
-        sys.stderr = Unbuffered(open(f"C:\\MIND\\app{log_suffix}_stderr.log", "w", encoding="utf-8"))
+        data_dir = get_default_data_dir()
+        os.makedirs(data_dir, exist_ok=True)
+        sys.stdout = Unbuffered(open(os.path.join(data_dir, f"app{log_suffix}_stdout.log"), "w", encoding="utf-8"))
+        sys.stderr = Unbuffered(open(os.path.join(data_dir, f"app{log_suffix}_stderr.log"), "w", encoding="utf-8"))
     except Exception:
         sys.stdout = io.StringIO()
         sys.stderr = io.StringIO()
 
-import os
 import time
+import random
 import math
 import ctypes
 import socket
@@ -263,7 +279,6 @@ def trigger_lockout_overlay(duration_seconds=20):
         )
         rule_label.pack(pady=15)
 
-        import random
         selected_stretch = random.choice(PHYSICAL_STRETCHES)
         stretch_label = tk.Label(
             frame, text=f"💪 PHYSICAL RECHARGE TIP:\n{selected_stretch}",
@@ -385,7 +400,6 @@ def trigger_lockout_overlay(duration_seconds=20):
 
 # Import state dictionary from server backend to synchronize API mutations
 from backend.server import shared_state, db, run_server
-shared_state.setdefault("manual_lockout_requested", False)
 
 def main_state_machine(gui_process=None):
     """Background thread checking active windows and tracking idle state."""
@@ -422,6 +436,18 @@ def main_state_machine(gui_process=None):
     shared_state["last_app_title"] = None
     shared_state["app_accumulated_seconds"] = 0
     
+    # Caches to prevent scanning database collections every second
+    reflections_cache = {
+        "len": -1,
+        "latest_today": None,
+        "last_checked_date": None
+    }
+    sessions_cache = {
+        "len": -1,
+        "bypasses_today": 0,
+        "last_checked_date": None
+    }
+
     while True:
         time.sleep(1.0)
         
@@ -548,38 +574,6 @@ def main_state_machine(gui_process=None):
         work_limit_sec = adaptive["work_minutes"] * 60
         rest_limit_sec = adaptive["rest_seconds"]
 
-        # Check manual lockout trigger
-        if shared_state.get("manual_lockout_requested", False):
-            shared_state["manual_lockout_requested"] = False
-            print(f"Manual lockout requested. Launching lockout overlay with rest duration ({rest_limit_sec}s).")
-            
-            # Flush app usage before manual lockout
-            last_proc = shared_state.get("last_app_process")
-            last_title = shared_state.get("last_app_title")
-            accum_sec = shared_state.get("app_accumulated_seconds", 0)
-            if last_proc and accum_sec > 0:
-                try:
-                    db.log_app_usage(last_proc, last_title, accum_sec)
-                except Exception as e:
-                    print(f"Error logging app usage on manual lockout: {e}")
-                shared_state["last_app_process"] = None
-                shared_state["last_app_title"] = None
-                shared_state["app_accumulated_seconds"] = 0
-            
-            now = datetime.now()
-            db.log_session(current_mode if current_mode != "neutral" else "work", state_start_time, now)
-            
-            # Blocking Tkinter overlay runs
-            brain_dump, completed, snoozed = trigger_lockout_overlay(rest_limit_sec)
-            if snoozed:
-                print("Manual lockout snoozed.")
-                state_start_time = datetime.now()
-                shared_state["elapsed_seconds"] = 0
-                continue
-            db.log_session("rest", now, datetime.now(), brain_dump=brain_dump, bypassed=not completed)
-            state_start_time = datetime.now()
-            shared_state["elapsed_seconds"] = 0
-            continue
 
         # Determine target mode
         target_mode = "neutral"
@@ -598,11 +592,18 @@ def main_state_machine(gui_process=None):
         if target_mode != current_mode:
             now = datetime.now()
             print(f"State transition: {current_mode} -> {target_mode}")
-            db.log_session(current_mode, state_start_time, now)
             
+            if target_mode == "rest" and current_mode in ["work", "recharge", "neutral"]:
+                from datetime import timedelta
+                transition_time = max(state_start_time, now - timedelta(seconds=idle_limit))
+                db.log_session(current_mode, state_start_time, transition_time)
+                state_start_time = transition_time
+            else:
+                db.log_session(current_mode, state_start_time, now)
+                state_start_time = now
+                
             current_mode = target_mode
             shared_state["current_mode"] = current_mode
-            state_start_time = now
             shared_state["elapsed_seconds"] = 0
         else:
             elapsed = (datetime.now() - state_start_time).total_seconds()
@@ -638,18 +639,27 @@ def main_state_machine(gui_process=None):
 
         # Automated energy battery tracking (Auto-decay/recharge check)
         try:
-            today_str = date.today().isoformat()
+            today_date = date.today()
+            today_str = today_date.isoformat()
             reflections = db.get_reflections()
-            latest_refl = None
-            for r in reversed(reflections):
-                if r["timestamp"].startswith(today_str):
-                    latest_refl = r
-                    break
-                try:
-                    if datetime.fromisoformat(r["timestamp"]).date() < date.today():
+            
+            # Fetch latest reflection (only scan if length of reflections list changed or date changed)
+            if len(reflections) != reflections_cache["len"] or reflections_cache["last_checked_date"] != today_date:
+                latest_refl = None
+                for r in reversed(reflections):
+                    if r["timestamp"].startswith(today_str):
+                        latest_refl = r
                         break
-                except:
-                    pass
+                    try:
+                        if datetime.fromisoformat(r["timestamp"]).date() < today_date:
+                            break
+                    except:
+                        pass
+                reflections_cache["len"] = len(reflections)
+                reflections_cache["latest_today"] = latest_refl
+                reflections_cache["last_checked_date"] = today_date
+            else:
+                latest_refl = reflections_cache["latest_today"]
             
             if latest_refl:
                 current_energy = latest_refl.get("energy_level", 5)
@@ -660,17 +670,27 @@ def main_state_machine(gui_process=None):
                     if elapsed_since_refl >= 300:
                         if current_energy > 1:
                             new_energy = current_energy - 1
-                            bypasses_today = 0
-                            for s in reversed(db.get_sessions()):
-                                if s["start"].startswith(today_str):
-                                    if s.get("bypassed", False):
-                                        bypasses_today += 1
-                                else:
-                                    try:
-                                        if datetime.fromisoformat(s["start"]).date() < date.today():
-                                            break
-                                    except:
-                                        pass
+                            
+                            # Fetch bypasses (only scan if length of sessions list changed or date changed)
+                            sessions = db.get_sessions()
+                            if len(sessions) != sessions_cache["len"] or sessions_cache["last_checked_date"] != today_date:
+                                bypasses_today = 0
+                                for s in reversed(sessions):
+                                    if s["start"].startswith(today_str):
+                                        if s.get("bypassed", False):
+                                            bypasses_today += 1
+                                    else:
+                                        try:
+                                            if datetime.fromisoformat(s["start"]).date() < today_date:
+                                                break
+                                        except:
+                                            pass
+                                sessions_cache["len"] = len(sessions)
+                                sessions_cache["bypasses_today"] = bypasses_today
+                                sessions_cache["last_checked_date"] = today_date
+                            else:
+                                bypasses_today = sessions_cache["bypasses_today"]
+                            
                             new_friction = min(5, 2 + bypasses_today)
                             db.add_reflection(new_energy, new_friction, "[Autopilot] Continuous focus tracking")
                             print(f"Autopilot: Automatically decayed energy to {new_energy} (Friction: {new_friction})")
@@ -740,7 +760,7 @@ def launch_app_window(url):
         for path in chrome_paths:
             if os.path.exists(path):
                 try:
-                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
+                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800", "--force-high-performance-gpu", "--gpu-preference=2"])
                     return True
                 except Exception:
                     pass
@@ -748,7 +768,7 @@ def launch_app_window(url):
         for path in edge_paths:
             if os.path.exists(path):
                 try:
-                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800"])
+                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800", "--force-high-performance-gpu", "--gpu-preference=2"])
                     return True
                 except Exception:
                     pass
@@ -775,6 +795,77 @@ def launch_app_window(url):
             return None
 
 if __name__ == "__main__":
+    # Configure Windows registry to prefer High Performance dGPU for this executable
+    try:
+        if sys.platform == "win32":
+            import winreg
+            import glob
+            import psutil
+            key_path = r"Software\Microsoft\DirectX\UserGpuPreferences"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+            except FileNotFoundError:
+                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
+            
+            # Register the virtual environment script shim/wrapper
+            winreg.SetValueEx(key, sys.executable, 0, winreg.REG_SZ, "GpuPreference=2;")
+            
+            # Register the actual base python interpreter executable (which performs the rendering)
+            if hasattr(sys, "_base_executable") and sys._base_executable != sys.executable:
+                winreg.SetValueEx(key, sys._base_executable, 0, winreg.REG_SZ, "GpuPreference=2;")
+                
+            # Register all msedgewebview2.exe executables (system runtime, Edge WebView versions, running processes, etc.)
+            webview_exes = set()
+            
+            # 1. Common system paths
+            system_webview = r"C:\Windows\System32\Microsoft-Edge-WebView\msedgewebview2.exe"
+            if os.path.exists(system_webview):
+                webview_exes.add(system_webview)
+                
+            # 2. Scanning common directories recursively for msedgewebview2.exe
+            search_roots = [
+                r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+                r"C:\Program Files (x86)\Microsoft\EdgeCore",
+                r"C:\Program Files\Microsoft\EdgeWebView\Application",
+                r"C:\Program Files\Microsoft\EdgeCore",
+            ]
+            for root in search_roots:
+                if os.path.exists(root):
+                    for p in glob.glob(os.path.join(root, "**", "msedgewebview2.exe"), recursive=True):
+                        webview_exes.add(os.path.abspath(p))
+            
+            # 3. Check currently running processes for any msedgewebview2.exe
+            try:
+                for proc in psutil.process_iter(['name', 'exe']):
+                    try:
+                        if proc.info['name'] and proc.info['name'].lower() == 'msedgewebview2.exe':
+                            exe_path = proc.info['exe']
+                            if exe_path and os.path.exists(exe_path):
+                                webview_exes.add(os.path.abspath(exe_path))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+            except Exception:
+                pass
+                
+            # Write all found executables to UserGpuPreferences
+            for exe_path in webview_exes:
+                try:
+                    winreg.SetValueEx(key, exe_path, 0, winreg.REG_SZ, "GpuPreference=2;")
+                except Exception:
+                    pass
+                    
+            winreg.CloseKey(key)
+    except Exception:
+        pass
+
+    # Force high-priority scheduling class to prevent CPU clock throttling and schedule on Performance cores
+    try:
+        import psutil
+        p = psutil.Process()
+        p.nice(psutil.HIGH_PRIORITY_CLASS)
+    except Exception:
+        pass
+
     # If --gui argument is passed, launch the pywebview standalone window process
     if len(sys.argv) > 1 and sys.argv[1] == "--gui":
         run_webview_gui("http://127.0.0.1:5000")

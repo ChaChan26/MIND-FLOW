@@ -433,6 +433,43 @@ class TestMindFlowAPI(unittest.TestCase):
         self.assertIn("today_bypasses", data)
         self.assertIn("companion_message", data)
 
+    def test_get_status_rest_duration(self):
+        # 1. Back up database sessions
+        original_sessions = self.db.data["sessions"].copy()
+        self.db.data["sessions"] = []
+        self.db.save()
+
+        try:
+            # 2. Configure state to represent an ongoing rest session
+            shared_state["current_mode"] = "rest"
+            shared_state["elapsed_seconds"] = 45
+            shared_state["idle_seconds"] = 165
+            shared_state["tracking_active"] = True
+
+            # 3. Call status endpoint
+            response = self.client.get('/api/status')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+
+            # Verify that rest mode sums the elapsed_seconds (45) instead of the idle_seconds (165)
+            self.assertEqual(data["today_rest_seconds"], 45)
+
+            # 4. Call analytics endpoint
+            response_an = self.client.get('/api/analytics')
+            self.assertEqual(response_an.status_code, 200)
+            data_an = response_an.get_json()
+
+            # Verify that the ongoing rest session injected has a duration of 45, not 165
+            sessions = data_an["today_sessions"]
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["mode"], "rest")
+            self.assertEqual(sessions[0]["duration"], 45)
+
+        finally:
+            # Restore original database sessions
+            self.db.data["sessions"] = original_sessions
+            self.db.save()
+
     def test_require_local_origin(self):
         # 1. No Origin/Referer headers should be allowed
         response = self.client.post('/api/status/toggle', json={"enable": True})
@@ -474,13 +511,6 @@ class TestMindFlowAPI(unittest.TestCase):
         data = response.get_json()
         self.assertTrue(data["tracking_active"])
         self.assertTrue(shared_state["tracking_active"])
-
-    def test_trigger_manual_lockout(self):
-        response = self.client.post('/api/status/lockout')
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        self.assertEqual(data["status"], "success")
-        self.assertTrue(shared_state["manual_lockout_requested"])
 
     def test_manage_settings(self):
         # Get settings
@@ -573,6 +603,7 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertIn("recharge_duration", chrome)
             self.assertIn("neutral_duration", chrome)
             self.assertIn("category", chrome)
+            self.assertIn("week_label", data)
             
             # Check values
             self.assertEqual(chrome["work_duration"], 300)
@@ -589,6 +620,60 @@ class TestMindFlowAPI(unittest.TestCase):
             
         finally:
             self.db.data["app_usage"] = original_app_usage
+            self.db.save()
+
+    def test_get_analytics_with_offset(self):
+        # Insert reflections with specific dates (one in current week, one in previous week)
+        from datetime import datetime, date, timedelta
+        
+        today = date.today()
+        # Monday of current week
+        current_monday = today - timedelta(days=today.weekday())
+        
+        # Current week reflection
+        ref_current = {
+            "timestamp": datetime.combine(current_monday, datetime.min.time()).isoformat(),
+            "energy_level": 4,
+            "friction_level": 2,
+            "summary": "Current week entry"
+        }
+        
+        # Previous week reflection
+        prev_monday = current_monday - timedelta(weeks=1)
+        ref_prev = {
+            "timestamp": datetime.combine(prev_monday, datetime.min.time()).isoformat(),
+            "energy_level": 3,
+            "friction_level": 4,
+            "summary": "[Autopilot] Previous week entry"
+        }
+        
+        original_reflections = self.db.data.get("reflections", []).copy()
+        self.db.data["reflections"] = [ref_current, ref_prev]
+        self.db.save()
+        
+        try:
+            # Query current week (week_offset=0)
+            response = self.client.get('/api/analytics?week_offset=0')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertIn("week_label", data)
+            self.assertTrue("Current Week" in data["week_label"])
+            # Should only contain current week reflection
+            self.assertEqual(len(data["reflections"]), 1)
+            self.assertEqual(data["reflections"][0]["summary"], "Current week entry")
+            
+            # Query previous week (week_offset=1)
+            response_prev = self.client.get('/api/analytics?week_offset=1')
+            self.assertEqual(response_prev.status_code, 200)
+            data_prev = response_prev.get_json()
+            self.assertIn("week_label", data_prev)
+            self.assertFalse("Current Week" in data_prev["week_label"])
+            # Should only contain previous week reflection
+            self.assertEqual(len(data_prev["reflections"]), 1)
+            self.assertEqual(data_prev["reflections"][0]["summary"], "[Autopilot] Previous week entry")
+            
+        finally:
+            self.db.data["reflections"] = original_reflections
             self.db.save()
 
     @patch('backend.server.os._exit')
@@ -947,12 +1032,12 @@ class TestMainStateMachine(unittest.TestCase):
     @patch('app.get_active_process_name')
     @patch('app.get_idle_seconds')
     @patch('app.db')
-    @patch('app.trigger_lockout_overlay')
-    def test_state_machine_manual_lockout(self, mock_overlay, mock_db, mock_idle, mock_proc, mock_title, mock_sleep):
+    @patch('app.datetime')
+    def test_state_machine_rest_transition_retroactive_adjust(self, mock_datetime, mock_db, mock_idle, mock_proc, mock_title, mock_sleep):
         mock_db.get_settings.return_value = {
             "work_keywords": ["code.exe"],
             "recharge_keywords": ["game.exe"],
-            "idle_timeout_seconds": 180
+            "idle_timeout_seconds": 120
         }
         mock_db.get_adaptive_times.return_value = {
             "work_minutes": 45,
@@ -961,12 +1046,30 @@ class TestMainStateMachine(unittest.TestCase):
         }
         mock_db.get_reflections.return_value = []
         
-        # Request manual lockout
+        # Start in work mode, and transition to rest
         shared_state["tracking_active"] = True
         shared_state["current_mode"] = "work"
-        shared_state["manual_lockout_requested"] = True
         
-        mock_overlay.return_value = ("Manual Dump", True, False)
+        mock_title.return_value = "Idle State"
+        mock_proc.return_value = "System"
+        mock_idle.return_value = 130.0  # Greater than 120s limit
+        
+        # Mock datetime now calls
+        import datetime as dt
+        t_start = datetime(2026, 6, 1, 10, 0, 0)
+        
+        # We need mock_datetime.now to return t_start first, then t_start + 300s
+        call_times = [t_start, t_start + dt.timedelta(seconds=300)]
+        call_index = 0
+        def mock_now():
+            nonlocal call_index
+            val = call_times[min(call_index, len(call_times) - 1)]
+            call_index += 1
+            return val
+        mock_datetime.now.side_effect = mock_now
+        
+        # Maintain fromisoformat
+        mock_datetime.fromisoformat.side_effect = lambda x: datetime.fromisoformat(x)
         
         sleep_count = 0
         def sleep_side_effect(secs):
@@ -980,16 +1083,51 @@ class TestMainStateMachine(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             main_state_machine()
             
-        # Verify lockout was triggered and logged
-        mock_overlay.assert_called_with(20)
-        # Should log previous session (work) and the rest session
-        self.assertEqual(mock_db.log_session.call_count, 2)
-        # Verify second call logged rest with manual dump and completed
-        calls = mock_db.log_session.call_args_list
-        rest_call = calls[1]
-        self.assertEqual(rest_call[0][0], "rest")
-        self.assertEqual(rest_call[1]["brain_dump"], "Manual Dump")
-        self.assertEqual(rest_call[1]["bypassed"], False)
+        # Verify transition to rest occurred
+        self.assertEqual(shared_state["current_mode"], "rest")
+        
+        # Verify log_session was called with adjusted end_time
+        mock_db.log_session.assert_called()
+        call_args = mock_db.log_session.call_args[0]
+        # Arguments: mode, start_time, end_time
+        self.assertEqual(call_args[0], "neutral")
+        start_time, end_time = call_args[1], call_args[2]
+        
+        # The start_time of work is t_start.
+        # The transition_time is now (t_start + 300s) - idle_limit (120s) = t_start + 180s
+        self.assertEqual(start_time, t_start)
+        self.assertEqual(end_time, t_start + dt.timedelta(seconds=180))
+
+
+class TestConcurrencyAndPathPortability(unittest.TestCase):
+    def test_database_list_accessors_thread_safety(self):
+        """Verify that get_reflections(), get_sessions(), and get_app_usage() return copies to prevent thread race conditions."""
+        db = MindFlowDB()
+        
+        # 1. Reflections copy test
+        refs = db.get_reflections()
+        self.assertIsInstance(refs, list)
+        refs.append({"test": "value"})
+        self.assertNotEqual(len(db.get_reflections()), len(refs))
+        
+        # 2. Sessions copy test
+        sess = db.get_sessions()
+        self.assertIsInstance(sess, list)
+        sess.append({"test": "value"})
+        self.assertNotEqual(len(db.get_sessions()), len(sess))
+        
+        # 3. App usage copy test
+        usage = db.get_app_usage()
+        self.assertIsInstance(usage, list)
+        usage.append({"test": "value"})
+        self.assertNotEqual(len(db.get_app_usage()), len(usage))
+
+    def test_default_data_dir_portability(self):
+        """Verify get_default_data_dir resolves to legacy path or portable paths."""
+        from backend.database import get_default_data_dir
+        path = get_default_data_dir()
+        self.assertTrue(os.path.exists(path) or os.path.basename(path) in ["MIND", ".mindflow"])
+
 
 if __name__ == "__main__":
     unittest.main()

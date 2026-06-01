@@ -17,6 +17,26 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+// Timezone-safe local ISO date parser
+function parseLocalDate(isoStr) {
+    if (!isoStr) return new Date();
+    if (isoStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(isoStr)) {
+        return new Date(isoStr);
+    }
+    const parts = isoStr.match(/(\d+)/g);
+    if (!parts) return new Date(isoStr);
+    
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const hour = parseInt(parts[3] || 0, 10);
+    const minute = parseInt(parts[4] || 0, 10);
+    const second = parseInt(parts[5] || 0, 10);
+    const ms = parseInt((parts[6] || '0').substring(0, 3), 10);
+    
+    return new Date(year, month, day, hour, minute, second, ms);
+}
+
 let currentTab = 'dashboard';
 let statusInterval = null;
 let lastActiveTitle = '';
@@ -24,8 +44,9 @@ let lastExternalWindow = 'None';
 let lastExternalProcess = 'None';
 let lastWeekdaySummary = null;
 let lastReflections = null;
-let appStatsData = [];
 let appStatsFilter = 'today';
+let weekOffset = 0;
+let lastAnalyticsLoadTime = 0;
 
 // DOM Elements
 const bodyEl = document.body;
@@ -295,6 +316,7 @@ async function pollStatus() {
             requestAnimationFrame(() => {
                 updateNavIndicator();
             });
+            loadAnalytics();
         }
         
         // 2. Status Details
@@ -566,6 +588,12 @@ async function pollStatus() {
         // 7.5 Update Daily Hydration UI if set
         if (status.hydration !== undefined) {
             updateHydrationUI(status.hydration);
+        }
+        
+        // 7.8 Periodically reload analytics every 10 seconds on active tabs
+        const now = Date.now();
+        if ((currentTab === 'dashboard' || currentTab === 'analytics') && (now - lastAnalyticsLoadTime >= 10000)) {
+            loadAnalytics();
         }
         
     } catch (e) {
@@ -1010,8 +1038,8 @@ function smoothSessions(sessions) {
     let list = [...sessions]
         .map(s => ({
             ...s,
-            startMs: new Date(s.start).getTime(),
-            endMs: new Date(s.end).getTime()
+            startMs: parseLocalDate(s.start).getTime(),
+            endMs: parseLocalDate(s.end).getTime()
         }))
         .sort((a, b) => a.startMs - b.startMs);
         
@@ -1025,7 +1053,9 @@ function smoothSessions(sessions) {
         let last = pass1[pass1.length - 1];
         if (last.mode === s.mode && (s.startMs - last.endMs) < 60000) {
             last.endMs = Math.max(last.endMs, s.endMs);
-            last.end = new Date(last.endMs).toISOString();
+            const endDt = new Date(last.endMs);
+            const pad = (num, size = 2) => ('000' + num).slice(-size);
+            last.end = `${endDt.getFullYear()}-${pad(endDt.getMonth() + 1)}-${pad(endDt.getDate())}T${pad(endDt.getHours())}:${pad(endDt.getMinutes())}:${pad(endDt.getSeconds())}.${pad(endDt.getMilliseconds(), 3)}`;
             last.duration = (last.endMs - last.startMs) / 1000;
             if (s.brain_dump) {
                 last.brain_dump = last.brain_dump ? `${last.brain_dump} | ${s.brain_dump}` : s.brain_dump;
@@ -1077,9 +1107,46 @@ function smoothSessions(sessions) {
 // Load Analytics & Draw SVG Line Chart
 async function loadAnalytics() {
     try {
-        const res = await fetch('/api/analytics');
+        lastAnalyticsLoadTime = Date.now();
+        const res = await fetch(`/api/analytics?week_offset=${weekOffset}`);
         const data = await res.json();
         hideSkeletons();
+        
+        // Update week navigation UI
+        const weekLabel = document.getElementById('current-week-label');
+        if (weekLabel && data.week_label) {
+            weekLabel.textContent = data.week_label;
+        }
+        const nextBtn = document.getElementById('next-week-btn');
+        if (nextBtn) {
+            nextBtn.disabled = (weekOffset === 0);
+            nextBtn.style.opacity = (weekOffset === 0) ? '0.4' : '1.0';
+        }
+        const prevBtn = document.getElementById('prev-week-btn');
+        if (prevBtn) {
+            prevBtn.disabled = (weekOffset >= 12);
+            prevBtn.style.opacity = (weekOffset >= 12) ? '0.4' : '1.0';
+        }
+
+        // Force weekly filter for earlier weeks
+        const btnToday = document.getElementById('app-filter-today');
+        if (weekOffset > 0) {
+            appStatsFilter = 'weekly';
+            const btnWeekly = document.getElementById('app-filter-weekly');
+            if (btnWeekly) btnWeekly.classList.add('active');
+            if (btnToday) {
+                btnToday.classList.remove('active');
+                btnToday.disabled = true;
+                btnToday.style.opacity = '0.4';
+                btnToday.style.pointerEvents = 'none';
+            }
+        } else {
+            if (btnToday) {
+                btnToday.disabled = false;
+                btnToday.style.opacity = '1.0';
+                btnToday.style.pointerEvents = 'auto';
+            }
+        }
         
         // 1. Load Insights
         const insightsList = document.getElementById('insights-list');
@@ -1149,7 +1216,7 @@ async function loadAnalytics() {
                     tr.classList.add('gratitude-row');
                 }
                 
-                const dt = new Date(ref.timestamp);
+                const dt = parseLocalDate(ref.timestamp);
                 const dateStr = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 
                 let energyBadge = `<span class="rating-badge badge-green">${ref.energy_level} / 5</span>`;
@@ -1158,11 +1225,25 @@ async function loadAnalytics() {
                 let frictionBadge = `<span class="rating-badge badge-purple">${ref.friction_level} / 5</span>`;
                 if (ref.friction_level >= 4) frictionBadge = `<span class="rating-badge badge-red">${ref.friction_level} / 5</span>`;
                 
+                let summaryText = ref.summary || '';
+                let isAutopilot = false;
+                if (summaryText.startsWith('[Autopilot]')) {
+                    isAutopilot = true;
+                    summaryText = summaryText.replace('[Autopilot]', '').trim();
+                }
+                
+                let summaryHtml = escapeHtml(summaryText);
+                if (isAutopilot) {
+                    summaryHtml = `<span class="autopilot-badge" style="background: rgba(167, 139, 250, 0.12); color: #a78bfa; border: 1px solid rgba(167, 139, 250, 0.25); padding: 0.15rem 0.4rem; border-radius: 6px; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; margin-right: 0.5rem; font-family: sans-serif;" title="Logged automatically by Autopilot">🤖 Autopilot</span><code>${summaryHtml}</code>`;
+                } else {
+                    summaryHtml = `<code>${summaryHtml}</code>`;
+                }
+                
                 tr.innerHTML = `
                     <td>${escapeHtml(dateStr)}</td>
                     <td>${energyBadge}</td>
                     <td>${frictionBadge}</td>
-                    <td><code>${escapeHtml(ref.summary)}</code></td>
+                    <td>${summaryHtml}</td>
                 `;
                 tableBody.appendChild(tr);
             });
@@ -1195,8 +1276,8 @@ async function loadAnalytics() {
                 let minStart = Infinity;
                 let maxEnd = -Infinity;
                 todaySessions.forEach(s => {
-                    const startMs = s.startMs || new Date(s.start).getTime();
-                    const endMs = s.endMs || new Date(s.end).getTime();
+                    const startMs = s.startMs || parseLocalDate(s.start).getTime();
+                    const endMs = s.endMs || parseLocalDate(s.end).getTime();
                     if (startMs < minStart) minStart = startMs;
                     if (endMs > maxEnd) maxEnd = endMs;
                 });
@@ -1215,8 +1296,8 @@ async function loadAnalytics() {
                 
                 // Populate progress track segments
                 todaySessions.forEach((session, index) => {
-                    const sessionStartMs = session.startMs || new Date(session.start).getTime();
-                    const sessionEndMs = session.endMs || new Date(session.end).getTime();
+                    const sessionStartMs = session.startMs || parseLocalDate(session.start).getTime();
+                    const sessionEndMs = session.endMs || parseLocalDate(session.end).getTime();
                     
                     const leftPct = ((sessionStartMs - startBound) / totalRangeMs) * 100;
                     let widthPct = ((sessionEndMs - sessionStartMs) / totalRangeMs) * 100;
@@ -1234,8 +1315,8 @@ async function loadAnalytics() {
                     seg.style.left = `${leftPct}%`;
                     seg.style.width = `${widthPct}%`;
                     
-                    const startDt = new Date(session.start);
-                    const endDt = new Date(session.end);
+                    const startDt = parseLocalDate(session.start);
+                    const endDt = parseLocalDate(session.end);
                     const startTimeStr = startDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     const endTimeStr = endDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     
@@ -1297,7 +1378,7 @@ async function loadAnalytics() {
                 }
                 
                 // Populate event list (sorted newest first)
-                const sortedTodaySessions = [...todaySessions].sort((a, b) => new Date(b.start) - new Date(a.start));
+                const sortedTodaySessions = [...todaySessions].sort((a, b) => parseLocalDate(b.start) - parseLocalDate(a.start));
                 sortedTodaySessions.forEach(session => {
                     // Find original index to link correctly
                     const originalIndex = todaySessions.indexOf(session);
@@ -1310,8 +1391,8 @@ async function loadAnalytics() {
                     
                     item.className = `timeline-event-item ${modeClass} timeline-event-index-${originalIndex}`;
                     
-                    const startDt = new Date(session.start);
-                    const endDt = new Date(session.end);
+                    const startDt = parseLocalDate(session.start);
+                    const endDt = parseLocalDate(session.end);
                     const startTimeStr = startDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     const endTimeStr = endDt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     const timeStr = `${startTimeStr} - ${endTimeStr}`;
@@ -1950,7 +2031,7 @@ function renderEnergyMap(weekdayData, reflections) {
         
         const dayRefs = reflections ? reflections.filter(ref => {
             try {
-                const dt = new Date(ref.timestamp);
+                const dt = parseLocalDate(ref.timestamp);
                 const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
                 return days[dt.getDay()] === dayName;
             } catch(err) {
@@ -2720,29 +2801,6 @@ function updateBatteryBubbles(isCharging) {
 }
 
 // ==========================================
-// Manual Lockout Trigger
-// ==========================================
-async function triggerManualLockout() {
-    try {
-        const res = await fetch('/api/status/lockout', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-        if (res.ok) {
-            const data = await res.json();
-            showToast(data.message || "Starting your restful break. Please relax your eyes! 🌸");
-            pollStatus();
-        } else {
-            showToast("Failed to trigger manual break", true);
-        }
-    } catch(err) {
-        console.error(err);
-        showToast("Error triggering manual rest break", true);
-    }
-}
-
-// ==========================================
 // Keyboard Shortcuts (1/2/3 for tabs)
 // ==========================================
 document.addEventListener('keydown', (e) => {
@@ -3098,22 +3156,8 @@ async function logHydrationDelta(delta, e) {
             updateHydrationUI(data.hydration);
             if (safeDelta > 0) {
                 showToast(`Logged +${safeDelta} water! Stay hydrated. 💧`);
-                if (e) triggerParticleBurst(e, '#38bdf8');
-                
-                // If goal is met, do a celebratory burst at the beaker!
-                if (data.hydration.cups >= data.hydration.target) {
-                    const beaker = document.querySelector('.hydration-beaker');
-                    if (beaker) {
-                        const rect = beaker.getBoundingClientRect();
-                        triggerParticleBurst({
-                            clientX: rect.left + rect.width / 2,
-                            clientY: rect.top + rect.height / 2
-                        }, '#10b981');
-                    }
-                }
             } else {
                 showToast(`Subtracted ${Math.abs(safeDelta)} water. 💧`);
-                if (e) triggerParticleBurst(e, '#f43f5e');
             }
         } else {
             console.error("[Hydration] Server returned non-OK:", res.status);
@@ -4146,7 +4190,7 @@ class ZenParticle {
             if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
                 const mdx = zenMouse.x - this.x;
                 const mdy = zenMouse.y - this.y;
-                const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 0.001; // Avoid division by zero/NaN
                 if (mdist < 100) {
                     const force = (100 - mdist) / 100;
                     this.x -= (mdx / mdist) * force * 2.0;
@@ -4168,7 +4212,7 @@ class ZenParticle {
                 if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
                     const mdx = zenMouse.x - this.x;
                     const mdy = zenMouse.y - this.y;
-                    const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                    const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 0.001; // Avoid division by zero/NaN
                     if (mdist < 120) {
                         const force = (120 - mdist) / 120;
                         this.x -= (mdx / mdist) * force * 2.5;
@@ -4190,7 +4234,7 @@ class ZenParticle {
             if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
                 const mdx = zenMouse.x - this.x;
                 const mdy = zenMouse.y - this.y;
-                const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 0.001; // Avoid division by zero/NaN
                 if (mdist < 150) {
                     const force = (150 - mdist) / 150;
                     this.x += (mdx / mdist) * force * 0.5;
@@ -4205,7 +4249,7 @@ class ZenParticle {
         }
     }
     draw(ctx) {
-        let r, g, b;
+        let r = 167, g = 139, b = 250; // Default fallback to cosmic purple
         if (zenVisualizerMode === 'cosmic') {
             if (this.colorVal < 0.4) {
                 r = 45; g = 212; b = 168;
@@ -4218,9 +4262,9 @@ class ZenParticle {
             if (this.isMote) {
                 r = 253; g = 230; b = 138;
             } else {
-                if (this.colorVal < 0.5) {
+                if (this.colorVal < 0.8) {
                     r = 16; g = 185; b = 129;
-                } else if (this.colorVal < 0.85) {
+                } else if (this.colorVal < 0.95) {
                     r = 245; g = 158; b = 11;
                 } else {
                     r = 253; g = 230; b = 138;
@@ -4236,17 +4280,18 @@ class ZenParticle {
             }
         }
         
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        
         if (zenVisualizerMode === 'forest') {
-            ctx.shadowBlur = this.size * 3.5;
-            ctx.shadowColor = `rgba(${r}, ${g}, ${b}, ${this.alpha * 0.9})`;
+            // High-performance hardware-accelerated outer glow (avoiding costly shadowBlur)
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size * 3.0, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${this.alpha * 0.18})`;
+            ctx.fill();
         }
         
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${this.alpha})`;
         ctx.fill();
-        ctx.shadowBlur = 0;
     }
 }
 
@@ -4472,41 +4517,40 @@ function drawForestLightBeams(ctx, w, h, elapsed, breathFactor) {
     }
     ctx.restore();
 
-    // 2. Crepuscular Light Beams (God Rays)
-    const numBeams = 5;
+    // 2. Crepuscular Light Beams (God Rays) - 1 Big Sweeping Beam
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
     
-    for (let i = 0; i < numBeams; i++) {
-        const timeScale = elapsed * 0.1 + i * 0.7;
-        const angleOffset = Math.sin(timeScale) * (w * 0.12) + Math.cos(timeScale * 0.55) * (w * 0.035);
-        
-        const startX = (w / (numBeams + 1)) * (i + 1) + Math.cos(timeScale * 0.65) * (w * 0.03);
-        const topWidth = 25 + Math.sin(timeScale) * 8;
-        const bottomWidth = 160 + Math.cos(timeScale * 0.95) * 45;
-        
-        const endX = startX + angleOffset;
-        
-        const baseAlpha = 0.025 + 0.02 * Math.sin(timeScale * 0.4);
-        const breathAlpha = breathFactor * 0.085;
-        const alpha = Math.max(0.012, baseAlpha + breathAlpha);
-        
-        const grad = ctx.createLinearGradient(startX, 0, endX, h);
-        grad.addColorStop(0, `rgba(253, 230, 138, ${alpha})`);
-        grad.addColorStop(0.22, `rgba(251, 191, 36, ${alpha * 0.8})`);
-        grad.addColorStop(0.65, `rgba(16, 185, 129, ${alpha * 0.45})`);
-        grad.addColorStop(1, `rgba(16, 185, 129, 0)`);
-        
-        ctx.beginPath();
-        ctx.moveTo(startX - topWidth / 2, 0);
-        ctx.lineTo(startX + topWidth / 2, 0);
-        ctx.lineTo(endX + bottomWidth / 2, h);
-        ctx.lineTo(endX - bottomWidth / 2, h);
-        ctx.closePath();
-        
-        ctx.fillStyle = grad;
-        ctx.fill();
-    }
+    const timeScale = elapsed * 0.05;
+    const angleOffset = Math.sin(timeScale) * (w * 0.12) + Math.cos(timeScale * 0.55) * (w * 0.035);
+    
+    // Position starting at the sunburst glow (w * 0.85)
+    const startX = w * 0.85 + Math.cos(timeScale * 0.65) * (w * 0.02);
+    const topWidth = w * 0.15 + Math.sin(timeScale) * 15;
+    const bottomWidth = w * 0.65 + Math.cos(timeScale * 0.95) * 50;
+    
+    const endX = w * 0.35 + angleOffset;
+    
+    const baseAlpha = 0.045 + 0.025 * Math.sin(timeScale * 0.4);
+    const breathAlpha = breathFactor * 0.095;
+    const alpha = Math.max(0.02, baseAlpha + breathAlpha);
+    
+    const grad = ctx.createLinearGradient(startX, 0, endX, h);
+    grad.addColorStop(0, `rgba(230, 253, 138, ${alpha})`);
+    grad.addColorStop(0.25, `rgba(74, 222, 128, ${alpha * 0.8})`);
+    grad.addColorStop(0.65, `rgba(16, 185, 129, ${alpha * 0.5})`);
+    grad.addColorStop(1, `rgba(6, 95, 70, 0)`);
+    
+    ctx.beginPath();
+    ctx.moveTo(startX - topWidth / 2, 0);
+    ctx.lineTo(startX + topWidth / 2, 0);
+    ctx.lineTo(endX + bottomWidth / 2, h);
+    ctx.lineTo(endX - bottomWidth / 2, h);
+    ctx.closePath();
+    
+    ctx.fillStyle = grad;
+    ctx.fill();
+    
     ctx.restore();
 
     // 3. Dynamic Swaying Leaf Canopy Silhouette
@@ -4640,8 +4684,18 @@ function drawOceanWaves(ctx, w, h, elapsed, breathFactor) {
 function animateZen() {
     if (!zenCanvas || !zenCtx) return;
     
+    // If canvas size is zero, try to resize it (in case layout was not complete during init)
+    if (zenCanvas.width === 0 || zenCanvas.height === 0) {
+        resizeZenCanvas();
+    }
+    
     const w = zenCanvas.width;
     const h = zenCanvas.height;
+    if (w === 0 || h === 0) {
+        // Still zero, defer rendering to next frame
+        zenAnimFrame = requestAnimationFrame(animateZen);
+        return;
+    }
     
     const elapsed = (Date.now() - zenStartTime) / 1000;
     const cycleTime = elapsed % 16.0;
@@ -5254,7 +5308,35 @@ function showTooltipForSegment(seg) {
     
     tooltip.innerHTML = tooltipHtml;
     tooltip.style.borderColor = modeColorVar;
-    tooltip.style.left = `${leftPct + (widthPct / 2)}%`;
+    
+    // Measure width to clamp position
+    tooltip.style.visibility = 'hidden';
+    tooltip.style.opacity = '1';
+    
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const tooltipWidth = tooltipRect.width || tooltip.offsetWidth || 200;
+    
+    const outer = document.querySelector('.timeline-track-outer');
+    const outerWidth = outer ? outer.getBoundingClientRect().width : window.innerWidth;
+    
+    const midPx = ((leftPct + (widthPct / 2)) / 100) * outerWidth;
+    const halfWidth = tooltipWidth / 2;
+    let finalLeftPx = midPx;
+    
+    if (finalLeftPx - halfWidth < 0) {
+        finalLeftPx = halfWidth;
+    } else if (finalLeftPx + halfWidth > outerWidth) {
+        finalLeftPx = outerWidth - halfWidth;
+    }
+    
+    // Adjust arrow to point directly to segment midpoint
+    const shiftPx = midPx - finalLeftPx;
+    const arrowPct = 50 + (shiftPx / tooltipWidth) * 100;
+    const clampedArrowPct = Math.max(5, Math.min(95, arrowPct));
+    
+    tooltip.style.setProperty('--arrow-left', `${clampedArrowPct}%`);
+    tooltip.style.left = `${finalLeftPx}px`;
+    tooltip.style.visibility = 'visible';
     tooltip.style.opacity = '1';
 }
 
@@ -5262,6 +5344,28 @@ function hideTooltip() {
     const tooltip = document.getElementById('timeline-tooltip');
     if (tooltip) {
         tooltip.style.opacity = '0';
+        tooltip.style.visibility = 'hidden';
     }
+}
+
+// Week Navigation pagination logic for analytics Energy Map
+function navigateWeek(offsetChange) {
+    weekOffset += offsetChange;
+    if (weekOffset < 0) weekOffset = 0;
+    if (weekOffset > 12) weekOffset = 12; // Cap at 12 weeks ago
+    
+    // Show chart loading skeleton again for premium visual response
+    const skeleton = document.getElementById('chart-skeleton');
+    if (skeleton) {
+        skeleton.style.display = 'block';
+    }
+    
+    // Remove the old chart SVG
+    const svg = document.querySelector('.svg-chart');
+    if (svg) {
+        svg.remove();
+    }
+    
+    loadAnalytics();
 }
 
