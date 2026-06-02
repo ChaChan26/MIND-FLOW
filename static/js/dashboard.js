@@ -290,7 +290,11 @@ async function pollStatus() {
         }
         
         // 2. Status Details
-        currentModeTitle.textContent = `${status.current_mode} mode`;
+        if (!status.tracking_active) {
+            currentModeTitle.textContent = "Shield Paused";
+        } else {
+            currentModeTitle.textContent = `${status.current_mode} mode`;
+        }
         activeAppName.textContent = status.active_window_title;
         
         const activeProcessEl = document.getElementById('active-process-display');
@@ -417,7 +421,9 @@ async function pollStatus() {
         // 4. Emojis and Rings
         let emoji = '⚪';
         
-        if (status.current_mode === 'work') {
+        if (!status.tracking_active) {
+            emoji = '🛡️';
+        } else if (status.current_mode === 'work') {
             emoji = '💻';
         } else if (status.current_mode === 'recharge') {
             emoji = '🎮';
@@ -548,14 +554,14 @@ async function pollStatus() {
         if (status.tracking_active) {
             trackingPulse.style.backgroundColor = 'var(--recharge-color)';
             trackingPulse.style.boxShadow = '0 0 8px var(--recharge-color)';
-            trackingStatusText.textContent = "Companion Active";
+            trackingStatusText.textContent = "Shield Active";
             toggleShieldBtn.textContent = "Pause Companion";
             toggleShieldBtn.style.color = 'var(--text-primary)';
             toggleShieldBtn.style.background = 'rgba(255, 255, 255, 0.06)';
         } else {
             trackingPulse.style.backgroundColor = '#ef4444';
             trackingPulse.style.boxShadow = '0 0 8px #ef4444';
-            trackingStatusText.textContent = "Companion Paused";
+            trackingStatusText.textContent = "Shield Paused";
             toggleShieldBtn.textContent = "Resume Companion";
             toggleShieldBtn.style.background = 'rgba(16, 185, 129, 0.1)';
             toggleShieldBtn.style.color = 'var(--recharge-color)';
@@ -594,7 +600,7 @@ toggleShieldBtn.addEventListener('click', async () => {
             body: JSON.stringify({})
         });
         const status = await res.json();
-        showToast(status.tracking_active ? "Cognitive Companion Activated" : "Cognitive Companion Deactivated");
+        showToast(status.tracking_active ? "Cognitive Shield Activated" : "Cognitive Shield Deactivated");
         pollStatus();
     } catch (e) {
         showToast("Error updating tracker state", true);
