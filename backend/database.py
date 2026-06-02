@@ -75,8 +75,11 @@ class MindFlowDB:
             "current_goal": "",
             "hydration": {"date": "", "cups": 0}
         }
-        self._save_in_progress = False
-        self._save_requested = False
+        self._save_event = threading.Event()
+        self._bg_writer_thread = None
+        if self.filepath != ":memory:":
+            self._bg_writer_thread = threading.Thread(target=self._bg_writer_worker, daemon=True)
+            self._bg_writer_thread.start()
         self._adaptive_cache = {
             "last_settings": None,
             "last_sessions_len": -1,
@@ -195,6 +198,20 @@ class MindFlowDB:
             except Exception as e:
                 print(f"Error saving database: {e}")
 
+    def _bg_writer_worker(self):
+        while True:
+            self._save_event.wait()
+            self._save_event.clear()
+            # Coalesce window (e.g., 0.1 seconds) to allow rapid writes to group together
+            time.sleep(0.1)
+            # Drain any triggers that occurred during the sleep
+            self._save_event.clear()
+            
+            with self.lock:
+                data_to_write = copy.deepcopy(self.data)
+            
+            self._bg_write(data_to_write)
+
     def save(self, sync=False):
         """Atomic write to prevent corruption on crash (default: async background)."""
         if self.filepath == ":memory:":
@@ -207,30 +224,10 @@ class MindFlowDB:
         if sync:
             with self.lock:
                 data_copy = copy.deepcopy(self.data)
-                self._save_requested = False
             self._bg_write(data_copy)
             return
 
-        with self.lock:
-            self._save_requested = True
-            if self._save_in_progress:
-                return
-            self._save_in_progress = True
-
-        def run_coalesced():
-            while True:
-                with self.lock:
-                    data_to_write = copy.deepcopy(self.data)
-                    self._save_requested = False
-                
-                self._bg_write(data_to_write)
-                
-                with self.lock:
-                    if not self._save_requested:
-                        self._save_in_progress = False
-                        break
-
-        threading.Thread(target=run_coalesced, daemon=False).start()
+        self._save_event.set()
 
     def get_settings(self):
         with self.lock:

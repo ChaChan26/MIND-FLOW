@@ -171,8 +171,11 @@ def disable_ecoqos_for_handle(handle):
     except Exception:
         return False
 
+_parent_process_cache = None
+
 def disable_ecoqos_for_process_tree():
     """Disable EcoQoS recursively for current process and all child processes (like WebView2 renderers)."""
+    global _parent_process_cache
     if sys.platform != "win32":
         return
     try:
@@ -191,8 +194,9 @@ def disable_ecoqos_for_process_tree():
                 ctypes.windll.kernel32.CloseHandle(current_handle)
         
         # 2. Disable for all child/descendant processes recursively
-        parent = psutil.Process()
-        for child in parent.children(recursive=True):
+        if _parent_process_cache is None:
+            _parent_process_cache = psutil.Process()
+        for child in _parent_process_cache.children(recursive=True):
             try:
                 h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, child.pid)
                 if h_proc:
@@ -206,6 +210,7 @@ def disable_ecoqos_for_process_tree():
                 pass
     except Exception:
         pass
+
 
 def trigger_lockout_overlay(duration_seconds=20):
     """Enforce a fullscreen borderless Tkinter window to lockout visual focus with a Brain Dump phase."""

@@ -1520,7 +1520,7 @@ async function loadAnalytics() {
                 let currentTick = startHourDate.getTime();
                 while (currentTick < endBound) {
                     const pct = ((currentTick - startBound) / totalRangeMs) * 100;
-                    if (pct >= 0 && pct <= 100) {
+                    if (pct >= 1.5 && pct <= 98.5) {
                         const tickDate = new Date(currentTick);
                         const label = tickDate.toLocaleTimeString([], { hour: 'numeric', hour12: true });
                         
@@ -2388,8 +2388,15 @@ async function quitApplication() {
 
 // Automatically redraw analytics chart on window resize
 let resizeTimeout;
+let isIndicatorTicking = false;
 window.addEventListener('resize', () => {
-    updateNavIndicator();
+    if (!isIndicatorTicking) {
+        window.requestAnimationFrame(() => {
+            updateNavIndicator();
+            isIndicatorTicking = false;
+        });
+        isIndicatorTicking = true;
+    }
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
         if (currentTab === 'analytics' && lastWeekdaySummary) {
@@ -3064,15 +3071,22 @@ function hideSkeletons() {
         
         const startX = e.clientX;
         const startWidth = sidebar.getBoundingClientRect().width;
+        let resizerTicking = false;
         
         function onMouseMove(moveEvent) {
             const currentX = moveEvent.clientX;
             // Enforce limits: 200px min, 450px max
             const newWidth = Math.max(200, Math.min(450, startWidth + (currentX - startX)));
-            container.style.setProperty('--sidebar-width', `${newWidth}px`);
-            localStorage.setItem('sidebar-width', newWidth);
             
-            updateNavIndicator();
+            if (!resizerTicking) {
+                window.requestAnimationFrame(() => {
+                    container.style.setProperty('--sidebar-width', `${newWidth}px`);
+                    localStorage.setItem('sidebar-width', newWidth);
+                    updateNavIndicator();
+                    resizerTicking = false;
+                });
+                resizerTicking = true;
+            }
         }
         
         function onMouseUp() {
@@ -4484,6 +4498,14 @@ class ZenParticle {
     }
 }
 
+let zenResizeTimeout = null;
+function handleZenCanvasResize() {
+    clearTimeout(zenResizeTimeout);
+    zenResizeTimeout = setTimeout(() => {
+        resizeZenCanvas();
+    }, 100);
+}
+
 function initZenCanvas() {
     zenCanvas = document.getElementById('zen-canvas');
     if (!zenCanvas) return;
@@ -4501,7 +4523,7 @@ function initZenCanvas() {
     zenCanvas.addEventListener('mouseleave', handleZenMouseLeave);
     zenCanvas.addEventListener('mouseenter', handleZenMouseEnter);
     zenCanvas.addEventListener('mousedown', handleZenCanvasClick);
-    window.addEventListener('resize', resizeZenCanvas);
+    window.addEventListener('resize', handleZenCanvasResize);
     
     zenStartTime = Date.now();
     lastFrameTime = 0;
@@ -4523,7 +4545,7 @@ function stopZenCanvas() {
         zenCanvas = null;
     }
     zenCtx = null;
-    window.removeEventListener('resize', resizeZenCanvas);
+    window.removeEventListener('resize', handleZenCanvasResize);
 }
 
 function resizeZenCanvas() {

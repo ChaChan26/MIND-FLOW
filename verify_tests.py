@@ -673,7 +673,7 @@ class TestMindFlowAPI(unittest.TestCase):
         }
         
         original_reflections = self.db.data.get("reflections", []).copy()
-        self.db.data["reflections"] = [ref_current, ref_prev]
+        self.db.data["reflections"] = [ref_prev, ref_current]
         self.db.save()
         
         try:

@@ -328,20 +328,30 @@ def get_status():
     else:
         forecast_message = "Forecast: Stamina optimal. Pace your sprints to sustain focus."
  
-    # Compare with past days' average daily curves to detect deficits
+    # Compare with past days' average daily curves to detect deficits (optimized with reverse scan capped at 30 days)
     try:
         from collections import defaultdict
+        from datetime import timedelta
         reflections_by_date = defaultdict(list)
-        for r in reflections:
+        thirty_days_ago = date.today() - timedelta(days=30)
+        for r in reversed(reflections):
             try:
-                r_date = datetime.fromisoformat(r["timestamp"]).date()
+                r_dt = datetime.fromisoformat(r["timestamp"])
+                r_date = r_dt.date()
+                if r_date < thirty_days_ago:
+                    break
                 if r_date < date.today():
                     reflections_by_date[r_date].append(r["energy_level"])
             except:
                 pass
         if reflections_by_date:
             avg_past_daily_energy = sum(sum(levels)/len(levels) for levels in reflections_by_date.values()) / len(reflections_by_date)
-            today_levels = [r["energy_level"] for r in reflections if r["timestamp"].startswith(today_str)]
+            today_levels = []
+            for r in reversed(reflections):
+                if r["timestamp"].startswith(today_str):
+                    today_levels.append(r["energy_level"])
+                else:
+                    break
             if today_levels:
                 today_avg = sum(today_levels) / len(today_levels)
                 if today_avg < avg_past_daily_energy - 0.5:
@@ -503,99 +513,107 @@ def get_analytics():
     start_date_str = target_monday.isoformat()
     end_date_str = target_sunday.isoformat()
     
-    # Filter reflections for this week
+    # Filter reflections for this week (optimized with reverse scan since reflections are chronological)
     filtered_reflections = []
-    for r in reflections:
+    for r in reversed(reflections):
         try:
             dt = datetime.fromisoformat(r["timestamp"])
-            # Strip timezone if present to make comparisons offset-naive
             if dt.tzinfo is not None:
                 dt = dt.replace(tzinfo=None)
-            if start_dt <= dt <= end_dt:
-                filtered_reflections.append(r)
+            if dt > end_dt:
+                continue
+            if dt < start_dt:
+                break
+            filtered_reflections.append(r)
         except Exception:
             pass
+    filtered_reflections.reverse()
 
     # Classification cache to avoid redundant regex matching across thousands of entries
     classification_cache = {}
     
     processed_app_usage = []
-    # Filter app usage by target week start and end dates
-    for entry in app_usage:
+    # Filter app usage by target week start and end dates (optimized with reverse scan since app_usage is chronological)
+    for entry in reversed(app_usage):
         entry_date = entry.get("date", "")
-        if entry_date and start_date_str <= entry_date <= end_date_str:
-            process = entry.get("process", "")
-            title = entry.get("title", "")
-            titles = entry.get("titles", {})
+        if not entry_date:
+            continue
+        if entry_date > end_date_str:
+            continue
+        if entry_date < start_date_str:
+            break
             
-            # Determine category for each title separately
-            title_categories = {}
-            work_dur = 0
-            recharge_dur = 0
-            neutral_dur = 0
-            
-            if titles:
-                for t, dur in titles.items():
-                    cache_key = (process, t)
-                    if cache_key in classification_cache:
-                        cat = classification_cache[cache_key]
-                    else:
-                        cat = "neutral"
-                        if any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in work_keywords):
-                            cat = "work"
-                        elif any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in recharge_keywords):
-                            cat = "recharge"
-                        classification_cache[cache_key] = cat
-                    
-                    title_categories[t] = cat
-                    if cat == "work":
-                        work_dur += dur
-                    elif cat == "recharge":
-                        recharge_dur += dur
-                    else:
-                        neutral_dur += dur
-            else:
-                # Fallback if titles is empty
-                cache_key = (process, title)
+        process = entry.get("process", "")
+        title = entry.get("title", "")
+        titles = entry.get("titles", {})
+        
+        # Determine category for each title separately
+        title_categories = {}
+        work_dur = 0
+        recharge_dur = 0
+        neutral_dur = 0
+        
+        if titles:
+            for t, dur in titles.items():
+                cache_key = (process, t)
                 if cache_key in classification_cache:
                     cat = classification_cache[cache_key]
                 else:
                     cat = "neutral"
-                    if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
+                    if any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in work_keywords):
                         cat = "work"
-                    elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
+                    elif any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in recharge_keywords):
                         cat = "recharge"
                     classification_cache[cache_key] = cat
-                title_categories[title] = cat
-                dur = entry.get("duration", 0)
+                
+                title_categories[t] = cat
                 if cat == "work":
                     work_dur += dur
                 elif cat == "recharge":
                     recharge_dur += dur
                 else:
                     neutral_dur += dur
-
-            # Predominant category is the one with the maximum duration
-            if work_dur >= recharge_dur and work_dur >= neutral_dur:
-                predominant_category = "work"
-            elif recharge_dur >= work_dur and recharge_dur >= neutral_dur:
-                predominant_category = "recharge"
+        else:
+            # Fallback if titles is empty
+            cache_key = (process, title)
+            if cache_key in classification_cache:
+                cat = classification_cache[cache_key]
             else:
-                predominant_category = "neutral"
-                
-            processed_app_usage.append({
-                "date": entry.get("date"),
-                "process": process,
-                "title": title,
-                "titles": titles,
-                "duration": entry.get("duration", 0),
-                "category": predominant_category,
-                "work_duration": work_dur,
-                "recharge_duration": recharge_dur,
-                "neutral_duration": neutral_dur,
-                "title_categories": title_categories
-            })
-    processed_app_usage.reverse()
+                cat = "neutral"
+                if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
+                    cat = "work"
+                elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
+                    cat = "recharge"
+                classification_cache[cache_key] = cat
+            title_categories[title] = cat
+            dur = entry.get("duration", 0)
+            if cat == "work":
+                work_dur += dur
+            elif cat == "recharge":
+                recharge_dur += dur
+            else:
+                neutral_dur += dur
+
+        # Predominant category is the one with the maximum duration
+        if work_dur >= recharge_dur and work_dur >= neutral_dur:
+            predominant_category = "work"
+        elif recharge_dur >= work_dur and recharge_dur >= neutral_dur:
+            predominant_category = "recharge"
+        else:
+            predominant_category = "neutral"
+            
+        processed_app_usage.append({
+            "date": entry.get("date"),
+            "process": process,
+            "title": title,
+            "titles": titles,
+            "duration": entry.get("duration", 0),
+            "category": predominant_category,
+            "work_duration": work_dur,
+            "recharge_duration": recharge_dur,
+            "neutral_duration": neutral_dur,
+            "title_categories": title_categories
+        })
     
     # Calculate energy vs friction mapping for target week
     energy_levels = [r["energy_level"] for r in filtered_reflections]
@@ -655,13 +673,29 @@ def get_analytics():
             "Your routine looks balanced! Keep logging your daily states to refine your battery predictions."
         )
 
-    # Compute high-quality structured premium insights
+    # Filter sessions for this week (optimized with reverse scan since sessions are chronological)
+    filtered_sessions = []
+    for s in reversed(sessions):
+        try:
+            s_start = s.get("start", "")
+            if not s_start:
+                continue
+            if s_start > end_date_str + "T23:59:59":
+                continue
+            if s_start < start_date_str:
+                break
+            filtered_sessions.append(s)
+        except Exception:
+            pass
+    filtered_sessions.reverse()
+
+    # Compute high-quality structured premium insights (scoped to the selected week)
     insights = []
     
     total_work = 0
     total_rest_recharge = 0
     bypassed_count = 0
-    for s in sessions:
+    for s in filtered_sessions:
         mode = s.get("mode")
         duration = s.get("duration", 0)
         if mode == "work":
@@ -727,8 +761,8 @@ def get_analytics():
             "actionable_tip": "Keep it up. Regular micro-breaks keep your brain primed for complex debugging tasks."
         })
 
-    # Insight 3: High Friction Hotspots
-    high_friction_reflections = [r for r in reflections if r["friction_level"] >= 4]
+    # Insight 3: High Friction Hotspots (scoped to selected week)
+    high_friction_reflections = [r for r in filtered_reflections if r["friction_level"] >= 4]
     if high_friction_reflections:
         recent_refl = high_friction_reflections[-1]
         insights.append({
@@ -740,7 +774,7 @@ def get_analytics():
             "description": f"High task friction detected in recent focus sessions. Your latest obstacle was: '{recent_refl.get('summary', '')}'. High friction points to structural roadblocks or mental fatigue.",
             "actionable_tip": "Divide your current complex task into small sub-tasks. Check in with tags like 'Coding Win' to boost motivation."
         })
-    elif reflections:
+    elif filtered_reflections:
         insights.append({
             "id": "friction_hotspot",
             "title": "Friction Status",
@@ -777,9 +811,9 @@ def get_analytics():
             "actionable_tip": "Enable Autopilot in Preferences to let the companion adapt dynamically to your daily cognitive capacity."
         })
 
-    # Insight 5: Circadian Peak Energy
+    # Insight 5: Circadian Peak Energy (optimized to scan latest 100 reflections to avoid all-time database overhead)
     time_groups = {"morning": [], "afternoon": [], "evening": [], "night": []}
-    for r in reflections:
+    for r in reflections[-100:]:
         try:
             dt = datetime.fromisoformat(r["timestamp"])
             h = dt.hour

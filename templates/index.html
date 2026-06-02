@@ -90,14 +90,6 @@
 
                 <!-- Energy Battery Widget (Top Full-Width Hero Position) -->
                 <div class="card glass-card battery-card">
-                    <div class="battery-card-forest-overlay">
-                        <span class="forest-leaf leaf-1">🍃</span>
-                        <span class="forest-leaf leaf-2">🌿</span>
-                        <span class="forest-leaf leaf-3">🌲</span>
-                        <span class="forest-mote mote-1"></span>
-                        <span class="forest-mote mote-2"></span>
-                        <span class="forest-mote mote-3"></span>
-                    </div>
                     <div class="battery-card-header">
                         <h3>Daily Mental Battery</h3>
                         <span class="battery-charging-indicator" id="battery-charge-status">⚡ discharging</span>
@@ -418,7 +410,7 @@
                                 <h3>Weekly Fatigue & Friction Analysis</h3>
                                 <p class="card-desc">Comparison of task friction against mental energy levels throughout the week.</p>
                             </div>
-                            <div class="week-navigation" style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); align-self: flex-start;">
+                            <div class="week-navigation" style="display: flex; align-items: center; gap: 0.5rem; background: var(--input-bg); border: 1px solid var(--border-color); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); align-self: flex-start;">
                                 <button type="button" class="week-nav-btn" id="prev-week-btn" onclick="navigateWeek(1)" style="background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0.5rem; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='none'" title="Previous Week">◀</button>
                                 <span id="current-week-label" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); min-width: 145px; text-align: center; white-space: nowrap; user-select: none;">Loading week...</span>
                                 <button type="button" class="week-nav-btn" id="next-week-btn" onclick="navigateWeek(-1)" style="background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0.5rem; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; opacity: 0.4;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='none'" title="Next Week" disabled>▶</button>
@@ -588,7 +580,7 @@
                             <div class="form-group" style="margin-top: 1rem;">
                                 <label for="hydration-unit-input">Measurement Unit</label>
                                 <p class="setting-desc">Preferred unit of measurement.</p>
-                                <select id="hydration-unit-input" style="width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.95rem; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.9rem;">
+                                <select id="hydration-unit-input" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.95rem; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.9rem;">
                                     <option value="cups">Cups (c)</option>
                                     <option value="ml">Milliliters (ml)</option>
                                     <option value="oz">Ounces (oz)</option>
@@ -738,19 +730,19 @@
                                     
                                     <div class="grounding-inputs-area" id="grounding-inputs-area">
                                         <div class="grounding-input-row" style="margin-bottom: 0.5rem;">
-                                            <input type="text" class="grounding-field" id="grounding-input-0" placeholder="Acknowledge item 1..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                            <input type="text" class="grounding-field" id="grounding-input-0" placeholder="Acknowledge item 1..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
                                         </div>
                                         <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-1">
-                                            <input type="text" class="grounding-field" id="grounding-input-1" placeholder="Acknowledge item 2..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                            <input type="text" class="grounding-field" id="grounding-input-1" placeholder="Acknowledge item 2..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
                                         </div>
                                         <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-2">
-                                            <input type="text" class="grounding-field" id="grounding-input-2" placeholder="Acknowledge item 3..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                            <input type="text" class="grounding-field" id="grounding-input-2" placeholder="Acknowledge item 3..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
                                         </div>
                                         <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-3">
-                                            <input type="text" class="grounding-field" id="grounding-input-3" placeholder="Acknowledge item 4..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                            <input type="text" class="grounding-field" id="grounding-input-3" placeholder="Acknowledge item 4..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
                                         </div>
                                         <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-4">
-                                            <input type="text" class="grounding-field" id="grounding-input-4" placeholder="Acknowledge item 5..." style="width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                            <input type="text" class="grounding-field" id="grounding-input-4" placeholder="Acknowledge item 5..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
                                         </div>
                                     </div>
                                 </div>
@@ -771,7 +763,7 @@
                                 </div>
                                 <p class="card-desc" style="margin-bottom: 1rem;">Select a mindful theme to anchor your focus and energy during breaks.</p>
                                 
-                                <div class="word-content-container" id="active-word-content" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; transition: opacity 0.2s ease;">
+                                <div class="word-content-container" id="active-word-content" style="background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; transition: opacity 0.2s ease;">
                                     <div style="display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem;">
                                         <h4 id="active-word-title" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0;">Stillness</h4>
                                         <span id="active-word-pronounce" style="font-size: 0.8rem; color: var(--text-muted); font-family: 'Outfit', sans-serif;">/ˈstɪlnəs/</span>
