@@ -67,6 +67,7 @@ const trackingStatusText = document.getElementById('tracking-status-text');
 // Ratings Selectors (Quick Reflection)
 let selectedEnergy = 5;
 let selectedFriction = 2;
+let selectedMood = 'Neutral';
 
 document.querySelectorAll('#energy-rating .rate-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -84,6 +85,17 @@ document.querySelectorAll('#friction-rating .rate-btn').forEach(btn => {
         document.querySelectorAll('#friction-rating .rate-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         selectedFriction = parseInt(btn.getAttribute('data-val'));
+        
+        btn.classList.add('clicked');
+        setTimeout(() => btn.classList.remove('clicked'), 400);
+    });
+});
+
+document.querySelectorAll('#mood-rating .rate-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#mood-rating .rate-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedMood = btn.getAttribute('data-val');
         
         btn.classList.add('clicked');
         setTimeout(() => btn.classList.remove('clicked'), 400);
@@ -200,49 +212,7 @@ setInterval(updateClock, 1000);
 updateClock();
 
 
-// 3D Card Tilt Effect (Optimized with cached dimensions and requestAnimationFrame)
-document.querySelectorAll('.card').forEach(card => {
-    let rect = null;
-    let cardTicking = false;
-    let localMouseX = 0;
-    let localMouseY = 0;
-    
-    card.addEventListener('mouseenter', () => {
-        rect = card.getBoundingClientRect();
-        card.style.transition = 'transform 0.1s ease-out, border-color 0.3s ease, box-shadow 0.4s ease';
-    });
-    
-    card.addEventListener('mousemove', (e) => {
-        if (!rect) rect = card.getBoundingClientRect();
-        localMouseX = e.clientX - rect.left;
-        localMouseY = e.clientY - rect.top;
-        
-        if (!cardTicking) {
-            requestAnimationFrame(updateCardTilt);
-            cardTicking = true;
-        }
-    });
-    
-    function updateCardTilt() {
-        if (!rect) {
-            cardTicking = false;
-            return;
-        }
-        
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        const rotateX = ((localMouseY - centerY) / centerY) * -3;
-        const rotateY = ((localMouseX - centerX) / centerX) * 3;
-        card.style.transform = `perspective(800px) rotate3d(1, 0, 0, ${rotateX}deg) rotate3d(0, 1, 0, ${rotateY}deg) translate3d(0, -4px, 0)`;
-        cardTicking = false;
-    }
-    
-    card.addEventListener('mouseleave', () => {
-        rect = null;
-        card.style.transition = 'transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s ease, box-shadow 0.4s ease';
-        card.style.transform = 'perspective(800px) rotate3d(1, 0, 0, 0deg) rotate3d(0, 1, 0, 0deg) translate3d(0, 0, 0)';
-    });
-});
+
 
 // Format Seconds -> MM:SS
 function formatTime(seconds) {
@@ -562,6 +532,17 @@ async function pollStatus() {
             batteryStatusMsg.textContent = 'FULLY CHARGED: High energy! Safe for deep focus, but remember to stand up, stretch, and rest more at regular intervals.';
             batteryStatusMsg.style.color = 'var(--text-secondary)';
         }
+
+        // Update battery forecast message
+        const forecastMsg = document.getElementById('battery-forecast-msg');
+        if (forecastMsg) {
+            if (status.forecast_message) {
+                forecastMsg.textContent = status.forecast_message;
+                forecastMsg.style.display = 'block';
+            } else {
+                forecastMsg.style.display = 'none';
+            }
+        }
         
         // 6. Companion Companion State Toggle Status
         if (status.tracking_active) {
@@ -589,6 +570,7 @@ async function pollStatus() {
         if (status.hydration !== undefined) {
             updateHydrationUI(status.hydration);
         }
+
         
         // 7.8 Periodically reload analytics every 10 seconds on active tabs
         const now = Date.now();
@@ -816,6 +798,11 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
                 document.body.classList.remove('eye-care-active');
             }
             
+            // Dynamically scale particles in Zen Canvas if open
+            if (zenCanvas) {
+                resetZenParticles();
+            }
+            
             // Re-cache initial settings
             initialSettings = {
                 work_duration_minutes: settings.work_duration_minutes,
@@ -874,7 +861,8 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
     const payload = {
         energy_level: selectedEnergy,
         friction_level: selectedFriction,
-        summary: summaryInput.value
+        summary: summaryInput.value,
+        mood: selectedMood
     };
     
     try {
@@ -888,6 +876,17 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
             showToast("Reflection logged inside private vault.");
             triggerParticleBurst(lastSubmitClick);
             summaryInput.value = '';
+            
+            // Reset selected mood
+            selectedMood = 'Neutral';
+            document.querySelectorAll('#mood-rating .rate-btn').forEach(btn => {
+                if (btn.getAttribute('data-val') === 'Neutral') {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            
             pollStatus(); // Immediately update battery meter
         } else {
             showToast("Failed to save reflection", true);
@@ -1195,6 +1194,150 @@ async function loadAnalytics() {
             }
         }
         
+        // 1.5. Render Flow Triggers and Cognitive Leaks Analyser
+        const flowTriggersList = document.getElementById('flow-triggers-list');
+        const cognitiveLeaksList = document.getElementById('cognitive-leaks-list');
+        
+        if (flowTriggersList && cognitiveLeaksList) {
+            flowTriggersList.innerHTML = '';
+            cognitiveLeaksList.innerHTML = '';
+            
+            const flowKeywords = new Set();
+            const leakKeywords = new Set();
+            
+            const reflections = data.reflections || [];
+            const stopWords = new Set(['and', 'the', 'for', 'with', 'this', 'that', 'from', 'your', 'continuous', 'focus', 'tracking', 'companion', 'active', 'recovery']);
+            
+            reflections.forEach(r => {
+                const summary = (r.summary || '').toLowerCase();
+                const energy = r.energy_level;
+                const friction = r.friction_level;
+                
+                const terms = summary.match(/[a-zA-Z0-9'#+.-]+/g) || [];
+                terms.forEach(term => {
+                    if (term.length > 3 && !stopWords.has(term)) {
+                        if (energy >= 4 && friction <= 2) {
+                            flowKeywords.add(term);
+                        } else if (friction >= 4 || energy <= 2) {
+                            leakKeywords.add(term);
+                        }
+                    }
+                });
+            });
+            
+            const appUsage = data.app_usage || [];
+            const workApps = [];
+            const distractApps = [];
+            
+            appUsage.forEach(app => {
+                if (app.category === 'work') {
+                    workApps.push({ name: app.process, dur: app.duration });
+                } else if (app.category === 'recharge' || app.category === 'neutral') {
+                    distractApps.push({ name: app.process, dur: app.duration });
+                }
+            });
+            
+            workApps.sort((a, b) => b.dur - a.dur);
+            distractApps.sort((a, b) => b.dur - a.dur);
+            
+            const topWork = workApps.slice(0, 3).map(a => a.name);
+            const topDistract = distractApps.slice(0, 3).map(a => a.name);
+            
+            const triggers = new Set([...topWork, ...Array.from(flowKeywords).slice(0, 4)]);
+            const leaks = new Set([...topDistract, ...Array.from(leakKeywords).slice(0, 4)]);
+            
+            const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
+            
+            if (triggers.size === 0) {
+                triggers.add('Deep Focus');
+                triggers.add('Clean Code');
+            }
+            if (leaks.size === 0) {
+                leaks.add('Multi-tasking');
+                leaks.add('Context Switching');
+            }
+            
+            triggers.forEach(t => {
+                const pill = document.createElement('span');
+                pill.style.background = 'rgba(45, 212, 168, 0.08)';
+                pill.style.border = '1px solid rgba(45, 212, 168, 0.25)';
+                pill.style.color = '#2dd4a8';
+                pill.style.fontSize = '0.72rem';
+                pill.style.padding = '0.25rem 0.5rem';
+                pill.style.borderRadius = '6px';
+                pill.style.fontWeight = '600';
+                pill.style.display = 'inline-block';
+                pill.textContent = capitalize(t);
+                flowTriggersList.appendChild(pill);
+            });
+            
+            leaks.forEach(l => {
+                const pill = document.createElement('span');
+                pill.style.background = 'rgba(239, 68, 68, 0.08)';
+                pill.style.border = '1px solid rgba(239, 68, 68, 0.25)';
+                pill.style.color = '#ef4444';
+                pill.style.fontSize = '0.72rem';
+                pill.style.padding = '0.25rem 0.5rem';
+                pill.style.borderRadius = '6px';
+                pill.style.fontWeight = '600';
+                pill.style.display = 'inline-block';
+                pill.textContent = capitalize(l);
+                cognitiveLeaksList.appendChild(pill);
+            });
+        }
+        
+        // 1.8. Render Mood Distribution Card
+        const moodDistList = document.getElementById('mood-distribution-list');
+        if (moodDistList) {
+            moodDistList.innerHTML = '';
+            const moodCounts = data.mood_counts || {};
+            const totalMoods = Object.values(moodCounts).reduce((a, b) => a + b, 0);
+            
+            if (totalMoods === 0) {
+                moodDistList.innerHTML = `<div style="text-align: center; padding: 1.5rem 0; color: var(--text-muted); font-size: 0.8rem;">No mood data logged this week. Fill some check-ins above!</div>`;
+            } else {
+                const moodEmojis = {
+                    Calm: '😌', Focused: '🎯', Neutral: '😐',
+                    Anxious: '😟', Overwhelmed: '🤯', Frustrated: '😤', Exhausted: '😴'
+                };
+                const moodColors = {
+                    Calm: '#10b981', Focused: '#3b82f6', Neutral: '#9ca3af',
+                    Anxious: '#fbbf24', Overwhelmed: '#c084fc', Frustrated: '#ef4444', Exhausted: '#6b7280'
+                };
+                
+                Object.entries(moodCounts).forEach(([mood, count]) => {
+                    if (count > 0) {
+                        const pct = Math.round((count / totalMoods) * 100);
+                        const emoji = moodEmojis[mood] || '🌿';
+                        const color = moodColors[mood] || '#a78bfa';
+                        
+                        const row = document.createElement('div');
+                        row.style.display = 'flex';
+                        row.style.flexDirection = 'column';
+                        row.style.gap = '0.25rem';
+                        row.style.marginBottom = '0.5rem';
+                        row.innerHTML = `
+                            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 500;">
+                                <span style="display: flex; align-items: center; gap: 0.25rem;">
+                                    <span>${emoji}</span>
+                                    <span>${mood}</span>
+                                </span>
+                                <span style="color: var(--text-secondary); font-weight: 600;">${count} (${pct}%)</span>
+                            </div>
+                            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.03); border-radius: 3px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05);">
+                                <div style="width: ${pct}%; height: 100%; background: ${color}; border-radius: 3px; box-shadow: 0 0 8px ${color}80; transition: width 0.5s ease-out;"></div>
+                            </div>
+                        `;
+                        moodDistList.appendChild(row);
+                    }
+                });
+                
+                if (moodDistList.children.length === 0) {
+                    moodDistList.innerHTML = `<div style="text-align: center; padding: 1.5rem 0; color: var(--text-muted); font-size: 0.8rem;">No mood data logged this week. Fill some check-ins above!</div>`;
+                }
+            }
+        }
+        
         // 2. Load Reflection Logs table
         const tableBody = document.getElementById('reflections-log-body');
         tableBody.innerHTML = '';
@@ -1232,11 +1375,21 @@ async function loadAnalytics() {
                     summaryText = summaryText.replace('[Autopilot]', '').trim();
                 }
                 
+                let moodHtml = '';
+                if (ref.mood) {
+                    const moodEmojis = {
+                        Calm: '😌', Focused: '🎯', Neutral: '😐',
+                        Anxious: '😟', Overwhelmed: '🤯', Frustrated: '😤', Exhausted: '😴'
+                    };
+                    const emoji = moodEmojis[ref.mood] || '🌿';
+                    moodHtml = `<span class="mood-badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); padding: 0.15rem 0.4rem; border-radius: 6px; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; margin-right: 0.5rem; font-family: sans-serif;" title="Logged Mood: ${ref.mood}">${emoji} ${ref.mood}</span>`;
+                }
+                
                 let summaryHtml = escapeHtml(summaryText);
                 if (isAutopilot) {
-                    summaryHtml = `<span class="autopilot-badge" style="background: rgba(167, 139, 250, 0.12); color: #a78bfa; border: 1px solid rgba(167, 139, 250, 0.25); padding: 0.15rem 0.4rem; border-radius: 6px; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; margin-right: 0.5rem; font-family: sans-serif;" title="Logged automatically by Autopilot">🤖 Autopilot</span><code>${summaryHtml}</code>`;
+                    summaryHtml = `<span class="autopilot-badge" style="background: rgba(167, 139, 250, 0.12); color: #a78bfa; border: 1px solid rgba(167, 139, 250, 0.25); padding: 0.15rem 0.4rem; border-radius: 6px; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; margin-right: 0.5rem; font-family: sans-serif;" title="Logged automatically by Autopilot">🤖 Autopilot</span>${moodHtml}<code>${summaryHtml}</code>`;
                 } else {
-                    summaryHtml = `<code>${summaryHtml}</code>`;
+                    summaryHtml = `${moodHtml}<code>${summaryHtml}</code>`;
                 }
                 
                 tr.innerHTML = `
@@ -1403,21 +1556,22 @@ async function loadAnalytics() {
                     else if (session.mode === 'rest') badgeClass = 'rest-badge';
                     
                     const durationSec = Math.round(session.duration);
-                    const durationText = durationSec < 60 ? `${durationSec} sec` : `${Math.round(durationSec / 60)} min`;
+                    const durationText = durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec / 60)} min`;
                     let modeName = session.mode;
                     if (modeName === 'work') modeName = 'focus';
-                    let summaryText = `${durationText} of ${modeName}`;
-                    if (session.brain_dump) {
-                        summaryText += ` — Save-State: "${escapeHtml(session.brain_dump)}"`;
-                    }
+                    
+                    let summaryHtml = `<strong style="color: var(--text-primary); font-weight: 600;">${durationText}</strong> of <span class="mode-name" style="text-transform: capitalize; font-weight: 500;">${modeName}</span>`;
                     if (session.bypassed) {
-                        summaryText += ` (Eye Rest Bypassed)`;
+                        summaryHtml += ` <span style="font-size: 0.72rem; color: #f87171; font-weight: 600; background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.2); padding: 0.1rem 0.35rem; border-radius: 4px; margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 0.15rem;" title="Eye care breaks were bypassed">⚠️ Bypassed</span>`;
+                    }
+                    if (session.brain_dump) {
+                        summaryHtml += ` <span class="brain-dump-text" style="color: var(--text-muted); font-size: 0.76rem; font-style: italic; display: block; margin-top: 0.3rem; opacity: 0.85; border-left: 2px solid rgba(255,255,255,0.08); padding-left: 0.5rem; line-height: 1.4;">"${escapeHtml(session.brain_dump)}"</span>`;
                     }
                     
                     item.innerHTML = `
                         <span class="event-time">${escapeHtml(timeStr)}</span>
                         <span class="event-badge ${escapeHtml(badgeClass)}">${escapeHtml(session.mode)}</span>
-                        <span class="event-summary">${summaryText}</span>
+                        <span class="event-summary">${summaryHtml}</span>
                     `;
                     
                     // Link hover effects (list card -> track seg)
@@ -2111,6 +2265,31 @@ function renderEnergyMap(weekdayData, reflections) {
 // Initial status load & continuous poll
 pollStatus();
 statusInterval = setInterval(pollStatus, 1000);
+
+// Page Visibility API throttling to save CPU/GPU when minimized/backgrounded
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        // App is minimized or backgrounded: slow down status poll and stop rendering
+        if (statusInterval) {
+            clearInterval(statusInterval);
+            statusInterval = setInterval(pollStatus, 5000);
+        }
+        stopZenCanvas();
+    } else {
+        // App returned to foreground: restore normal status polling speed
+        if (statusInterval) {
+            clearInterval(statusInterval);
+            statusInterval = setInterval(pollStatus, 1000);
+        }
+        pollStatus();
+        
+        // Restore Zen Visualizer if currently on the Zen Space tab
+        const zenTab = document.getElementById('tab-zen');
+        if (zenTab && zenTab.classList.contains('active')) {
+            initZenCanvas();
+        }
+    }
+});
 
 // Helper to extract a high-quality keyword from active window titles or processes, discarding browser names
 function extractCleanKeyword(title, process) {
@@ -2932,6 +3111,8 @@ function toggleSoundboxCollapse() {
     }
 })();
 
+
+
 // ==========================================
 // Micro-Goals Management Controller
 // ==========================================
@@ -3503,10 +3684,12 @@ let zenCanvas = null;
 let zenCtx = null;
 let zenAnimFrame = null;
 let zenParticles = [];
+let lastFrameTime = 0;
 const MAX_ZEN_PARTICLES = 120;
 let zenMouse = { x: null, y: null, active: false };
 let zenStartTime = 0;
 let zenVisualizerMode = 'cosmic';
+let zenBreathingRhythm = 'box';
 let zenRipples = [];
 let lastBreathPhase = "";
 let lightningFlashAlpha = 0;
@@ -4303,7 +4486,8 @@ function initZenCanvas() {
     resizeZenCanvas();
     
     zenParticles = [];
-    for (let i = 0; i < MAX_ZEN_PARTICLES; i++) {
+    const maxParticles = MAX_ZEN_PARTICLES;
+    for (let i = 0; i < maxParticles; i++) {
         zenParticles.push(new ZenParticle(zenCanvas.width, zenCanvas.height));
     }
     
@@ -4314,6 +4498,7 @@ function initZenCanvas() {
     window.addEventListener('resize', resizeZenCanvas);
     
     zenStartTime = Date.now();
+    lastFrameTime = 0;
     
     if (zenAnimFrame) cancelAnimationFrame(zenAnimFrame);
     animateZen();
@@ -4405,7 +4590,7 @@ function handleZenCanvasClick(e) {
                     this.y += this.vy;
                     this.vx *= 0.96;
                     this.vy *= 0.96;
-                    this.life -= 0.022;
+                    this.life = Math.max(0, this.life - 0.022); // Prevent negative life values
                     this.alpha = this.life;
                     this.size = this.baseSize * this.life;
                 },
@@ -4419,7 +4604,7 @@ function handleZenCanvasClick(e) {
                         r = 251; g = 191; b = 36;
                     }
                     ctx.beginPath();
-                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.arc(this.x, this.y, Math.max(0, this.size), 0, Math.PI * 2); // Prevent negative radius
                     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${this.alpha})`;
                     ctx.fill();
                 }
@@ -4442,13 +4627,13 @@ function handleZenCanvasClick(e) {
                     this.x += this.vx;
                     this.y += this.vy;
                     this.vy *= 0.97;
-                    this.life -= 0.015;
+                    this.life = Math.max(0, this.life - 0.015); // Prevent negative life values
                     this.alpha = this.life * 0.65;
                     this.size = this.baseSize * (0.5 + this.life * 0.5);
                 },
                 draw(ctx) {
                     ctx.beginPath();
-                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.arc(this.x, this.y, Math.max(0, this.size), 0, Math.PI * 2); // Prevent negative radius
                     ctx.strokeStyle = `rgba(255, 255, 255, ${this.alpha})`;
                     ctx.lineWidth = 1.0;
                     ctx.stroke();
@@ -4478,7 +4663,8 @@ function setZenVisualizerMode(mode) {
     if (zenCanvas) {
         resizeZenCanvas();
         zenParticles = [];
-        for (let i = 0; i < MAX_ZEN_PARTICLES; i++) {
+        const maxParticles = MAX_ZEN_PARTICLES;
+        for (let i = 0; i < maxParticles; i++) {
             zenParticles.push(new ZenParticle(zenCanvas.width, zenCanvas.height));
         }
     }
@@ -4486,10 +4672,39 @@ function setZenVisualizerMode(mode) {
     showToast(`Visualizer mode set to ${mode.toUpperCase()} ✨`);
 }
 
+function setBreathingRhythm(rhythm) {
+    zenBreathingRhythm = rhythm;
+    document.querySelectorAll('.zen-breathing-bar .filter-pill').forEach(btn => {
+        if (btn.id === `breath-rhythm-${rhythm}`) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Play a brief visual phase ripple
+    if (zenCanvas) {
+        const w = zenCanvas.width;
+        const h = zenCanvas.height;
+        zenRipples.push({
+            x: w / 2,
+            y: h / 2,
+            radius: 10,
+            maxRadius: Math.max(w, h) * 0.5,
+            speed: 3.0,
+            alpha: 0.8,
+            color: '45, 212, 168'
+        });
+    }
+    
+    showToast(`Breathing rhythm set to ${rhythm.toUpperCase()} ✨`);
+}
+
 function resetZenParticles() {
     if (!zenCanvas) return;
     zenParticles = [];
-    for (let i = 0; i < MAX_ZEN_PARTICLES; i++) {
+    const maxParticles = MAX_ZEN_PARTICLES;
+    for (let i = 0; i < maxParticles; i++) {
         zenParticles.push(new ZenParticle(zenCanvas.width, zenCanvas.height));
     }
     showToast("Stardust regenerated ✨");
@@ -4637,7 +4852,8 @@ function drawOceanWaves(ctx, w, h, elapsed, breathFactor) {
     waveLayers.forEach(layer => {
         ctx.beginPath();
         
-        for (let x = 0; x <= w + 8; x += 8) {
+        const step = 8;
+        for (let x = 0; x <= w + step; x += step) {
             const timeTerm = (elapsed * layer.speed);
             const rawAmp = layer.amp * (1 + breathFactor * 0.8);
             let y = layer.baseHeight + Math.sin(x * layer.waveLen + timeTerm) * rawAmp;
@@ -4684,6 +4900,8 @@ function drawOceanWaves(ctx, w, h, elapsed, breathFactor) {
 function animateZen() {
     if (!zenCanvas || !zenCtx) return;
     
+    lastFrameTime = Date.now();
+    
     // If canvas size is zero, try to resize it (in case layout was not complete during init)
     if (zenCanvas.width === 0 || zenCanvas.height === 0) {
         resizeZenCanvas();
@@ -4698,7 +4916,14 @@ function animateZen() {
     }
     
     const elapsed = (Date.now() - zenStartTime) / 1000;
-    const cycleTime = elapsed % 16.0;
+    
+    let cycleTotal = 16.0;
+    if (zenBreathingRhythm === 'relax') {
+        cycleTotal = 19.0;
+    } else if (zenBreathingRhythm === 'coherent') {
+        cycleTotal = 10.0;
+    }
+    const cycleTime = elapsed % cycleTotal;
     
     let breathFactor = 0;
     let breathText = "";
@@ -4706,30 +4931,66 @@ function animateZen() {
     let textGlowColor = "#2dd4a8";
     let breathPhase = "";
     
-    if (cycleTime < 4.0) {
-        breathFactor = cycleTime / 4.0;
-        breathText = "Inhale";
-        breathColor = "rgba(45, 212, 168, 0.35)";
-        textGlowColor = "#2dd4a8";
-        breathPhase = "inhale";
-    } else if (cycleTime < 8.0) {
-        breathFactor = 1.0;
-        breathText = "Hold";
-        breathColor = "rgba(251, 191, 36, 0.35)";
-        textGlowColor = "#fbbf24";
-        breathPhase = "hold-in";
-    } else if (cycleTime < 12.0) {
-        breathFactor = 1.0 - (cycleTime - 8.0) / 4.0;
-        breathText = "Exhale";
-        breathColor = "rgba(167, 139, 250, 0.35)";
-        textGlowColor = "#a78bfa";
-        breathPhase = "exhale";
-    } else {
-        breathFactor = 0.0;
-        breathText = "Hold";
-        breathColor = "rgba(244, 63, 94, 0.35)";
-        textGlowColor = "#f43f5e";
-        breathPhase = "hold-out";
+    if (zenBreathingRhythm === 'box') {
+        if (cycleTime < 4.0) {
+            breathFactor = cycleTime / 4.0;
+            breathText = "Inhale";
+            breathColor = "rgba(45, 212, 168, 0.35)";
+            textGlowColor = "#2dd4a8";
+            breathPhase = "inhale";
+        } else if (cycleTime < 8.0) {
+            breathFactor = 1.0;
+            breathText = "Hold";
+            breathColor = "rgba(251, 191, 36, 0.35)";
+            textGlowColor = "#fbbf24";
+            breathPhase = "hold-in";
+        } else if (cycleTime < 12.0) {
+            breathFactor = 1.0 - (cycleTime - 8.0) / 4.0;
+            breathText = "Exhale";
+            breathColor = "rgba(167, 139, 250, 0.35)";
+            textGlowColor = "#a78bfa";
+            breathPhase = "exhale";
+        } else {
+            breathFactor = 0.0;
+            breathText = "Hold";
+            breathColor = "rgba(244, 63, 94, 0.35)";
+            textGlowColor = "#f43f5e";
+            breathPhase = "hold-out";
+        }
+    } else if (zenBreathingRhythm === 'relax') {
+        if (cycleTime < 4.0) {
+            breathFactor = cycleTime / 4.0;
+            breathText = "Inhale";
+            breathColor = "rgba(45, 212, 168, 0.35)";
+            textGlowColor = "#2dd4a8";
+            breathPhase = "inhale";
+        } else if (cycleTime < 11.0) {
+            breathFactor = 1.0;
+            breathText = "Hold";
+            breathColor = "rgba(251, 191, 36, 0.35)";
+            textGlowColor = "#fbbf24";
+            breathPhase = "hold-in";
+        } else {
+            breathFactor = 1.0 - (cycleTime - 11.0) / 8.0;
+            breathText = "Exhale";
+            breathColor = "rgba(167, 139, 250, 0.35)";
+            textGlowColor = "#a78bfa";
+            breathPhase = "exhale";
+        }
+    } else if (zenBreathingRhythm === 'coherent') {
+        if (cycleTime < 5.0) {
+            breathFactor = cycleTime / 5.0;
+            breathText = "Inhale";
+            breathColor = "rgba(45, 212, 168, 0.35)";
+            textGlowColor = "#2dd4a8";
+            breathPhase = "inhale";
+        } else {
+            breathFactor = 1.0 - (cycleTime - 5.0) / 5.0;
+            breathText = "Exhale";
+            breathColor = "rgba(167, 139, 250, 0.35)";
+            textGlowColor = "#a78bfa";
+            breathPhase = "exhale";
+        }
     }
 
     // Real-time Audio Synth breathing integration
@@ -4836,9 +5097,10 @@ function animateZen() {
                 const p2 = zenParticles[j];
                 const dx = p1.x - p2.x;
                 const dy = p1.y - p2.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+                const distSq = dx * dx + dy * dy;
                 
-                if (dist < 60) {
+                if (distSq < 3600) {
+                    const dist = Math.sqrt(distSq);
                     const alpha = (60 - dist) / 60 * 0.15;
                     zenCtx.beginPath();
                     zenCtx.moveTo(p1.x, p1.y);

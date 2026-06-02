@@ -338,12 +338,14 @@ class TestMindFlowComponents(unittest.TestCase):
             
             # rest fatigue addition: +10 seconds
             # rest bypass deficit: 3 * 10 = 30 seconds
-            # Total rest: 20 + 10 + 30 = 60 seconds
-            self.assertEqual(res["rest_seconds"], 60)
+            # friction rest addition: +24 seconds (avg friction 5.0 -> +24s)
+            # Total rest: 20 + 10 + 30 + 24 = 84 seconds
+            self.assertEqual(res["rest_seconds"], 84)
             self.assertIn("Fatigue (-15m)", res["reason"])
             self.assertIn("Bypasses (-15m)", res["reason"])
             self.assertIn("Rest Alert (+10s)", res["reason"])
             self.assertIn("Rest Deficit (+30s)", res["reason"])
+            self.assertIn("Friction Deficit (+24s)", res["reason"])
             
             # Scenario E: Verify Floor Safety bounds (Work must not fall below 10 mins)
             self.db.update_settings({"work_duration_minutes": 15})
@@ -552,6 +554,29 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(data["reflection"]["energy_level"], 4)
             self.assertEqual(data["reflection"]["friction_level"], 2)
             self.assertEqual(data["reflection"]["summary"], "Testing API Reflection")
+            self.assertIsNone(data["reflection"].get("mood"))
+
+            # Post reflection with mood
+            response_mood = self.client.post('/api/reflections', json={
+                "energy_level": 3,
+                "friction_level": 4,
+                "summary": "Testing API Reflection with Mood",
+                "mood": "Anxious"
+            })
+            self.assertEqual(response_mood.status_code, 200)
+            data_mood = response_mood.get_json()
+            self.assertEqual(data_mood["reflection"]["mood"], "Anxious")
+
+            # Post reflection with invalid mood
+            response_inv = self.client.post('/api/reflections', json={
+                "energy_level": 3,
+                "friction_level": 4,
+                "summary": "Testing API Reflection with Invalid Mood",
+                "mood": "InvalidMoodVal"
+            })
+            self.assertEqual(response_inv.status_code, 200)
+            data_inv = response_inv.get_json()
+            self.assertIsNone(data_inv["reflection"]["mood"])
             
             # Missing param
             response2 = self.client.post('/api/reflections', json={
@@ -779,45 +804,38 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.save()
 
 class TestAppWindowLaunch(unittest.TestCase):
-    @patch('os.path.exists')
     @patch('subprocess.Popen')
-    def test_launch_app_window_chrome(self, mock_popen, mock_exists):
-        # Simulate Chrome existing, Edge not existing
-        def exists_side_effect(path):
-            return "chrome.exe" in path.lower()
-        mock_exists.side_effect = exists_side_effect
-        
+    def test_launch_app_window_frozen(self, mock_popen):
+        import sys
+        # Set sys.frozen temporarily
+        sys.frozen = True
+        try:
+            mock_popen.return_value = MagicMock()
+            result = launch_app_window("http://localhost:5000")
+            self.assertIsNotNone(result)
+            mock_popen.assert_called_once()
+            args = mock_popen.call_args[0][0]
+            self.assertEqual(args[-1], "--gui")
+            self.assertEqual(len(args), 2)
+            self.assertEqual(args[0], sys.executable)
+        finally:
+            if hasattr(sys, 'frozen'):
+                del sys.frozen
+
+    @patch('subprocess.Popen')
+    def test_launch_app_window_dev(self, mock_popen):
+        import sys
+        # Ensure sys.frozen does not exist
+        if hasattr(sys, 'frozen'):
+            del sys.frozen
+        mock_popen.return_value = MagicMock()
         result = launch_app_window("http://localhost:5000")
-        self.assertTrue(result)
+        self.assertIsNotNone(result)
         mock_popen.assert_called_once()
         args = mock_popen.call_args[0][0]
-        self.assertIn("chrome.exe", args[0].lower())
-        self.assertIn("--app=http://localhost:5000", args[1])
-
-    @patch('os.path.exists')
-    @patch('subprocess.Popen')
-    def test_launch_app_window_edge(self, mock_popen, mock_exists):
-        # Simulate Chrome NOT existing, Edge existing
-        def exists_side_effect(path):
-            return "msedge.exe" in path.lower()
-        mock_exists.side_effect = exists_side_effect
-        
-        result = launch_app_window("http://localhost:5000")
-        self.assertTrue(result)
-        mock_popen.assert_called_once()
-        args = mock_popen.call_args[0][0]
-        self.assertIn("msedge.exe", args[0].lower())
-        self.assertIn("--app=http://localhost:5000", args[1])
-
-    @patch('os.path.exists')
-    @patch('webbrowser.open')
-    def test_launch_app_window_fallback(self, mock_web_open, mock_exists):
-        # Simulate neither Chrome nor Edge existing
-        mock_exists.return_value = False
-        
-        result = launch_app_window("http://localhost:5000")
-        self.assertFalse(result)
-        mock_web_open.assert_called_once_with("http://localhost:5000")
+        self.assertEqual(args[-1], "--gui")
+        self.assertEqual(args[0], sys.executable)
+        self.assertEqual(args[1], sys.argv[0])
 
 class TestLockoutOverlay(unittest.TestCase):
     @patch('app.tk.Tk')

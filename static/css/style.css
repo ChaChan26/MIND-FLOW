@@ -58,6 +58,7 @@
     --bg-surface: #0e0e22;
     --card-bg: rgba(14, 14, 34, 0.88);
     --card-bg-solid: #0d0d20;
+    --sidebar-bg: rgba(16, 16, 26, 0.72);
     --border-color: rgba(255, 255, 255, 0.18);
     --border-hover: rgba(255, 255, 255, 0.35);
     --text-primary: #ffffff;
@@ -66,8 +67,10 @@
     
     --work-color: hsl(260, 85%, 80%);
     --work-glow: hsla(260, 85%, 80%, 0.3);
+    --work-glow-color: rgba(167, 139, 250, 0.4);
     --recharge-color: hsl(158, 70%, 60%);
     --recharge-glow: hsla(158, 70%, 60%, 0.3);
+    --recharge-glow-color: rgba(16, 185, 129, 0.4);
     --rest-color: hsl(38, 85%, 66%);
     --rest-glow: hsla(38, 85%, 66%, 0.3);
     --neutral-color: hsl(210, 20%, 75%);
@@ -98,7 +101,7 @@ html {
 }
 
 body {
-    background-color: var(--bg-color);
+    background: radial-gradient(circle at 85% 15%, var(--bg-surface) 0%, var(--bg-color) 100%) no-repeat fixed;
     color: var(--text-primary);
     font-family: 'Inter', sans-serif;
     overflow: hidden; /* Avoid default page scrollbar on desktop */
@@ -115,79 +118,7 @@ h1, h2, h3, h4, .live-clock, .battery-pct {
     font-weight: 600;
 }
 
-/* Background glowing blur blobs (Lava Lamp style) */
-.glass-bg-glow-wrapper {
-    position: fixed;
-    z-index: -1;
-    pointer-events: none;
-    transition: opacity 1.5s ease;
-}
 
-#glow-1 {
-    width: 600px;
-    height: 600px;
-    top: -100px;
-    right: -100px;
-}
-
-#glow-2 {
-    width: 750px;
-    height: 750px;
-    bottom: -220px;
-    left: -180px;
-}
-
-.glass-bg-glow-inner {
-    width: 100%;
-    height: 100%;
-    border-radius: 43% 57% 41% 59% / 57% 45% 55% 43%;
-    filter: blur(180px);
-    opacity: 0.18;
-    pointer-events: none;
-    will-change: transform;
-}
-
-#glow-1-inner {
-    background: var(--active-mode-color, var(--work-color));
-    animation: lava1 25s infinite alternate ease-in-out;
-    transition: background 1.5s ease;
-}
-
-#glow-2-inner {
-    background: rgba(var(--active-mode-secondary-rgb, 52, 211, 153), 1);
-    animation: lava2 30s infinite alternate ease-in-out;
-    transition: background 1.5s ease;
-}
-
-@keyframes lava1 {
-    0% {
-        transform: translate(0, 0) scale(1) rotate(0deg);
-    }
-    33% {
-        transform: translate(-50px, 60px) scale(1.08) rotate(60deg);
-    }
-    66% {
-        transform: translate(50px, -30px) scale(0.92) rotate(120deg);
-    }
-    100% {
-        transform: translate(-20px, -50px) scale(1.05) rotate(180deg);
-    }
-}
-
-@keyframes lava2 {
-    0% {
-        transform: translate(0, 0) scale(1) rotate(0deg);
-    }
-    33% {
-        transform: translate(60px, -50px) scale(0.92) rotate(-60deg);
-    }
-    66% {
-        transform: translate(-40px, 30px) scale(1.08) rotate(-120deg);
-    }
-    100% {
-        transform: translate(30px, 60px) scale(0.95) rotate(-180deg);
-    }
-}
 
 /* Layout container */
 .app-container {
@@ -201,7 +132,7 @@ h1, h2, h3, h4, .live-clock, .battery-pct {
 
 /* Sidebar Navigation Styling */
 .sidebar {
-    background: rgba(16, 16, 26, 0.72);
+    background: var(--sidebar-bg, rgba(16, 16, 26, 0.72));
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     padding: 2rem 1.5rem;
@@ -215,6 +146,7 @@ h1, h2, h3, h4, .live-clock, .battery-pct {
     scrollbar-width: none;
     position: relative; /* Position anchor for resizer */
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    transition: background var(--transition-speed) ease, border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
 }
 
 /* Sidebar Resizer Handle */
@@ -394,6 +326,7 @@ body.resizing * {
 .main-content {
     padding: 2.75rem 3rem;
     overflow-y: auto;
+    overflow-x: hidden;
     scroll-behavior: smooth;
     height: 100%;
     min-height: 0;
@@ -470,7 +403,7 @@ body.resizing * {
     padding: 2rem;
     /* backdrop-filter: blur(var(--glass-blur)); */
     /* -webkit-backdrop-filter: blur(var(--glass-blur)); */
-    transition: transform 0.45s ease-out, border-color var(--transition-speed) ease, box-shadow 0.4s ease;
+    transition: transform 0.45s ease-out, border-color var(--transition-speed) ease, box-shadow 0.4s ease, background var(--transition-speed) ease;
     box-shadow: var(--shadow-card);
     transform-style: preserve-3d;
     will-change: transform;
@@ -542,6 +475,7 @@ body.resizing * {
     border: 1px solid rgba(52, 211, 153, 0.16) !important;
     box-shadow: 0 8px 32px rgba(4, 16, 10, 0.35), inset 0 1px 2px rgba(52, 211, 153, 0.06) !important;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
+    margin-bottom: 1.5rem;
 }
 
 .battery-card:hover {
@@ -1179,7 +1113,7 @@ input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
     stroke-width: 3.5;
     fill: none;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.4));
+    filter: drop-shadow(0 0 8px var(--recharge-glow-color, rgba(16, 185, 129, 0.4)));
 }
 
 .chart-line-friction {
@@ -1187,7 +1121,7 @@ input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
     stroke-width: 3.5;
     fill: none;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.4));
+    filter: drop-shadow(0 0 8px var(--work-glow-color, rgba(139, 92, 246, 0.4)));
 }
 
 .chart-dot-energy {
@@ -1892,12 +1826,16 @@ body.mode-rest .portal-sphere::after {
         gap: 1.25rem;
     }
     
-    .span-3 {
-        grid-column: span 2;
+    .span-3, .span-1 {
+        grid-column: span 2 !important;
     }
     
-    .insight-card, .reflections-list-card {
-        grid-column: span 2;
+    .insight-card, .reflections-list-card, .flow-analysis-card {
+        grid-column: span 2 !important;
+    }
+    
+    #tab-settings .card {
+        grid-column: span 2 !important;
     }
     
     .card {
@@ -2534,41 +2472,44 @@ body.mode-rest .portal-sphere::after {
 .timeline-track {
     position: relative;
     width: 100%;
-    height: 32px;
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
-    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
-    overflow: hidden; /* Clips segments cleanly at rounded ends */
+    height: 24px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
+    overflow: visible; /* Allows hovering capsules to scale out cleanly */
 }
 .timeline-segment {
     position: absolute;
-    height: 100%;
-    top: 0;
-    border-radius: 0;
-    border: none;
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
-    border-right: 1px solid rgba(0, 0, 0, 0.12);
-    transition: all 0.2s ease;
+    height: 14px;
+    top: 5px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     box-sizing: border-box;
 }
 .timeline-segment:hover, .timeline-segment.highlighted {
-    filter: brightness(1.28) contrast(1.12);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+    transform: scaleY(1.35) scaleX(1.01);
+    box-shadow: 0 0 12px var(--active-glow, rgba(255, 255, 255, 0.35));
     z-index: 10;
+    filter: brightness(1.15);
 }
 .timeline-segment.work-seg {
     background: linear-gradient(180deg, var(--work-color) 0%, rgba(139, 92, 246, 0.85) 100%);
+    --active-glow: var(--work-glow);
 }
 .timeline-segment.recharge-seg {
     background: linear-gradient(180deg, var(--recharge-color) 0%, rgba(16, 185, 129, 0.85) 100%);
+    --active-glow: var(--recharge-glow);
 }
 .timeline-segment.rest-seg {
     background: linear-gradient(180deg, var(--rest-color) 0%, rgba(217, 119, 6, 0.85) 100%);
+    --active-glow: var(--rest-glow);
 }
 .timeline-segment.neutral-seg {
     background: linear-gradient(180deg, var(--neutral-color) 0%, rgba(71, 85, 105, 0.85) 100%);
+    --active-glow: rgba(255, 255, 255, 0.1);
 }
 .timeline-tooltip {
     position: absolute;
@@ -2704,12 +2645,13 @@ body.mode-rest .portal-sphere::after {
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: transparent;
-    border: none;
-    padding: 0.65rem 0.5rem 0.65rem 0px;
-    border-radius: 0px;
-    font-size: 0.85rem;
-    transition: all 0.2s ease;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.5rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
 }
 .timeline-event-item::before {
@@ -2751,8 +2693,10 @@ body.mode-rest .portal-sphere::after {
     background: var(--neutral-color);
 }
 .timeline-event-item:hover, .timeline-event-item.highlighted {
-    background: rgba(255, 255, 255, 0.02);
-    box-shadow: inset 3px 0 0 0 var(--active-color, var(--work-color));
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), inset 3px 0 0 0 var(--active-color, var(--work-color));
+    transform: translateY(-1px);
 }
 .timeline-event-item.highlighted::before {
     background: var(--active-color, var(--work-color));
@@ -4744,49 +4688,55 @@ tr.gratitude-row {
 
 /* Theme 1: Cosmic Flow (Dark Space / Indigo Violet) */
 body.theme-cosmic {
-    --bg-color: #060610;
-    --bg-surface: #0e0e22;
-    --card-bg: rgba(14, 14, 34, 0.88);
-    --card-bg-solid: #0d0d20;
-    --border-color: rgba(255, 255, 255, 0.18);
-    --border-hover: rgba(255, 255, 255, 0.35);
-    --shadow-glow: 0 0 45px rgba(180, 154, 255, 0.15);
+    --bg-color: #040409;
+    --bg-surface: #0f0d23;
+    --card-bg: rgba(11, 11, 26, 0.85);
+    --card-bg-solid: #090919;
+    --sidebar-bg: rgba(8, 8, 20, 0.78);
+    --border-color: rgba(167, 139, 250, 0.16);
+    --border-hover: rgba(167, 139, 250, 0.35);
+    --work-glow-color: rgba(167, 139, 250, 0.4);
+    --recharge-glow-color: rgba(16, 185, 129, 0.4);
+    --shadow-glow: 0 0 35px rgba(167, 139, 250, 0.12);
 }
 
 /* Theme 2: Ocean Waves (Marine Cyan & Teal) */
 body.theme-ocean {
-    --bg-color: #020b12;
-    --bg-surface: #031522;
-    --card-bg: rgba(3, 21, 34, 0.88);
-    --card-bg-solid: #041c2d;
-    --border-color: rgba(0, 242, 254, 0.18);
-    --border-hover: rgba(0, 242, 254, 0.35);
+    --bg-color: #01060c;
+    --bg-surface: #031c2f;
+    --card-bg: rgba(3, 23, 39, 0.85);
+    --card-bg-solid: #021727;
+    --sidebar-bg: rgba(2, 19, 32, 0.78);
+    --border-color: rgba(6, 182, 212, 0.16);
+    --border-hover: rgba(6, 182, 212, 0.35);
     --text-primary: #ffffff;
-    --text-secondary: #acd3ef;
-    --text-muted: #749fb9;
+    --text-secondary: #c0def4;
+    --text-muted: #82a8c0;
     
-    --work-color: hsl(185, 90%, 70%);
-    --work-glow: hsla(185, 90%, 70%, 0.35);
-    --recharge-color: hsl(165, 85%, 60%);
-    --recharge-glow: hsla(165, 85%, 60%, 0.3);
-    --rest-color: hsl(205, 90%, 65%);
-    --rest-glow: hsla(205, 90%, 65%, 0.35);
+    --work-color: hsl(188, 90%, 62%);
+    --work-glow: hsla(188, 90%, 62%, 0.3);
+    --work-glow-color: rgba(6, 182, 212, 0.4);
+    --recharge-color: hsl(164, 85%, 55%);
+    --recharge-glow: hsla(164, 85%, 55%, 0.25);
+    --recharge-glow-color: rgba(16, 185, 129, 0.4);
+    --rest-color: hsl(206, 90%, 62%);
+    --rest-glow: hsla(206, 90%, 62%, 0.3);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
-    --active-mode-rgb: 0, 242, 254;
-    --active-mode-secondary-rgb: 79, 172, 254;
+    --active-mode-rgb: 6, 182, 212;
+    --active-mode-secondary-rgb: 59, 130, 246;
     
-    --shadow-glow: 0 0 45px rgba(0, 242, 254, 0.15);
+    --shadow-glow: 0 0 35px rgba(6, 182, 212, 0.12);
 }
 
 body.theme-ocean.mode-work {
-    --active-mode-rgb: 0, 242, 254;
-    --active-mode-secondary-rgb: 79, 172, 254;
+    --active-mode-rgb: 6, 182, 212;
+    --active-mode-secondary-rgb: 59, 130, 246;
 }
 body.theme-ocean.mode-recharge {
-    --active-mode-rgb: 79, 172, 254;
-    --active-mode-secondary-rgb: 0, 242, 254;
+    --active-mode-rgb: 59, 130, 246;
+    --active-mode-secondary-rgb: 6, 182, 212;
 }
 body.theme-ocean.mode-rest {
     --active-mode-rgb: 0, 180, 216;
@@ -4799,29 +4749,32 @@ body.theme-ocean.mode-neutral {
 
 /* Theme 3: Forest Light (Timber Woodland & Sunlight) */
 body.theme-forest {
-    --bg-color: #030b06;
-    --bg-surface: #06140a;
-    --card-bg: rgba(6, 20, 10, 0.88);
-    --card-bg-solid: #092815;
-    --border-color: rgba(52, 211, 153, 0.18);
+    --bg-color: #020704;
+    --bg-surface: #071a0e;
+    --card-bg: rgba(6, 26, 14, 0.85);
+    --card-bg-solid: #041d0e;
+    --sidebar-bg: rgba(4, 21, 11, 0.78);
+    --border-color: rgba(52, 211, 153, 0.16);
     --border-hover: rgba(52, 211, 153, 0.35);
     --text-primary: #ffffff;
-    --text-secondary: #bce7ce;
-    --text-muted: #7eaf90;
+    --text-secondary: #c2e8d2;
+    --text-muted: #84b397;
     
-    --work-color: hsl(150, 75%, 65%);
-    --work-glow: hsla(150, 75%, 65%, 0.35);
-    --recharge-color: hsl(90, 75%, 60%);
-    --recharge-glow: hsla(90, 75%, 60%, 0.3);
-    --rest-color: hsl(35, 85%, 60%);
-    --rest-glow: hsla(35, 85%, 60%, 0.35);
+    --work-color: hsl(150, 75%, 60%);
+    --work-glow: hsla(150, 75%, 60%, 0.3);
+    --work-glow-color: rgba(52, 211, 153, 0.4);
+    --recharge-color: hsl(92, 75%, 56%);
+    --recharge-glow: hsla(92, 75%, 56%, 0.25);
+    --recharge-glow-color: rgba(132, 204, 22, 0.4);
+    --rest-color: hsl(36, 85%, 58%);
+    --rest-glow: hsla(36, 85%, 58%, 0.3);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
     --active-mode-rgb: 52, 211, 153;
     --active-mode-secondary-rgb: 132, 204, 22;
     
-    --shadow-glow: 0 0 45px rgba(16, 185, 129, 0.15);
+    --shadow-glow: 0 0 35px rgba(52, 211, 153, 0.12);
 }
 
 body.theme-forest.mode-work {
@@ -4843,32 +4796,35 @@ body.theme-forest.mode-neutral {
 
 /* Theme 4: Solar Breeze (Clean Light Theme) */
 body.theme-light {
-    --bg-color: #f1f5f9;
+    --bg-color: #f8fafc;
     --bg-surface: #ffffff;
-    --card-bg: rgba(255, 255, 255, 0.88);
+    --card-bg: rgba(255, 255, 255, 0.95);
     --card-bg-solid: #ffffff;
-    --border-color: rgba(15, 23, 42, 0.22);
-    --border-hover: rgba(15, 23, 42, 0.38);
+    --sidebar-bg: rgba(255, 255, 255, 0.8);
+    --border-color: rgba(15, 23, 42, 0.08);
+    --border-hover: rgba(15, 23, 42, 0.18);
     --text-primary: #0f172a;
     --text-secondary: #334155;
-    --text-muted: #475569;
+    --text-muted: #64748b;
     
-    --work-color: hsl(262, 75%, 52%);
-    --work-glow: rgba(139, 92, 246, 0.12);
-    --recharge-color: hsl(160, 84%, 32%);
-    --recharge-glow: rgba(16, 185, 129, 0.12);
-    --rest-color: hsl(38, 92%, 45%);
-    --rest-glow: rgba(245, 158, 11, 0.12);
+    --work-color: hsl(262, 72%, 58%);
+    --work-glow: rgba(139, 92, 246, 0.08);
+    --work-glow-color: rgba(109, 40, 217, 0.15);
+    --recharge-color: hsl(162, 80%, 30%);
+    --recharge-glow: rgba(16, 185, 129, 0.08);
+    --recharge-glow-color: rgba(16, 185, 129, 0.15);
+    --rest-color: hsl(38, 90%, 42%);
+    --rest-glow: rgba(245, 158, 11, 0.08);
     --neutral-color: hsl(215, 16%, 42%);
-    --neutral-glow: rgba(100, 116, 139, 0.08);
+    --neutral-glow: rgba(100, 116, 139, 0.05);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
     --active-mode-rgb: 109, 40, 217;
     --active-mode-secondary-rgb: 13, 148, 136;
     
-    --shadow-card: 0 8px 32px rgba(15, 23, 42, 0.04);
-    --shadow-glow: 0 0 35px rgba(109, 40, 217, 0.05);
+    --shadow-card: 0 10px 30px rgba(15, 23, 42, 0.03);
+    --shadow-glow: 0 0 35px rgba(109, 40, 217, 0.04);
 }
 
 body.theme-light.mode-work {
@@ -4938,8 +4894,7 @@ body.theme-light .timeline-event-item::before {
 }
 
 body.theme-light .glass-bg-glow-inner {
-    opacity: 0.06;
-    filter: blur(140px);
+    opacity: 0.08;
 }
 
 body.theme-light .btn-icon {
@@ -4988,4 +4943,29 @@ body.theme-light .timeline-tooltip {
 }
 body.theme-light .timeline-tooltip::after {
     border-color: rgba(255, 255, 255, 0.98) transparent;
+}
+
+
+
+/* ==========================================
+   Optimization Overrides (Always Active)
+   ========================================== */
+.leaf-1,
+.leaf-2,
+.leaf-3,
+.forest-mote,
+.water-wave,
+.wisdom-emoji,
+.status-ring-outer::after,
+.status-pulse,
+.battery-outer.charging .battery-segment.active,
+.audio-waveform-bar,
+.eq-bar {
+    animation: none !important;
+    transform: none !important;
+}
+
+.card {
+    will-change: auto !important;
+    transform-style: flat !important;
 }

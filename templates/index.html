@@ -19,12 +19,6 @@
             console.error('Error applying theme early:', e);
         }
     </script>
-    <div class="glass-bg-glow-wrapper" id="glow-1">
-        <div class="glass-bg-glow-inner" id="glow-1-inner"></div>
-    </div>
-    <div class="glass-bg-glow-wrapper" id="glow-2">
-        <div class="glass-bg-glow-inner" id="glow-2-inner"></div>
-    </div>
 
     <div class="app-container">
         <!-- Sidebar Navigation -->
@@ -94,6 +88,67 @@
                     <div class="live-clock" id="live-time">10:15 AM</div>
                 </header>
 
+                <!-- Energy Battery Widget (Top Full-Width Hero Position) -->
+                <div class="card glass-card battery-card">
+                    <div class="battery-card-forest-overlay">
+                        <span class="forest-leaf leaf-1">🍃</span>
+                        <span class="forest-leaf leaf-2">🌿</span>
+                        <span class="forest-leaf leaf-3">🌲</span>
+                        <span class="forest-mote mote-1"></span>
+                        <span class="forest-mote mote-2"></span>
+                        <span class="forest-mote mote-3"></span>
+                    </div>
+                    <div class="battery-card-header">
+                        <h3>Daily Mental Battery</h3>
+                        <span class="battery-charging-indicator" id="battery-charge-status">⚡ discharging</span>
+                    </div>
+                    <div class="battery-grid-content">
+                        <div class="battery-wrapper">
+                            <div class="battery-outer">
+                                <div class="battery-segments">
+                                    <div class="battery-segment" data-index="1"></div>
+                                    <div class="battery-segment" data-index="2"></div>
+                                    <div class="battery-segment" data-index="3"></div>
+                                    <div class="battery-segment" data-index="4"></div>
+                                    <div class="battery-segment" data-index="5"></div>
+                                </div>
+                                <div id="battery-fill" style="display: none; width: 0%;"></div>
+                                <div id="battery-bubbles" style="display: none;"></div>
+                                <div class="battery-cap"></div>
+                            </div>
+                            <div class="battery-stats">
+                                <span class="battery-pct" id="battery-pct">0%</span>
+                                <span class="battery-status-msg" id="battery-status-msg">Fully Charged. Safe to perform deep work.</span>
+                                <div class="battery-forecast-msg" id="battery-forecast-msg" style="margin-top: 0.45rem; font-size: 0.72rem; color: var(--text-muted); font-style: italic; border-top: 1px dashed rgba(255, 255, 255, 0.08); padding-top: 0.45rem; display: none; line-height: 1.4;"></div>
+                            </div>
+                        </div>
+                        <div class="quick-stats-divider"></div>
+                        <div class="quick-stats-container">
+                            <div class="quick-stat-item">
+                                <span class="stat-icon">💻</span>
+                                <div class="stat-info">
+                                    <span class="stat-label">Work Time</span>
+                                    <strong id="stat-work-time">0h 0m</strong>
+                                </div>
+                            </div>
+                            <div class="quick-stat-item">
+                                <span class="stat-icon">🎮</span>
+                                <div class="stat-info">
+                                    <span class="stat-label">Recharge Time</span>
+                                    <strong id="stat-recharge-time">0h 0m</strong>
+                                </div>
+                            </div>
+                            <div class="quick-stat-item">
+                                <span class="stat-icon">💤</span>
+                                <div class="stat-info">
+                                    <span class="stat-label">Rest Time</span>
+                                    <strong id="stat-rest-time">0h 0m</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="companion-advice-card" id="companion-message-banner">
                     <span class="advice-icon">🛡️</span>
                     <p id="companion-advice-text">Your companion is watching over you. Looking good!</p>
@@ -112,66 +167,6 @@
                 </div>
 
                 <div class="grid-layout">
-                    <!-- Energy Battery Widget -->
-                    <div class="card glass-card span-2 battery-card">
-                        <div class="battery-card-forest-overlay">
-                            <span class="forest-leaf leaf-1">🍃</span>
-                            <span class="forest-leaf leaf-2">🌿</span>
-                            <span class="forest-leaf leaf-3">🌲</span>
-                            <span class="forest-mote mote-1"></span>
-                            <span class="forest-mote mote-2"></span>
-                            <span class="forest-mote mote-3"></span>
-                        </div>
-                        <div class="battery-card-header">
-                            <h3>Daily Mental Battery</h3>
-                            <span class="battery-charging-indicator" id="battery-charge-status">⚡ discharging</span>
-                        </div>
-                        <div class="battery-grid-content">
-                            <div class="battery-wrapper">
-                                <div class="battery-outer">
-                                    <div class="battery-segments">
-                                        <div class="battery-segment" data-index="1"></div>
-                                        <div class="battery-segment" data-index="2"></div>
-                                        <div class="battery-segment" data-index="3"></div>
-                                        <div class="battery-segment" data-index="4"></div>
-                                        <div class="battery-segment" data-index="5"></div>
-                                    </div>
-                                    <div id="battery-fill" style="display: none; width: 0%;"></div>
-                                    <div id="battery-bubbles" style="display: none;"></div>
-                                    <div class="battery-cap"></div>
-                                </div>
-                                <div class="battery-stats">
-                                    <span class="battery-pct" id="battery-pct">0%</span>
-                                    <span class="battery-status-msg" id="battery-status-msg">Fully Charged. Safe to perform deep work.</span>
-                                </div>
-                            </div>
-                            <div class="quick-stats-divider"></div>
-                            <div class="quick-stats-container">
-                                <div class="quick-stat-item">
-                                    <span class="stat-icon">💻</span>
-                                    <div class="stat-info">
-                                        <span class="stat-label">Work Time</span>
-                                        <strong id="stat-work-time">0h 0m</strong>
-                                    </div>
-                                </div>
-                                <div class="quick-stat-item">
-                                    <span class="stat-icon">🎮</span>
-                                    <div class="stat-info">
-                                        <span class="stat-label">Recharge Time</span>
-                                        <strong id="stat-recharge-time">0h 0m</strong>
-                                    </div>
-                                </div>
-                                <div class="quick-stat-item">
-                                    <span class="stat-icon">💤</span>
-                                    <div class="stat-info">
-                                        <span class="stat-label">Rest Time</span>
-                                        <strong id="stat-rest-time">0h 0m</strong>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Current State Shield Widget -->
                     <div class="card glass-card state-card" id="state-card">
                         <h3>Shield Status</h3>
@@ -221,6 +216,8 @@
                         </div>
                     </div>
 
+
+
                     <!-- Quick Check-in / Reflection Widget -->
                     <div class="card glass-card span-2 reflection-quick-card">
                         <h3>Quick Check-in</h3>
@@ -247,6 +244,18 @@
                                         <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">🌩️</span><span class="rate-label">Tough (4)</span></button>
                                         <button type="button" class="rate-btn" data-val="5"><span class="rate-emoji">🧱</span><span class="rate-label">Blocked (5)</span></button>
                                     </div>
+                                </div>
+                            </div>
+                            <div class="form-group" style="margin-top: 1rem; margin-bottom: 1rem;">
+                                <label>Current Mood / Emotion?</label>
+                                <div class="rating-group" id="mood-rating" style="flex-wrap: wrap; gap: 0.5rem; justify-content: flex-start;">
+                                    <button type="button" class="rate-btn" data-val="Calm" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😌</span><span class="rate-label">Calm</span></button>
+                                    <button type="button" class="rate-btn" data-val="Focused" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">🎯</span><span class="rate-label">Focused</span></button>
+                                    <button type="button" class="rate-btn active" data-val="Neutral" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😐</span><span class="rate-label">Neutral</span></button>
+                                    <button type="button" class="rate-btn" data-val="Anxious" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😟</span><span class="rate-label">Anxious</span></button>
+                                    <button type="button" class="rate-btn" data-val="Overwhelmed" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">🤯</span><span class="rate-label">Overwhelmed</span></button>
+                                    <button type="button" class="rate-btn" data-val="Frustrated" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😤</span><span class="rate-label">Frustrated</span></button>
+                                    <button type="button" class="rate-btn" data-val="Exhausted" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😴</span><span class="rate-label">Exhausted</span></button>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -431,6 +440,41 @@
                         </div>
                     </div>
 
+                    <!-- Cognitive Flow Analyser Widget -->
+                    <div class="card glass-card flow-analysis-card" id="flow-analysis-card">
+                        <h3>Cognitive Flow Analyzer</h3>
+                        <p class="card-desc" style="margin-bottom: 0.85rem;">Weekly detection of focus drivers (Flow Triggers) and friction hotspots (Cognitive Leaks).</p>
+                        <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+                            <div>
+                                <h4 style="font-size: 0.78rem; font-weight: 700; color: var(--recharge-color); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem;">
+                                    <span>🚀</span> Flow Triggers
+                                </h4>
+                                <div id="flow-triggers-list" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                                    <!-- Injected tags -->
+                                </div>
+                            </div>
+                            <div style="border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 0.85rem;">
+                                <h4 style="font-size: 0.78rem; font-weight: 700; color: #ef4444; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem;">
+                                    <span>🚧</span> Cognitive Leaks
+                                </h4>
+                                <div id="cognitive-leaks-list" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                                    <!-- Injected tags -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+ 
+                    <!-- Mental Well-being Card -->
+                    <div class="card glass-card mood-analysis-card" id="mood-analysis-card">
+                        <h3>Weekly Mood Distribution</h3>
+                        <p class="card-desc" style="margin-bottom: 0.85rem;">Aggregated tracking of your emotional states during work and recovery blocks.</p>
+                        <div id="mood-distribution-list" style="display: flex; flex-direction: column; gap: 0.6rem;">
+                            <div style="text-align: center; padding: 1rem 0; color: var(--text-muted); font-size: 0.85rem;">
+                                No mood data logged this week.
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Recent Roadblocks & Reflection Log -->
                     <div class="card glass-card span-2 reflections-list-card">
                         <h3>Reflection Logs</h3>
@@ -509,6 +553,7 @@
                                     <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Apply a warm, low-contrast night light filter to reduce fatigue.</p>
                                 </div>
                             </div>
+
                         </div>
 
                         <!-- Card 2: Foreground Classifier Rules -->
@@ -576,11 +621,17 @@
                 <div class="grid-layout">
                     <!-- Left: Stardust breathing canvas (span-2) -->
                     <div class="card glass-card span-2 zen-card" style="padding: 1.5rem;">
-                        <div class="zen-visualizer-bar" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; width: 100%; justify-content: flex-start; align-items: center; flex-wrap: wrap;">
+                        <div class="zen-visualizer-bar" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; width: 100%; justify-content: flex-start; align-items: center; flex-wrap: wrap;">
                             <span style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; margin-right: 0.5rem;">Visualizer Mode</span>
                             <button type="button" class="filter-pill active" id="zen-mode-cosmic" onclick="setZenVisualizerMode('cosmic')">✨ Cosmic Flow</button>
                             <button type="button" class="filter-pill" id="zen-mode-ocean" onclick="setZenVisualizerMode('ocean')">🌊 Ocean Waves</button>
                             <button type="button" class="filter-pill" id="zen-mode-forest" onclick="setZenVisualizerMode('forest')">🌿 Forest Light</button>
+                        </div>
+                        <div class="zen-breathing-bar" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; width: 100%; justify-content: flex-start; align-items: center; flex-wrap: wrap; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 0.5rem;">
+                            <span style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; margin-right: 0.5rem;">Breathing Rhythm</span>
+                            <button type="button" class="filter-pill active" id="breath-rhythm-box" onclick="setBreathingRhythm('box')">💨 Box (4-4-4-4)</button>
+                            <button type="button" class="filter-pill" id="breath-rhythm-relax" onclick="setBreathingRhythm('relax')">💤 Relax (4-7-8)</button>
+                            <button type="button" class="filter-pill" id="breath-rhythm-coherent" onclick="setBreathingRhythm('coherent')">⚖️ Coherent (5-5)</button>
                         </div>
                         <div class="zen-canvas-container visualizer-cosmic">
                             <canvas id="zen-canvas"></canvas>

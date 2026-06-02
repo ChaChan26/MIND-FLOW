@@ -367,12 +367,13 @@ class MindFlowDB:
         self.data["sessions"].append(session_entry)
         self.save()
 
-    def add_reflection(self, energy_level, friction_level, summary):
+    def add_reflection(self, energy_level, friction_level, summary, mood=None):
         reflection_entry = {
             "timestamp": datetime.now().isoformat(),
             "energy_level": int(energy_level),
             "friction_level": int(friction_level),
-            "summary": str(summary).strip()
+            "summary": str(summary).strip(),
+            "mood": str(mood).strip() if mood else None
         }
         self.data["reflections"].append(reflection_entry)
         self.save()
@@ -527,7 +528,25 @@ class MindFlowDB:
             deficit_rest_mod = 10 * bypasses_today
             deficit_rest_mod = min(deficit_rest_mod, 30)
             
-            total_rest_modifier = ref_rest_mod + deficit_rest_mod
+            # Dynamic rest modifier based on recent task friction logs
+            today_reflections = []
+            for r in reversed(self.data.get("reflections", [])):
+                try:
+                    refl_dt = datetime.fromisoformat(r["timestamp"])
+                    if refl_dt.date() == today_date:
+                        if not r.get("summary", "").startswith("[Autopilot]"):
+                            today_reflections.append(r)
+                    else:
+                        break
+                except:
+                    pass
+            avg_friction = sum(r.get("friction_level", 3) for r in today_reflections) / len(today_reflections) if today_reflections else 1.0
+            friction_rest_mod = 0
+            if avg_friction >= 3.0:
+                friction_rest_mod = int((avg_friction - 2.0) * 8)  # 3.0 average friction -> +8s, 4.0 -> +16s, etc.
+                friction_rest_mod = min(25, friction_rest_mod)
+            
+            total_rest_modifier = ref_rest_mod + deficit_rest_mod + friction_rest_mod
             rest_seconds = min(600, base_rest_seconds + total_rest_modifier)
             
             # Formulate dynamic status reason text
@@ -545,6 +564,9 @@ class MindFlowDB:
                 
             if deficit_rest_mod > 0:
                 reasons.append(f"Rest Deficit (+{deficit_rest_mod}s)")
+                
+            if friction_rest_mod > 0:
+                reasons.append(f"Friction Deficit (+{friction_rest_mod}s)")
                 
             reason_str = " | ".join(reasons) if reasons else "Default"
             

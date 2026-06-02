@@ -5,6 +5,21 @@ from datetime import datetime, date
 from urllib.parse import urlparse
 from flask import Flask, jsonify, request, send_from_directory
 
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+_proc_cache = None
+def get_current_process():
+    global _proc_cache
+    if _proc_cache is None and psutil is not None:
+        try:
+            _proc_cache = psutil.Process()
+        except Exception:
+            pass
+    return _proc_cache
+
 def require_local_origin(f):
     """CSRF protection: reject POST requests from foreign Origins."""
     @wraps(f)
@@ -200,6 +215,34 @@ def get_status():
                 break
         except:
             pass
+
+    # Detect consecutive high stress (low energy <= 2 or high friction >= 4 in the last 2 user reflections)
+    latest_user_reflections = []
+    for r in reversed(reflections):
+        is_auto = r.get("summary", "").startswith("[Autopilot]")
+        if not is_auto:
+            latest_user_reflections.append(r)
+            if len(latest_user_reflections) == 2:
+                break
+                
+    high_stress_alert = False
+    latest_mood = None
+    if len(latest_user_reflections) >= 1:
+        latest_mood = latest_user_reflections[0].get("mood")
+        if len(latest_user_reflections) == 2:
+            stress_flags = []
+            for ur in latest_user_reflections:
+                e = ur.get("energy_level", 5)
+                f = ur.get("friction_level", 1)
+                if e <= 2 or f >= 4:
+                    stress_flags.append(True)
+                else:
+                    stress_flags.append(False)
+            if all(stress_flags):
+                high_stress_alert = True
+
+    if high_stress_alert:
+        adaptive_rest_limit_seconds = max(120, adaptive_rest_limit_seconds * 2)
         
     # Calculate today's total stats (optimized with chronological short-circuiting)
     sessions = db.get_sessions()
@@ -239,7 +282,7 @@ def get_status():
     elif cur_mode == "rest":
         today_rest += elapsed
         
-    # Dynamic companion advice generation
+    # Dynamic companion advice generation with CBT mental health interventions
     companion_message = "Your cognitive shield is active. Looking good!"
     if not shared_state["tracking_active"]:
         companion_message = "Companion is paused. Take care of yourself out there!"
@@ -247,6 +290,18 @@ def get_status():
         companion_message = f"🚨 That's {today_bypasses} breaks skipped today! Your health comes first: Rest more, step away from the keyboard, and take a physical break."
     elif today_bypasses == 1:
         companion_message = "⚠️ I noticed you skipped a break earlier. Rest more during the next cycle: stretch your arms and rest your eyes."
+    elif high_stress_alert:
+        companion_message = "🚨 Persistent high stress detected! MIND-FLOW has scheduled a deep recovery break. Step away, close your eyes, and take a long rest."
+    elif latest_mood and latest_mood.lower() in ["anxious", "overwhelmed", "frustrated", "exhausted"]:
+        mood_lower = latest_mood.lower()
+        if mood_lower == "anxious":
+            companion_message = "😟 Anxious mood logged. Breathe slowly. Remember, your worth is not defined by today's output."
+        elif mood_lower == "overwhelmed":
+            companion_message = "🤯 Feeling overwhelmed? Focus on a single micro-goal. You have the right to close your tabs and rest."
+        elif mood_lower == "frustrated":
+            companion_message = "😤 Frustration is just a signal to pause. A short walk or water break often unlocks the solution."
+        elif mood_lower == "exhausted":
+            companion_message = "😴 Exhaustion detected. Give yourself permission to log off early or start a rest block."
     elif current_energy <= 2:
         companion_message = "🔋 Battery critical! Focus blocks are blocked. Rest more, start your rest cycle, and let your mind drift in Zen Space."
     elif current_energy == 3:
@@ -259,6 +314,40 @@ def get_status():
         companion_message = "💤 Rest block. Close your eyes, rest more, and follow the 20-20-20 rule to relax your eyes."
     else:
         companion_message = "🌳 Energy optimal. Maintain your stamina by remembering to stretch, hydrate, and rest more periodically."
+ 
+    # Calculate battery forecast & circadian check
+    forecast_message = ""
+    if cur_mode == "work" and current_energy > 1:
+        minutes_left = (current_energy - 1) * 5
+        forecast_message = f"Forecast: Battery will deplete to critical in ~{minutes_left} minutes of continuous focus."
+    elif cur_mode in ["recharge", "rest"] and current_energy < 5:
+        minutes_left = (5 - current_energy) * 2
+        forecast_message = f"Forecast: Fully charged battery expected in ~{minutes_left} minutes of continuous recharge."
+    elif current_energy == 1:
+        forecast_message = f"Warning: Cognitive stamina depleted. Recommend a rest cycle of {adaptive_rest_limit_seconds} seconds."
+    else:
+        forecast_message = "Forecast: Stamina optimal. Pace your sprints to sustain focus."
+ 
+    # Compare with past days' average daily curves to detect deficits
+    try:
+        from collections import defaultdict
+        reflections_by_date = defaultdict(list)
+        for r in reflections:
+            try:
+                r_date = datetime.fromisoformat(r["timestamp"]).date()
+                if r_date < date.today():
+                    reflections_by_date[r_date].append(r["energy_level"])
+            except:
+                pass
+        if reflections_by_date:
+            avg_past_daily_energy = sum(sum(levels)/len(levels) for levels in reflections_by_date.values()) / len(reflections_by_date)
+            today_levels = [r["energy_level"] for r in reflections if r["timestamp"].startswith(today_str)]
+            if today_levels:
+                today_avg = sum(today_levels) / len(today_levels)
+                if today_avg < avg_past_daily_energy - 0.5:
+                    forecast_message += " (Accumulated fatigue alert: Energy is running lower than your historic average)"
+    except Exception:
+        pass
 
     return jsonify({
         "current_mode": cur_mode,
@@ -280,7 +369,10 @@ def get_status():
         "last_external_window": shared_state["last_external_window"],
         "last_external_process": shared_state["last_external_process"],
         "current_goal": db.get_current_goal(),
-        "hydration": db.get_hydration()
+        "hydration": db.get_hydration(),
+        "forecast_message": forecast_message,
+        "high_stress_alert": high_stress_alert,
+        "latest_mood": latest_mood
     })
 
 @app.route("/api/status/toggle", methods=["POST"])
@@ -355,6 +447,7 @@ def manage_reflections():
         energy = data.get("energy_level")
         friction = data.get("friction_level")
         summary = data.get("summary", "")
+        mood = data.get("mood")
         
         if energy is None or friction is None:
             return jsonify({"error": "energy_level and friction_level are required"}), 400
@@ -366,8 +459,14 @@ def manage_reflections():
         except (ValueError, TypeError):
             return jsonify({"error": "energy_level and friction_level must be integers 1-5"}), 400
         summary = str(summary).strip()[:500]  # Cap summary length
+        
+        validated_mood = None
+        if mood:
+            mood_str = str(mood).strip()
+            mood_map = {m.lower(): m for m in ["Calm", "Focused", "Anxious", "Overwhelmed", "Frustrated", "Exhausted", "Neutral"]}
+            validated_mood = mood_map.get(mood_str.lower(), None)
             
-        entry = db.add_reflection(energy, friction, summary)
+        entry = db.add_reflection(energy, friction, summary, mood=validated_mood)
         return jsonify({"status": "success", "reflection": entry})
     else:
         return jsonify(db.get_reflections())
@@ -749,6 +848,12 @@ def get_analytics():
             }
             today_sessions.append(ongoing_session)
 
+    mood_counts = {m: 0 for m in ["Calm", "Focused", "Anxious", "Overwhelmed", "Frustrated", "Exhausted", "Neutral"]}
+    for r in filtered_reflections:
+        mood = r.get("mood")
+        if mood in mood_counts:
+            mood_counts[mood] += 1
+
     return jsonify({
         "reflections": filtered_reflections[-15:], # Send last 15 filtered reflections for recent list
         "weekday_summary": weekday_summary,
@@ -758,7 +863,8 @@ def get_analytics():
         "total_sessions": len(sessions),
         "today_sessions": today_sessions,
         "app_usage": processed_app_usage,
-        "week_label": week_label
+        "week_label": week_label,
+        "mood_counts": mood_counts
     })
 
 @app.route("/api/shutdown", methods=["POST"])

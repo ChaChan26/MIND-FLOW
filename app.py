@@ -65,6 +65,15 @@ PHYSICAL_STRETCHES = [
     "Rotate your wrists in slow circles outward, then inward 5 times."
 ]
 
+EYE_EXERCISES = [
+    "Look at the moving balloon and track it slowly with your eyes only, keeping your head still.",
+    "Look at an object at least 20 feet away for 20 seconds, then focus on your finger nearby.",
+    "Blink rapidly 10 times to naturally re-moisturize your eyes.",
+    "Slowly roll your eyes in a circle clockwise, then counter-clockwise.",
+    "Focus on a distant wall, and draw a giant figure-eight with your eyes.",
+    "Rub your hands together to warm them, cup them over closed eyes, and rest for 10 seconds."
+]
+
 from backend.database import matches_keyword
 
 class LASTINPUTINFO(ctypes.Structure):
@@ -132,8 +141,102 @@ def play_beep_sequence(sequence):
                 pass
     threading.Thread(target=run, daemon=True).start()
 
+# Win32 API Constants and Structures for Power Throttling (EcoQoS/Efficiency Mode)
+ProcessPowerThrottling = 4
+PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1
+PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
+
+class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
+    _fields_ = [
+        ("Version", ctypes.c_ulong),
+        ("ControlMask", ctypes.c_ulong),
+        ("StateMask", ctypes.c_ulong),
+    ]
+
+def disable_ecoqos_for_handle(handle):
+    """Disable EcoQoS (Power Throttling) for a given process handle to prevent CPU throttling on low clock."""
+    try:
+        state = PROCESS_POWER_THROTTLING_STATE()
+        state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION
+        state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+        state.StateMask = 0  # 0 to disable throttling
+        
+        result = ctypes.windll.kernel32.SetProcessInformation(
+            handle,
+            ProcessPowerThrottling,
+            ctypes.byref(state),
+            ctypes.sizeof(state)
+        )
+        return bool(result)
+    except Exception:
+        return False
+
+def disable_ecoqos_for_process_tree():
+    """Disable EcoQoS recursively for current process and all child processes (like WebView2 renderers)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import psutil
+        PROCESS_SET_INFORMATION = 0x0200
+        
+        # 1. Disable for current process
+        current_pid = os.getpid()
+        current_handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, current_pid)
+        if current_handle:
+            try:
+                disable_ecoqos_for_handle(current_handle)
+            except Exception:
+                pass
+            finally:
+                ctypes.windll.kernel32.CloseHandle(current_handle)
+        
+        # 2. Disable for all child/descendant processes recursively
+        parent = psutil.Process()
+        for child in parent.children(recursive=True):
+            try:
+                h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, child.pid)
+                if h_proc:
+                    try:
+                        disable_ecoqos_for_handle(h_proc)
+                    except Exception:
+                        pass
+                    finally:
+                        ctypes.windll.kernel32.CloseHandle(h_proc)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 def trigger_lockout_overlay(duration_seconds=20):
     """Enforce a fullscreen borderless Tkinter window to lockout visual focus with a Brain Dump phase."""
+    # Check for High Stress Alert based on last 2 user reflections
+    high_stress_alert = False
+    try:
+        reflections = db.get_reflections()
+        latest_user_reflections = []
+        for r in reversed(reflections):
+            is_auto = r.get("summary", "").startswith("[Autopilot]")
+            if not is_auto:
+                latest_user_reflections.append(r)
+                if len(latest_user_reflections) == 2:
+                    break
+        if len(latest_user_reflections) == 2:
+            stress_flags = []
+            for ur in latest_user_reflections:
+                e = ur.get("energy_level", 5)
+                f = ur.get("friction_level", 1)
+                if e <= 2 or f >= 4:
+                    stress_flags.append(True)
+                else:
+                    stress_flags.append(False)
+            if all(stress_flags):
+                high_stress_alert = True
+    except Exception as e:
+        print(f"Error checking stress in lockout: {e}")
+
+    if high_stress_alert:
+        duration_seconds = max(120, duration_seconds * 2)
+
     # Play a peaceful, soft, rising wind chime arpeggio (C4, E4, G4, B4, C5)
     play_beep_sequence([
         (262, 120),  # C4
@@ -143,12 +246,21 @@ def trigger_lockout_overlay(duration_seconds=20):
         (523, 200)   # C5
     ])
 
+    # Dynamic Theme Configuration
+    root_bg = "#0b132b" if high_stress_alert else "#0b0f19"
+    frame_bg = "#1c2541" if high_stress_alert else "#0e0e1a"
+    highlight_color = "#3a506b" if high_stress_alert else "#2e2e4f"
+    text_color = "#eaeaf2"
+    desc_color = "#9d9db8"
+    accent_purple = "#b49aff"
+    accent_green = "#38bdf8" if high_stress_alert else "#2dd4a8"
+
     root = tk.Tk()
     root.title("MIND-FLOW // Cognitive Shield Lockout")
     root.overrideredirect(True)
     root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
     root.attributes("-topmost", True)
-    root.configure(bg="#0b0f19")
+    root.configure(bg=root_bg)
 
     active_goal = db.get_current_goal()
     captured_dump = ""
@@ -156,36 +268,39 @@ def trigger_lockout_overlay(duration_seconds=20):
     grace_remaining = 15
     completed_fully = False
     snoozed = False
+    breathing_mode = "box"
 
     frame = tk.Frame(
-        root, bg="#0e0e1a", bd=1, relief="solid", 
-        highlightbackground="#2e2e4f", highlightthickness=1, padx=45, pady=40
+        root, bg=frame_bg, bd=1, relief="solid", 
+        highlightbackground=highlight_color, highlightthickness=1, padx=45, pady=40
     )
     frame.place(relx=0.5, rely=0.5, anchor="center")
 
+    title_text = "🌸 DEEP RECOVERY INTERVENTION 🌸" if high_stress_alert else "🌿 COGNITIVE SAVE-STATE 🌿"
     title_label = tk.Label(
-        frame, text="🌿 COGNITIVE SAVE-STATE 🌿",
-        font=("Outfit", 22, "bold"), fg="#b49aff", bg="#0e0e1a"
+        frame, text=title_text,
+        font=("Outfit", 22, "bold"), fg=accent_purple if not high_stress_alert else accent_green, bg=frame_bg
     )
     title_label.pack(pady=(5, 10))
 
     if active_goal:
         goal_label = tk.Label(
             frame, text=f"🎯 FOCUS INTENTION: {active_goal}",
-            font=("Inter", 12, "bold"), fg="#a78bfa", bg="#0e0e1a", wraplength=600
+            font=("Inter", 12, "bold"), fg=accent_purple, bg=frame_bg, wraplength=600
         )
         goal_label.pack(pady=(0, 10))
 
+    desc_text = "MIND-FLOW has detected high persistent stress. A deep recovery break is active to restore focus." if high_stress_alert else "Write down your active thoughts or next steps to safely pause your flow."
     desc_label = tk.Label(
-        frame, text="Write down your active thoughts or next steps to safely pause your flow.",
-        font=("Inter", 12), fg="#9d9db8", bg="#0e0e1a"
+        frame, text=desc_text,
+        font=("Inter", 12), fg=desc_color, bg=frame_bg
     )
     desc_label.pack(pady=5)
 
     text_box = tk.Text(
         frame, width=55, height=4, font=("Inter", 13),
-        bg="#0f0f1b", fg="#eaeaf2", insertbackground="#b49aff",
-        bd=0, highlightbackground="#23233b", highlightcolor="#b49aff",
+        bg="#0b132b" if high_stress_alert else "#0f0f1b", fg=text_color, insertbackground=accent_purple,
+        bd=0, highlightbackground=highlight_color, highlightcolor=accent_purple,
         highlightthickness=1, padx=15, pady=15
     )
     text_box.pack(pady=15)
@@ -193,11 +308,11 @@ def trigger_lockout_overlay(duration_seconds=20):
 
     timer_label = tk.Label(
         frame, text=f"Grace period: {grace_remaining} seconds remaining",
-        font=("Outfit", 12, "bold"), fg="#b49aff", bg="#0e0e1a"
+        font=("Outfit", 12, "bold"), fg=accent_purple, bg=frame_bg
     )
     timer_label.pack(pady=5)
 
-    btn_frame = tk.Frame(frame, bg="#0e0e1a")
+    btn_frame = tk.Frame(frame, bg=frame_bg)
     btn_frame.pack(pady=10)
 
     lockout_remaining = duration_seconds
@@ -258,47 +373,98 @@ def trigger_lockout_overlay(duration_seconds=20):
         btn_frame.pack_forget()
         desc_label.pack_forget()
 
-        title_label.config(text="🌸 MINDFUL RECHARGE TIME 🌸", fg="#2dd4a8")
+        title_label.config(text="🌸 MINDFUL RECHARGE TIME 🌸", fg=accent_green)
         
         anchor_title = tk.Label(
             frame, text="YOUR SECURED FLOW STATE:",
-            font=("Outfit", 11, "bold"), fg="#fbbf24", bg="#0e0e1a"
+            font=("Outfit", 11, "bold"), fg="#fbbf24", bg=frame_bg
         )
         anchor_title.pack(pady=(15, 2))
 
         display_text = f'"{captured_dump}"' if captured_dump else "[No thought saved - brain clean]"
         anchor_msg = tk.Label(
             frame, text=display_text, font=("Inter", 15, "italic", "bold"),
-            fg="#2dd4a8", bg="#0e0e1a", wraplength=600, justify="center"
+            fg=accent_green, bg=frame_bg, wraplength=600, justify="center"
         )
         anchor_msg.pack(pady=12)
 
         rule_label = tk.Label(
-            frame, text="THE 20-20-20 RULE:\nLook away from your screen at an object 20 feet away\nfor 20 seconds to reset eye strain and cognitive focus.\n\n(Box Breathing: Follow the balloon's pace or close your eyes and rest)",
-            font=("Inter", 12, "italic"), fg="#9d9db8", bg="#0e0e1a", justify="center"
+            frame, text="THE 20-20-20 RULE:\nLook away from your screen at an object 20 feet away\nfor 20 seconds to reset eye strain and cognitive focus.",
+            font=("Inter", 12, "italic"), fg=desc_color, bg=frame_bg, justify="center"
         )
-        rule_label.pack(pady=15)
+        rule_label.pack(pady=12)
 
-        selected_stretch = random.choice(PHYSICAL_STRETCHES)
-        stretch_label = tk.Label(
-            frame, text=f"💪 PHYSICAL RECHARGE TIP:\n{selected_stretch}",
-            font=("Inter", 11, "bold"), fg="#fbbf24", bg="#0e0e1a", justify="center", wraplength=600
+        STRESS_SELF_CARE = [
+            "Drop your shoulders, unclamp your jaw, and let your hands rest flat on your lap.",
+            "Close your eyes. Listen to the room around you. Sense the gravity holding you in your seat.",
+            "Take a very slow sip of water. Feel the cool temperature as it refreshes you.",
+            "Gently roll your neck in a slow circle. Let go of the urge to compile or solve.",
+            "Look out the window at the sky. Focus on a cloud or distant tree. Let your vision widen."
+        ]
+
+        if high_stress_alert:
+            selected_tip = random.choice(STRESS_SELF_CARE)
+            stretch_label = tk.Label(
+                frame, text=f"💪 DEEP SELF-CARE TIP:\n{selected_tip}",
+                font=("Inter", 11, "bold"), fg="#fbbf24", bg=frame_bg, justify="center", wraplength=600
+            )
+        else:
+            selected_stretch = random.choice(PHYSICAL_STRETCHES)
+            stretch_label = tk.Label(
+                frame, text=f"💪 PHYSICAL RECHARGE TIP:\n{selected_stretch}",
+                font=("Inter", 11, "bold"), fg="#fbbf24", bg=frame_bg, justify="center", wraplength=600
+            )
+        stretch_label.pack(pady=6)
+
+        selected_eye = random.choice(EYE_EXERCISES)
+        eye_label = tk.Label(
+            frame, text=f"👀 EYE RECOVERY TIP:\n{selected_eye}",
+            font=("Inter", 11, "bold"), fg="#38bdf8", bg=frame_bg, justify="center", wraplength=600
         )
-        stretch_label.pack(pady=10)
+        eye_label.pack(pady=6)
 
         nonlocal lockout_timer_label
         lockout_timer_label = tk.Label(
             frame, text=f"{duration_seconds} seconds remaining",
-            font=("Outfit", 18, "bold"), fg="#eaeaf2", bg="#0e0e1a"
+            font=("Outfit", 18, "bold"), fg=text_color, bg=frame_bg
         )
         lockout_timer_label.pack(pady=10)
 
+        # Toggle breathing rhythm controls
+        toggle_breathing_frame = tk.Frame(frame, bg=frame_bg)
+        toggle_breathing_frame.pack(pady=(5, 5))
+
+        def set_breathing_mode(mode):
+            nonlocal breathing_mode, start_anim_time
+            breathing_mode = mode
+            start_anim_time = time.time()
+            if mode == "box":
+                box_btn.config(bg="#8b5cf6", fg="#ffffff")
+                anxiety_btn.config(bg="#374151", fg="#eaeaf2")
+            else:
+                box_btn.config(bg="#374151", fg="#eaeaf2")
+                anxiety_btn.config(bg=accent_green, fg="#0b0f19")
+
+        box_btn = tk.Button(
+            toggle_breathing_frame, text="Box (4-4-4-4)", font=("Inter", 9, "bold"),
+            bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", activeforeground="#ffffff",
+            bd=0, padx=10, pady=5, cursor="hand2", command=lambda: set_breathing_mode("box")
+        )
+        box_btn.pack(side="left", padx=5)
+
+        anxiety_btn = tk.Button(
+            toggle_breathing_frame, text="4-7-8 Anxiety Relief", font=("Inter", 9, "bold"),
+            bg="#374151", fg="#eaeaf2", activebackground=accent_green, activeforeground="#0b0f19",
+            bd=0, padx=10, pady=5, cursor="hand2", command=lambda: set_breathing_mode("anxiety")
+        )
+        anxiety_btn.pack(side="left", padx=5)
+
         nonlocal canvas
-        canvas = tk.Canvas(frame, width=500, height=180, bg="#0e0e1a", bd=0, highlightthickness=0)
+        canvas = tk.Canvas(frame, width=500, height=180, bg=frame_bg, bd=0, highlightthickness=0)
         canvas.pack(pady=10)
-        canvas.create_line(50, 90, 450, 90, fill="#23233b", dash=(2, 4))
+        canvas.create_line(50, 90, 450, 90, fill="#23233b" if not high_stress_alert else "#3a506b", dash=(2, 4))
         
-        bubble_id = canvas.create_oval(0, 0, 0, 0, fill="#2dd4a8", outline="#5eead4", width=2)
+        bubble_id = canvas.create_oval(0, 0, 0, 0, fill=accent_green, outline="#5eead4", width=2)
         instruction_text_id = canvas.create_text(0, 0, text="", font=("Inter", 9, "bold"), fill="#ffffff")
         
         start_anim_time = time.time()
@@ -307,39 +473,62 @@ def trigger_lockout_overlay(duration_seconds=20):
             if not phase1_active and lockout_remaining > 0:
                 try:
                     elapsed = time.time() - start_anim_time
-                    angle = (elapsed * 2 * math.pi) / 8.0
-                    cx = 250 + 160 * math.cos(angle)
-                    cy = 90
+                    cx = 90
                     
-                    # Box breathing: 4s inhale, 4s hold, 4s exhale, 4s hold (16s cycle)
-                    breath_cycle = elapsed % 16.0
-                    if breath_cycle < 4.0:
-                        fraction = breath_cycle / 4.0
-                        radius = 25 + 30 * fraction
-                        text = "INHALE..."
-                        color = "#2dd4a8"
-                        outline_color = "#5eead4"
-                    elif breath_cycle < 8.0:
-                        radius = 55
-                        text = "HOLD..."
-                        color = "#fbbf24"
-                        outline_color = "#fcd34d"
-                    elif breath_cycle < 12.0:
-                        fraction = (breath_cycle - 8.0) / 4.0
-                        radius = 55 - 30 * fraction
-                        text = "EXHALE..."
-                        color = "#b49aff"
-                        outline_color = "#c084fc"
+                    if breathing_mode == "box":
+                        # Box breathing: 4s inhale, 4s hold, 4s exhale, 4s hold (16s cycle)
+                        angle = (elapsed * 2 * math.pi) / 8.0
+                        cx_pos = 250 + 160 * math.cos(angle)
+                        breath_cycle = elapsed % 16.0
+                        if breath_cycle < 4.0:
+                            fraction = breath_cycle / 4.0
+                            radius = 25 + 30 * fraction
+                            text = "INHALE..."
+                            color = "#2dd4a8"
+                            outline_color = "#5eead4"
+                        elif breath_cycle < 8.0:
+                            radius = 55
+                            text = "HOLD..."
+                            color = "#fbbf24"
+                            outline_color = "#fcd34d"
+                        elif breath_cycle < 12.0:
+                            fraction = (breath_cycle - 8.0) / 4.0
+                            radius = 55 - 30 * fraction
+                            text = "EXHALE..."
+                            color = "#b49aff"
+                            outline_color = "#c084fc"
+                        else:
+                            radius = 25
+                            text = "HOLD..."
+                            color = "#f43f5e"
+                            outline_color = "#fda4af"
                     else:
-                        radius = 25
-                        text = "HOLD..."
-                        color = "#f43f5e"
-                        outline_color = "#fda4af"
+                        # 4-7-8 breathing: Inhale 4s, Hold 7s, Exhale 8s (19s cycle)
+                        angle = (elapsed * 2 * math.pi) / 9.5
+                        cx_pos = 250 + 160 * math.cos(angle)
+                        breath_cycle = elapsed % 19.0
+                        if breath_cycle < 4.0:
+                            fraction = breath_cycle / 4.0
+                            radius = 25 + 30 * fraction
+                            text = "INHALE (4S)..."
+                            color = "#2dd4a8"
+                            outline_color = "#5eead4"
+                        elif breath_cycle < 11.0:
+                            radius = 55
+                            text = "HOLD (7S)..."
+                            color = "#fbbf24"
+                            outline_color = "#fcd34d"
+                        else:
+                            fraction = (breath_cycle - 11.0) / 8.0
+                            radius = 55 - 30 * fraction
+                            text = "EXHALE (8S)..."
+                            color = "#3b82f6"
+                            outline_color = "#60a5fa"
                     
                     canvas.itemconfig(bubble_id, fill=color, outline=outline_color)
                     canvas.itemconfig(instruction_text_id, text=text)
-                    canvas.coords(bubble_id, cx - radius, cy - radius, cx + radius, cy + radius)
-                    canvas.coords(instruction_text_id, cx, cy)
+                    canvas.coords(bubble_id, cx_pos - radius, cy - radius, cx_pos + radius, cy + radius)
+                    canvas.coords(instruction_text_id, cx_pos, cy)
                     canvas.after(40, animate_relaxation)
                 except Exception:
                     pass
@@ -348,7 +537,7 @@ def trigger_lockout_overlay(duration_seconds=20):
 
         esc_label = tk.Label(
             frame, text="Press ESCAPE to bypass in case of emergency.",
-            font=("Inter", 9), fg="#5c5c78", bg="#0e0e1a"
+            font=("Inter", 9), fg="#5c5c78", bg=frame_bg
         )
         esc_label.pack(pady=10)
 
@@ -364,7 +553,7 @@ def trigger_lockout_overlay(duration_seconds=20):
 
         enforce_topmost()
         update_lockout_countdown()
-
+ 
     def update_grace_countdown():
         nonlocal grace_remaining
         if not phase1_active:
@@ -375,25 +564,23 @@ def trigger_lockout_overlay(duration_seconds=20):
             root.after(1000, update_grace_countdown)
         else:
             submit_dump()
-
+ 
     def update_lockout_countdown():
         nonlocal lockout_remaining
         if lockout_remaining > 0:
             lockout_remaining -= 1
             lockout_timer_label.config(text=f"{lockout_remaining} seconds remaining")
-            # No alarm sound during relaxation period to keep it peaceful and stress-free
             root.after(1000, update_lockout_countdown)
         else:
             nonlocal completed_fully
             completed_fully = True
-            # Play a peaceful, soft, rising success chime (G4, C5, E5) when rest period completes
             play_beep_sequence([
                 (392, 120),  # G4
                 (523, 120),  # C5
                 (659, 250)   # E5
             ])
             root.destroy()
-
+ 
     update_grace_countdown()
     root.mainloop()
     return captured_dump, completed_fully, snoozed
@@ -448,8 +635,15 @@ def main_state_machine(gui_process=None):
         "last_checked_date": None
     }
 
+    # Set up loop counter and run initial EcoQoS disabling
+    loop_counter = 0
+    disable_ecoqos_for_process_tree()
+
     while True:
         time.sleep(1.0)
+        loop_counter += 1
+        if loop_counter % 5 == 0:
+            disable_ecoqos_for_process_tree()
         
         # Check if standalone GUI process exited
         if gui_process and hasattr(gui_process, 'poll') and gui_process.poll() is not None:
@@ -726,7 +920,16 @@ def run_webview_gui(url):
     monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
     monitor_thread.start()
     
-    # 2. WebView window setup
+    # 2. Start periodic background EcoQoS disabling for child processes
+    def periodic_disable_throttling():
+        while True:
+            time.sleep(5.0)
+            disable_ecoqos_for_process_tree()
+            
+    throttling_thread = threading.Thread(target=periodic_disable_throttling, daemon=True)
+    throttling_thread.start()
+    
+    # 3. WebView window setup
     # Set background color to #0b0f19 to avoid white flash
     window = webview.create_window(
         "MIND-FLOW // Cognitive Companion Dashboard",
@@ -737,47 +940,13 @@ def run_webview_gui(url):
     )
     webview.start(debug=False)
 
-# Original app window launcher restored for test suite Popen expectations
+# Original pywebview standalone app launcher restored
 def launch_app_window(url):
-    """Launch the dashboard url in pywebview standalone window, falling back to original code in testing."""
+    """Launch the dashboard url in a standalone pywebview GUI subprocess."""
     import sys
     import subprocess
     import os
     
-    # Check if we are running in testing environment (verify_tests.py, run_50_tests.py, unittest, etc.)
-    is_testing = any(t in sys.argv[0].lower() for t in ["verify_tests", "run_50_tests", "unittest"])
-    if is_testing:
-        chrome_paths = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
-        ]
-        edge_paths = [
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-        ]
-        
-        for path in chrome_paths:
-            if os.path.exists(path):
-                try:
-                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800", "--force-high-performance-gpu", "--gpu-preference=2"])
-                    return True
-                except Exception:
-                    pass
-                    
-        for path in edge_paths:
-            if os.path.exists(path):
-                try:
-                    subprocess.Popen([path, f"--app={url}", "--window-size=1280,800", "--force-high-performance-gpu", "--gpu-preference=2"])
-                    return True
-                except Exception:
-                    pass
-                    
-        import webbrowser
-        webbrowser.open(url)
-        return False
-
-    # Standard execution: launch pywebview process
     if getattr(sys, 'frozen', False):
         exe = sys.executable
         try:
@@ -808,11 +977,12 @@ if __name__ == "__main__":
                 key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
             
             # Register the virtual environment script shim/wrapper
-            winreg.SetValueEx(key, sys.executable, 0, winreg.REG_SZ, "GpuPreference=2;")
+            gpu_pref_val = "GpuPreference=2;"
+            winreg.SetValueEx(key, sys.executable, 0, winreg.REG_SZ, gpu_pref_val)
             
             # Register the actual base python interpreter executable (which performs the rendering)
             if hasattr(sys, "_base_executable") and sys._base_executable != sys.executable:
-                winreg.SetValueEx(key, sys._base_executable, 0, winreg.REG_SZ, "GpuPreference=2;")
+                winreg.SetValueEx(key, sys._base_executable, 0, winreg.REG_SZ, gpu_pref_val)
                 
             # Register all msedgewebview2.exe executables (system runtime, Edge WebView versions, running processes, etc.)
             webview_exes = set()
@@ -850,7 +1020,7 @@ if __name__ == "__main__":
             # Write all found executables to UserGpuPreferences
             for exe_path in webview_exes:
                 try:
-                    winreg.SetValueEx(key, exe_path, 0, winreg.REG_SZ, "GpuPreference=2;")
+                    winreg.SetValueEx(key, exe_path, 0, winreg.REG_SZ, gpu_pref_val)
                 except Exception:
                     pass
                     
@@ -858,11 +1028,12 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    # Force high-priority scheduling class to prevent CPU clock throttling and schedule on Performance cores
+    # Use standard priority scheduling class to prevent background console OS-throttling overrides
+    pass
+
+    # Disable EcoQoS/Power Throttling for current process initially
     try:
-        import psutil
-        p = psutil.Process()
-        p.nice(psutil.HIGH_PRIORITY_CLASS)
+        disable_ecoqos_for_process_tree()
     except Exception:
         pass
 
