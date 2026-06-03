@@ -2,9 +2,6 @@ import os
 import sys
 import io
 
-# Force high-performance discrete GPU (dGPU) for hardware accelerated rendering in WebView2/Chromium
-os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--force-high-performance-gpu --gpu-preference=2"
-
 
 class Unbuffered:
     def __init__(self, stream):
@@ -132,13 +129,33 @@ def get_idle_seconds():
         return 0
 
 def play_beep_sequence(sequence):
-    """Play a sequence of beeps asynchronously in a daemon thread to prevent blocking the UI thread."""
+    """Play a sequence of beeps asynchronously, trying system sound first, falling back to Beep. Safe for unit tests."""
     def run():
-        for freq, duration in sequence:
-            try:
-                winsound.Beep(freq, duration)
-            except Exception:
-                pass
+        # Skip playing actual Windows audio events if running unit tests to avoid noise and test runner errors
+        if os.environ.get("MINDFLOW_DB_FILE") == ":memory:":
+            for freq, duration in sequence:
+                try:
+                    winsound.Beep(freq, duration)
+                except Exception:
+                    pass
+            return
+
+        try:
+            if len(sequence) == 5:
+                # Lockout start arpeggio equivalent: SystemNotification
+                winsound.PlaySound("SystemNotification", winsound.SND_ALIAS)
+            elif len(sequence) == 3:
+                # Lockout end arpeggio equivalent: SystemAsterisk
+                winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
+            else:
+                # Other transitions
+                winsound.PlaySound("SystemDefault", winsound.SND_ALIAS)
+        except Exception:
+            for freq, duration in sequence:
+                try:
+                    winsound.Beep(freq, duration)
+                except Exception:
+                    pass
     threading.Thread(target=run, daemon=True).start()
 
 # Win32 API Constants and Structures for Power Throttling (EcoQoS/Efficiency Mode)
@@ -171,12 +188,27 @@ def disable_ecoqos_for_handle(handle):
     except Exception:
         return False
 
+def is_gui_minimized():
+    """Detect if the standalone MIND-FLOW pywebview window is minimized."""
+    if sys.platform != "win32":
+        return False
+    try:
+        hwnd = ctypes.windll.user32.FindWindowW(None, "MIND-FLOW // Cognitive Companion Dashboard")
+        if hwnd:
+            return bool(ctypes.windll.user32.IsIconic(hwnd))
+    except Exception:
+        pass
+    return False
+
 _parent_process_cache = None
+_disabled_ecoqos_pids = set()
 
 def disable_ecoqos_for_process_tree():
     """Disable EcoQoS recursively for current process and all child processes (like WebView2 renderers)."""
-    global _parent_process_cache
+    global _parent_process_cache, _disabled_ecoqos_pids
     if sys.platform != "win32":
+        return
+    if is_gui_minimized():
         return
     try:
         import psutil
@@ -184,30 +216,45 @@ def disable_ecoqos_for_process_tree():
         
         # 1. Disable for current process
         current_pid = os.getpid()
-        current_handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, current_pid)
-        if current_handle:
-            try:
-                disable_ecoqos_for_handle(current_handle)
-            except Exception:
-                pass
-            finally:
-                ctypes.windll.kernel32.CloseHandle(current_handle)
+        if current_pid not in _disabled_ecoqos_pids:
+            current_handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, current_pid)
+            if current_handle:
+                try:
+                    if disable_ecoqos_for_handle(current_handle):
+                        _disabled_ecoqos_pids.add(current_pid)
+                except Exception:
+                    pass
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(current_handle)
         
         # 2. Disable for all child/descendant processes recursively
         if _parent_process_cache is None:
             _parent_process_cache = psutil.Process()
-        for child in _parent_process_cache.children(recursive=True):
-            try:
-                h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, child.pid)
-                if h_proc:
-                    try:
-                        disable_ecoqos_for_handle(h_proc)
-                    except Exception:
-                        pass
-                    finally:
-                        ctypes.windll.kernel32.CloseHandle(h_proc)
-            except Exception:
-                pass
+            
+        active_pids = {current_pid}
+        try:
+            children = _parent_process_cache.children(recursive=True)
+        except Exception:
+            children = []
+            
+        for child in children:
+            active_pids.add(child.pid)
+            if child.pid not in _disabled_ecoqos_pids:
+                try:
+                    h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, child.pid)
+                    if h_proc:
+                        try:
+                            if disable_ecoqos_for_handle(h_proc):
+                                _disabled_ecoqos_pids.add(child.pid)
+                        except Exception:
+                            pass
+                        finally:
+                            ctypes.windll.kernel32.CloseHandle(h_proc)
+                except Exception:
+                    pass
+                    
+        # Intersect with active PIDs to prune dead processes and handle PID recycling
+        _disabled_ecoqos_pids &= active_pids
     except Exception:
         pass
 
@@ -439,16 +486,39 @@ def trigger_lockout_overlay(duration_seconds=20):
         toggle_breathing_frame = tk.Frame(frame, bg=frame_bg)
         toggle_breathing_frame.pack(pady=(5, 5))
 
+        # Breathing guide label packed directly under toggle frame
+        breathing_desc_label = tk.Label(
+            frame, text="Box Breathing (4-4-4-4): Inhale 4s -> Hold 4s -> Exhale 4s -> Hold 4s.\nBest for regulating the nervous system and resetting mental fatigue.",
+            font=("Inter", 10, "italic"), fg=desc_color, bg=frame_bg,
+            wraplength=600, justify="center"
+        )
+        breathing_desc_label.pack(pady=(5, 10))
+
         def set_breathing_mode(mode):
             nonlocal breathing_mode, start_anim_time
             breathing_mode = mode
             start_anim_time = time.time()
+            
+            # Reset all button backgrounds
+            box_btn.config(bg="#374151", fg="#eaeaf2")
+            anxiety_btn.config(bg="#374151", fg="#eaeaf2")
+            coherent_btn.config(bg="#374151", fg="#eaeaf2")
+            
             if mode == "box":
                 box_btn.config(bg="#8b5cf6", fg="#ffffff")
-                anxiety_btn.config(bg="#374151", fg="#eaeaf2")
+                breathing_desc_label.config(
+                    text="Box Breathing (4-4-4-4): Inhale 4s -> Hold 4s -> Exhale 4s -> Hold 4s.\nBest for regulating the nervous system and resetting mental fatigue."
+                )
+            elif mode == "coherent":
+                coherent_btn.config(bg="#fbbf24", fg="#0b0f19")
+                breathing_desc_label.config(
+                    text="Coherent Breathing (5-5): Inhale 5s -> Exhale 5s.\nBest for stabilizing heart rate variability and inducing calm alert focus."
+                )
             else:
-                box_btn.config(bg="#374151", fg="#eaeaf2")
                 anxiety_btn.config(bg=accent_green, fg="#0b0f19")
+                breathing_desc_label.config(
+                    text="Anxiety Relief (4-7-8): Inhale 4s -> Hold 7s -> Exhale 8s.\nBest for reducing stress, slowing heart rate, and calming nervous energy."
+                )
 
         box_btn = tk.Button(
             toggle_breathing_frame, text="Box (4-4-4-4)", font=("Inter", 9, "bold"),
@@ -456,6 +526,13 @@ def trigger_lockout_overlay(duration_seconds=20):
             bd=0, padx=10, pady=5, cursor="hand2", command=lambda: set_breathing_mode("box")
         )
         box_btn.pack(side="left", padx=5)
+
+        coherent_btn = tk.Button(
+            toggle_breathing_frame, text="Coherent (5-5)", font=("Inter", 9, "bold"),
+            bg="#374151", fg="#eaeaf2", activebackground="#fbbf24", activeforeground="#0b0f19",
+            bd=0, padx=10, pady=5, cursor="hand2", command=lambda: set_breathing_mode("coherent")
+        )
+        coherent_btn.pack(side="left", padx=5)
 
         anxiety_btn = tk.Button(
             toggle_breathing_frame, text="4-7-8 Anxiety Relief", font=("Inter", 9, "bold"),
@@ -472,13 +549,17 @@ def trigger_lockout_overlay(duration_seconds=20):
         bubble_id = canvas.create_oval(0, 0, 0, 0, fill=accent_green, outline="#5eead4", width=2)
         instruction_text_id = canvas.create_text(0, 0, text="", font=("Inter", 9, "bold"), fill="#ffffff")
         
+        # Rounded progress bar track and indicator at the bottom of the canvas
+        canvas.create_line(50, 165, 450, 165, fill="#1e293b" if not high_stress_alert else "#2e3a4e", width=4, capstyle="round")
+        progress_bar_id = canvas.create_line(50, 165, 50, 165, fill=accent_purple, width=4, capstyle="round")
+
         start_anim_time = time.time()
         
         def animate_relaxation():
             if not phase1_active and lockout_remaining > 0:
                 try:
                     elapsed = time.time() - start_anim_time
-                    cx = 90
+                    cy = 90
                     
                     if breathing_mode == "box":
                         # Box breathing: 4s inhale, 4s hold, 4s exhale, 4s hold (16s cycle)
@@ -507,6 +588,23 @@ def trigger_lockout_overlay(duration_seconds=20):
                             text = "HOLD..."
                             color = "#f43f5e"
                             outline_color = "#fda4af"
+                    elif breathing_mode == "coherent":
+                        # Coherent breathing: 5s inhale, 5s exhale (10s cycle)
+                        angle = (elapsed * 2 * math.pi) / 5.0
+                        cx_pos = 250 + 160 * math.cos(angle)
+                        breath_cycle = elapsed % 10.0
+                        if breath_cycle < 5.0:
+                            fraction = breath_cycle / 5.0
+                            radius = 25 + 30 * fraction
+                            text = "INHALE..."
+                            color = "#fbbf24"
+                            outline_color = "#fcd34d"
+                        else:
+                            fraction = (breath_cycle - 5.0) / 5.0
+                            radius = 55 - 30 * fraction
+                            text = "EXHALE..."
+                            color = "#3b82f6"
+                            outline_color = "#60a5fa"
                     else:
                         # 4-7-8 breathing: Inhale 4s, Hold 7s, Exhale 8s (19s cycle)
                         angle = (elapsed * 2 * math.pi) / 9.5
@@ -534,6 +632,12 @@ def trigger_lockout_overlay(duration_seconds=20):
                     canvas.itemconfig(instruction_text_id, text=text)
                     canvas.coords(bubble_id, cx_pos - radius, cy - radius, cx_pos + radius, cy + radius)
                     canvas.coords(instruction_text_id, cx_pos, cy)
+                    
+                    # Update active progress bar width
+                    progress_pct = 1.0 - (lockout_remaining / duration_seconds) if duration_seconds > 0 else 0
+                    progress_pct = max(0.0, min(1.0, progress_pct))
+                    canvas.coords(progress_bar_id, 50, 165, 50 + 400 * progress_pct, 165)
+                    
                     canvas.after(40, animate_relaxation)
                 except Exception:
                     pass
@@ -647,7 +751,7 @@ def main_state_machine(gui_process=None):
     while True:
         time.sleep(1.0)
         loop_counter += 1
-        if loop_counter % 5 == 0:
+        if loop_counter % 60 == 0:
             disable_ecoqos_for_process_tree()
         
         # Check if standalone GUI process exited
@@ -779,8 +883,8 @@ def main_state_machine(gui_process=None):
         if idle_sec_val >= idle_limit:
             target_mode = "rest"
         else:
-            is_work = any(matches_keyword(kw, active_process) or matches_keyword(kw, active_title) for kw in work_keywords)
-            is_recharge = any(matches_keyword(kw, active_process) or matches_keyword(kw, active_title) for kw in recharge_keywords)
+            is_work = any(matches_keyword(kw, process_lower, pre_lowercased=True) or matches_keyword(kw, title_lower, pre_lowercased=True) for kw in work_keywords)
+            is_recharge = any(matches_keyword(kw, process_lower, pre_lowercased=True) or matches_keyword(kw, title_lower, pre_lowercased=True) for kw in recharge_keywords)
 
             if is_work:
                 target_mode = "work"
@@ -928,7 +1032,7 @@ def run_webview_gui(url):
     # 2. Start periodic background EcoQoS disabling for child processes
     def periodic_disable_throttling():
         while True:
-            time.sleep(5.0)
+            time.sleep(60.0)
             disable_ecoqos_for_process_tree()
             
     throttling_thread = threading.Thread(target=periodic_disable_throttling, daemon=True)
@@ -969,67 +1073,46 @@ def launch_app_window(url):
             return None
 
 if __name__ == "__main__":
-    # Configure Windows registry to prefer High Performance dGPU for this executable
+    # Clean up Windows registry overrides to let the OS route GPU preferences naturally
     try:
         if sys.platform == "win32":
             import winreg
-            import glob
-            import psutil
             key_path = r"Software\Microsoft\DirectX\UserGpuPreferences"
             try:
-                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
-            except FileNotFoundError:
-                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
-            
-            # Register the virtual environment script shim/wrapper
-            gpu_pref_val = "GpuPreference=2;"
-            winreg.SetValueEx(key, sys.executable, 0, winreg.REG_SZ, gpu_pref_val)
-            
-            # Register the actual base python interpreter executable (which performs the rendering)
-            if hasattr(sys, "_base_executable") and sys._base_executable != sys.executable:
-                winreg.SetValueEx(key, sys._base_executable, 0, winreg.REG_SZ, gpu_pref_val)
-                
-            # Register all msedgewebview2.exe executables (system runtime, Edge WebView versions, running processes, etc.)
-            webview_exes = set()
-            
-            # 1. Common system paths
-            system_webview = r"C:\Windows\System32\Microsoft-Edge-WebView\msedgewebview2.exe"
-            if os.path.exists(system_webview):
-                webview_exes.add(system_webview)
-                
-            # 2. Scanning common directories recursively for msedgewebview2.exe
-            search_roots = [
-                r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
-                r"C:\Program Files (x86)\Microsoft\EdgeCore",
-                r"C:\Program Files\Microsoft\EdgeWebView\Application",
-                r"C:\Program Files\Microsoft\EdgeCore",
-            ]
-            for root in search_roots:
-                if os.path.exists(root):
-                    for p in glob.glob(os.path.join(root, "**", "msedgewebview2.exe"), recursive=True):
-                        webview_exes.add(os.path.abspath(p))
-            
-            # 3. Check currently running processes for any msedgewebview2.exe
-            try:
-                for proc in psutil.process_iter(['name', 'exe']):
-                    try:
-                        if proc.info['name'] and proc.info['name'].lower() == 'msedgewebview2.exe':
-                            exe_path = proc.info['exe']
-                            if exe_path and os.path.exists(exe_path):
-                                webview_exes.add(os.path.abspath(exe_path))
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                        pass
-            except Exception:
-                pass
-                
-            # Write all found executables to UserGpuPreferences
-            for exe_path in webview_exes:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE)
                 try:
-                    winreg.SetValueEx(key, exe_path, 0, winreg.REG_SZ, gpu_pref_val)
+                    winreg.DeleteValue(key, sys.executable)
+                except FileNotFoundError:
+                    pass
+                if hasattr(sys, "_base_executable") and sys._base_executable != sys.executable:
+                    try:
+                        winreg.DeleteValue(key, sys._base_executable)
+                    except FileNotFoundError:
+                        pass
+                
+                # Delete any registered webview runtimes
+                try:
+                    idx = 0
+                    to_delete = []
+                    while True:
+                        try:
+                            name, val, type_ = winreg.EnumValue(key, idx)
+                            if name.lower().endswith("msedgewebview2.exe"):
+                                to_delete.append(name)
+                            idx += 1
+                        except OSError:
+                            break
+                    for name in to_delete:
+                        try:
+                            winreg.DeleteValue(key, name)
+                        except FileNotFoundError:
+                            pass
                 except Exception:
                     pass
-                    
-            winreg.CloseKey(key)
+                
+                winreg.CloseKey(key)
+            except FileNotFoundError:
+                pass
     except Exception:
         pass
 

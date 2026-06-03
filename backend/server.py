@@ -560,9 +560,11 @@ def get_analytics():
                     cat = classification_cache[cache_key]
                 else:
                     cat = "neutral"
-                    if any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in work_keywords):
+                    proc_lower = process.lower()
+                    t_lower = t.lower()
+                    if any(matches_keyword(kw, proc_lower, pre_lowercased=True) or matches_keyword(kw, t_lower, pre_lowercased=True) for kw in work_keywords):
                         cat = "work"
-                    elif any(matches_keyword(kw, process) or matches_keyword(kw, t) for kw in recharge_keywords):
+                    elif any(matches_keyword(kw, proc_lower, pre_lowercased=True) or matches_keyword(kw, t_lower, pre_lowercased=True) for kw in recharge_keywords):
                         cat = "recharge"
                     classification_cache[cache_key] = cat
                 
@@ -580,9 +582,11 @@ def get_analytics():
                 cat = classification_cache[cache_key]
             else:
                 cat = "neutral"
-                if any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in work_keywords):
+                proc_lower = process.lower()
+                title_lower = title.lower()
+                if any(matches_keyword(kw, proc_lower, pre_lowercased=True) or matches_keyword(kw, title_lower, pre_lowercased=True) for kw in work_keywords):
                     cat = "work"
-                elif any(matches_keyword(kw, process) or matches_keyword(kw, title) for kw in recharge_keywords):
+                elif any(matches_keyword(kw, proc_lower, pre_lowercased=True) or matches_keyword(kw, title_lower, pre_lowercased=True) for kw in recharge_keywords):
                     cat = "recharge"
                 classification_cache[cache_key] = cat
             title_categories[title] = cat

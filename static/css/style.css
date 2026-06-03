@@ -80,6 +80,10 @@
     --neutral-color-rgb: 71, 85, 105;
     --neutral-glow: hsla(210, 20%, 75%, 0.2);
     --danger-color: hsl(355, 95%, 66%);
+    --battery-outer-bg: rgba(0, 0, 0, 0.25);
+    --battery-outer-border: var(--border-color);
+    --battery-segment-inactive-bg: rgba(255, 255, 255, 0.04);
+    --battery-segment-inactive-border: rgba(255, 255, 255, 0.06);
     
     --radius-sm: 10px;
     --radius-md: 16px;
@@ -302,6 +306,8 @@ body.resizing * {
     border-radius: 50%;
     display: inline-block;
     box-shadow: 0 0 8px var(--recharge-color);
+}
+#tab-dashboard.active .status-pulse {
     animation: pulse 1.8s infinite;
 }
 
@@ -476,7 +482,7 @@ body.resizing * {
 .battery-wrapper {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 1.75rem;
     margin-top: 1.5rem;
     flex: 1 1 340px;
     min-width: 0;
@@ -488,89 +494,80 @@ body.resizing * {
 }
 
 .battery-outer {
-    width: 200px;
-    height: 70px;
-    border: 2px solid var(--border-color);
-    border-radius: 14px;
-    padding: 6px;
+    width: 180px;
+    height: 48px;
+    border: 1px solid var(--battery-outer-border, var(--border-color));
+    border-radius: 8px;
+    padding: 4px;
     position: relative;
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    background: rgba(0, 0, 0, 0.15);
-    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
-    transition: all 0.3s ease;
+    background: var(--battery-outer-bg, rgba(0, 0, 0, 0.2));
+    transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+    z-index: 5;
+    overflow: visible; /* Let cap stick out on right */
+}
+
+.battery-outer.charging {
+    border-color: var(--recharge-color);
 }
 
 .battery-segments {
     display: flex;
-    gap: 4px;
+    gap: 3px;
     width: 100%;
     height: 100%;
     align-items: stretch;
+    z-index: 3;
 }
 
 .battery-segment {
     flex: 1;
     height: 100%;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.015);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
-    will-change: background, border-color, box-shadow;
+    border-radius: 4px;
+    background: var(--battery-segment-inactive-bg, rgba(255, 255, 255, 0.02));
+    border: 1px solid var(--battery-segment-inactive-border, transparent);
+    transition: all 0.4s ease;
 }
 
 .battery-segment.active-high {
-    background: linear-gradient(180deg, #10b981 0%, #064e3b 100%);
-    border-color: #34d399;
-    box-shadow: 0 0 15px rgba(16, 185, 129, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+    background: var(--recharge-color);
+    border-color: transparent;
 }
 
 .battery-segment.active-mid {
-    background: linear-gradient(180deg, #84cc16 0%, #3f6212 100%);
-    border-color: #bef264;
-    box-shadow: 0 0 15px rgba(132, 204, 22, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+    background: var(--rest-color);
+    border-color: transparent;
 }
 
 .battery-segment.active-low {
-    background: linear-gradient(180deg, #f97316 0%, #7c2d12 100%);
-    border-color: #fdba74;
-    box-shadow: 0 0 15px rgba(249, 115, 22, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+    background: var(--danger-color);
+    border-color: transparent;
 }
-
-/* Staggered neon energy pulse when charging */
-@keyframes segment-pulse {
-    0%, 100% { opacity: 0.75; filter: brightness(1.0); }
-    50% { opacity: 1.0; filter: brightness(1.25) contrast(1.1); }
-}
-
-.battery-outer.charging .battery-segment.active {
-    animation: segment-pulse 1.8s infinite ease-in-out;
-}
-
-.battery-outer.charging .battery-segment.active[data-index="1"] { animation-delay: 0.1s; }
-.battery-outer.charging .battery-segment.active[data-index="2"] { animation-delay: 0.3s; }
-.battery-outer.charging .battery-segment.active[data-index="3"] { animation-delay: 0.5s; }
-.battery-outer.charging .battery-segment.active[data-index="4"] { animation-delay: 0.7s; }
-.battery-outer.charging .battery-segment.active[data-index="5"] { animation-delay: 0.9s; }
 
 .battery-cap {
-    width: 7px;
-    height: 24px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 2px solid var(--border-color);
+    width: 5px;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--battery-outer-border, var(--border-color));
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 4px 4px 0;
     position: absolute;
-    right: -9px;
-    top: calc(50% - 12px);
-    transition: background-color 0.5s ease, box-shadow 0.5s ease, border-color 0.5s ease;
+    right: -6px;
+    top: calc(50% - 8px);
+    transition: all 0.5s ease;
+    z-index: 2;
 }
 
 .battery-outer.charging .battery-cap {
-    background-color: rgba(var(--active-mode-rgb, 16, 185, 129), 0.35);
-    border-color: rgba(var(--active-mode-rgb, 52, 211, 153), 0.65);
-    box-shadow: 0 0 10px rgba(var(--active-mode-rgb, 52, 211, 153), 0.45);
+    background-color: var(--recharge-color);
+    border-color: var(--recharge-color);
+}
+
+/* Hide bubble visual elements for Clean Tech Segments */
+#battery-bubbles {
+    display: none !important;
 }
 
 .battery-stats {
@@ -634,9 +631,11 @@ body.resizing * {
     border: 2px solid transparent;
     border-bottom: 2px solid var(--neutral-color);
     border-radius: 50%;
-    animation: rotate 3s linear infinite reverse;
     opacity: 0.35;
     transition: border-bottom-color var(--transition-speed) ease;
+}
+#tab-dashboard.active .status-ring-outer::after {
+    animation: rotate 3s linear infinite reverse;
 }
 
 .status-icon {
@@ -2401,61 +2400,22 @@ body.mode-rest .portal-sphere::after {
     border-radius: 7px;
     border: 1px solid rgba(255, 255, 255, 0.04);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
+    cursor: default;
     box-sizing: border-box;
-}
-.timeline-segment:hover, .timeline-segment.highlighted {
-    transform: scaleY(1.35) scaleX(1.01);
-    box-shadow: 0 0 12px var(--active-glow, rgba(255, 255, 255, 0.35));
-    z-index: 10;
-    filter: brightness(1.15);
 }
 .timeline-segment.work-seg {
     background: linear-gradient(180deg, var(--work-color) 0%, rgba(var(--work-color-rgb), 0.85) 100%);
-    --active-glow: var(--work-glow);
 }
 .timeline-segment.recharge-seg {
     background: linear-gradient(180deg, var(--recharge-color) 0%, rgba(var(--recharge-color-rgb), 0.85) 100%);
-    --active-glow: var(--recharge-glow);
 }
 .timeline-segment.rest-seg {
     background: linear-gradient(180deg, var(--rest-color) 0%, rgba(var(--rest-color-rgb), 0.85) 100%);
-    --active-glow: var(--rest-glow);
 }
 .timeline-segment.neutral-seg {
     background: linear-gradient(180deg, var(--neutral-color) 0%, rgba(var(--neutral-color-rgb), 0.85) 100%);
-    --active-glow: rgba(255, 255, 255, 0.1);
 }
-.timeline-tooltip {
-    position: absolute;
-    background: rgba(10, 10, 20, 0.96);
-    border: 1px solid rgba(52, 211, 153, 0.35);
-    color: #ffffff;
-    padding: 0.55rem 0.85rem;
-    border-radius: 8px;
-    font-size: 0.78rem;
-    pointer-events: none;
-    z-index: 1000;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-    opacity: 0;
-    transition: opacity 0.15s ease, transform 0.1s ease;
-    transform: translate(-50%, -112%);
-    font-family: 'Inter', sans-serif;
-    line-height: 1.4;
-    white-space: nowrap;
-}
-.timeline-tooltip::after {
-    content: '';
-    position: absolute;
-    bottom: -6px;
-    left: var(--arrow-left, 50%);
-    transform: translateX(-50%);
-    border-width: 6px 6px 0;
-    border-style: solid;
-    border-color: rgba(10, 10, 20, 0.96) transparent;
-    display: block;
-    width: 0;
-}
+
 .timeline-axis {
     position: relative;
     width: 100%;
@@ -2583,12 +2543,6 @@ body.mode-rest .portal-sphere::after {
     border: 2px solid #0e0e1a;
     z-index: 2;
     transition: all 0.25s ease;
-}
-.timeline-event-item:hover::before {
-    background: var(--active-color, var(--work-color));
-    box-shadow: 0 0 8px var(--active-glow, var(--work-glow));
-    transform: translateY(-50%) scale(1.3);
-}
 .timeline-event-item.work-item::before {
     --active-color: var(--work-color);
     --active-glow: var(--work-glow);
@@ -2608,17 +2562,7 @@ body.mode-rest .portal-sphere::after {
     --active-color: var(--neutral-color);
     background: var(--neutral-color);
 }
-.timeline-event-item:hover, .timeline-event-item.highlighted {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.07);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), inset 3px 0 0 0 var(--active-color, var(--work-color));
-    transform: translateY(-1px);
-}
-.timeline-event-item.highlighted::before {
-    background: var(--active-color, var(--work-color));
-    box-shadow: 0 0 8px var(--active-glow, var(--work-glow));
-    transform: translateY(-50%) scale(1.3);
-}
+
 .event-time {
     font-family: 'Outfit', sans-serif;
     font-weight: 600;
@@ -2643,6 +2587,7 @@ body.mode-rest .portal-sphere::after {
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1;
+    min-width: 0;
 }
 
 /* 5. Chart Tooltip Overlay */
@@ -2721,32 +2666,7 @@ body.mode-rest .portal-sphere::after {
     pointer-events: none;
     z-index: 99999;
     box-shadow: 0 0 10px currentColor;
-}
-
-.click-ripple-ring {
-    position: absolute;
-    width: 2px;
-    height: 2px;
-    border: 1.5px solid currentColor;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 99998;
-    opacity: 1;
-    animation: clickRingExpand 0.5s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
-}
-
-@keyframes clickRingExpand {
-    0% {
-        width: 2px;
-        height: 2px;
-        opacity: 1;
-    }
-    100% {
-        width: 50px;
-        height: 50px;
-        opacity: 0;
-    }
+    will-change: transform, opacity;
 }
 
 .chart-guide-line {
@@ -2778,6 +2698,8 @@ body.mode-rest .portal-sphere::after {
     width: 3px;
     background: var(--ambient-active-color, var(--recharge-color));
     border-radius: 1px;
+}
+.audio-waveform.active .audio-waveform-bar {
     animation: waveform-bounce 1.2s ease-in-out infinite;
 }
 
@@ -3114,6 +3036,7 @@ body.mode-rest .portal-sphere::after {
     display: flex;
     justify-content: flex-start;
     gap: 1.25rem;
+    flex-wrap: wrap;
 }
 
 .ratio-legend-item {
@@ -3433,10 +3356,11 @@ tr.roadblock-row {
 .water-stream {
     position: absolute;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scaleY(0);
+    transform-origin: top;
     width: 5px;
     top: 0; /* start from top rim of the beaker */
-    height: 0;
+    height: 104px;
     background: linear-gradient(to bottom, 
                 #e0f2fe 0%, 
                 #38bdf8 30%, 
@@ -3447,7 +3371,8 @@ tr.roadblock-row {
     z-index: 1; /* behind the liquid column, which has z-index: 2 */
     opacity: 0;
     pointer-events: none;
-    transition: height 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
+    will-change: transform, opacity;
 }
 
 .water-stream.pouring {
@@ -3494,23 +3419,25 @@ tr.roadblock-row {
 .surface-ripple {
     position: absolute;
     left: 50%;
-    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 8px; /* Ellipse shape */
+    transform: translate(-50%, -50%) scale(0);
+    transform-origin: center;
     border: 1px solid rgba(186, 230, 253, 0.8);
     border-radius: 50%;
     box-shadow: 0 0 4px rgba(56, 189, 248, 0.3);
     pointer-events: none;
     animation: rippleExpand 0.5s ease-out forwards;
+    will-change: transform, opacity;
 }
 
 @keyframes rippleExpand {
     0% {
-        width: 0;
-        height: 0;
+        transform: translate(-50%, -50%) scale(0);
         opacity: 1;
     }
     100% {
-        width: 44px;
-        height: 8px; /* Ellipse shape */
+        transform: translate(-50%, -50%) scale(1);
         opacity: 0;
     }
 }
@@ -3522,12 +3449,12 @@ tr.roadblock-row {
     box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6), 0 0 4px rgba(255, 255, 255, 0.3);
     pointer-events: none;
     animation: pourBubbleFloat 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    will-change: transform, opacity;
 }
 
 @keyframes pourBubbleFloat {
     0% {
-        top: 100%;
-        transform: scale(0.4) translateX(0);
+        transform: translateY(0) scale(0.4) translateX(0);
         opacity: 0;
     }
     15% {
@@ -3537,8 +3464,7 @@ tr.roadblock-row {
         opacity: 0.95;
     }
     100% {
-        top: 0%;
-        transform: scale(1.3) translateX(var(--wobble, 10px));
+        transform: translateY(-104px) scale(1.3) translateX(var(--wobble, 10px));
         opacity: 0;
     }
 }
@@ -3632,22 +3558,29 @@ tr.roadblock-row {
     height: 16px;
     pointer-events: none;
     z-index: 1;
+    will-change: transform;
 }
 .water-wave.wave-1 {
     fill: var(--wave-color-1);
-    animation: waveMoveLeft 7s infinite linear;
 }
 .water-wave.wave-2 {
     fill: var(--wave-color-2);
-    animation: waveMoveRight 9s infinite linear;
     top: -16px;
     height: 18px;
 }
 .water-wave.wave-3 {
     fill: var(--wave-color-3);
-    animation: waveMoveLeft 12s infinite linear;
     top: -18px;
     height: 20px;
+}
+#tab-dashboard.active .water-wave.wave-1 {
+    animation: waveMoveLeft 7s infinite linear;
+}
+#tab-dashboard.active .water-wave.wave-2 {
+    animation: waveMoveRight 9s infinite linear;
+}
+#tab-dashboard.active .water-wave.wave-3 {
+    animation: waveMoveLeft 12s infinite linear;
 }
 
 @keyframes waveMoveLeft {
@@ -3672,6 +3605,7 @@ tr.roadblock-row {
 }
 .hydration-bubble {
     position: absolute;
+    top: 100%; /* Statically position at bottom */
     background: rgba(255, 255, 255, 0.35);
     border: 0.5px solid rgba(255, 255, 255, 0.6);
     border-radius: 50%;
@@ -3679,12 +3613,12 @@ tr.roadblock-row {
     box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.5), 
                 0 0 6px rgba(255, 255, 255, 0.25);
     animation: hydrationBubbleFloat 3s infinite ease-in;
+    will-change: transform, opacity;
 }
 
 @keyframes hydrationBubbleFloat {
     0% {
-        top: 100%;
-        transform: scale(0.6) translateX(0);
+        transform: translateY(0) scale(0.6) translateX(0);
         opacity: 0;
     }
     10% {
@@ -3692,11 +3626,10 @@ tr.roadblock-row {
     }
     90% {
         opacity: 0.8;
-        transform: scale(1) translateX(calc(var(--wobble, 10px) * 0.9));
+        transform: translateY(-93.6px) scale(1) translateX(calc(var(--wobble, 10px) * 0.9));
     }
     100% {
-        top: 0%;
-        transform: scale(0) translateX(var(--wobble, 10px));
+        transform: translateY(-104px) scale(0) translateX(var(--wobble, 10px));
         opacity: 0;
     }
 }
@@ -3864,7 +3797,7 @@ body.theme-light .zen-breather {
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.05), inset 0 0 15px rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    transition: transform 0.05s linear, border-color 0.4s ease, box-shadow 0.4s ease, background 0.4s ease;
+    transition: border-color 0.4s ease, box-shadow 0.4s ease, background 0.4s ease;
 }
 .zen-breather.inhale {
     border-color: rgba(var(--inhale-color), 0.55) !important;
@@ -3948,16 +3881,18 @@ body.theme-light .zen-breather {
 }
 .eq-bar {
     width: 3px;
-    height: 4px;
+    height: 26px; /* Use static full height */
     background: var(--recharge-color);
     border-radius: 2px 2px 0 0;
-    transition: height 0.15s ease, background-color 0.4s ease;
+    transform: scaleY(0.15); /* Corresponds to original 4px/26px */
+    transform-origin: bottom;
+    transition: transform 0.15s ease, background-color 0.4s ease;
+    will-change: transform;
 }
 
 @keyframes eq-dance {
-    0% { height: 4px; }
-    50% { height: 26px; }
-    100% { height: 4px; }
+    0% { transform: scaleY(0.15); }
+    100% { transform: scaleY(1); }
 }
 .soundscape-visualizer-container.playing .eq-bar {
     animation: eq-dance 0.8s ease-in-out infinite alternate;
@@ -4101,7 +4036,9 @@ tr.gratitude-row {
 }
 .wisdom-emoji {
     font-size: 1.75rem;
-    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.4));
+    opacity: 0.85;
+}
+#tab-dashboard.active .wisdom-emoji {
     animation: pulseGlow 4s infinite ease-in-out;
 }
 .wisdom-label {
@@ -4147,11 +4084,11 @@ tr.gratitude-row {
 @keyframes pulseGlow {
     0%, 100% {
         transform: scale(1);
-        filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.3));
+        opacity: 0.85;
     }
     50% {
         transform: scale(1.1);
-        filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.6));
+        opacity: 1;
     }
 }
 
@@ -4342,11 +4279,11 @@ tr.gratitude-row {
 @keyframes pulseGlow {
     0%, 100% {
         transform: scale(1);
-        filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.3));
+        opacity: 0.85;
     }
     50% {
         transform: scale(1.1);
-        filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.6));
+        opacity: 1;
     }
 }
 
@@ -4553,6 +4490,7 @@ tr.gratitude-row {
 .theme-select-btn {
     width: 32px;
     height: 32px;
+    flex-shrink: 0;
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, 0.08);
     background: rgba(0, 0, 0, 0.25);
@@ -4579,6 +4517,7 @@ tr.gratitude-row {
 .theme-color-preview {
     width: 18px;
     height: 18px;
+    flex-shrink: 0;
     border-radius: 50%;
     display: block;
     box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
@@ -4868,6 +4807,12 @@ body.theme-light {
     --exhale-color: 99, 102, 241;   /* Royal Indigo exhale */
     --hold-out-color: 220, 38, 38;  /* Crimson hold-out */
 
+    --danger-color: hsl(355, 85%, 45%);
+    --battery-outer-bg: rgba(15, 23, 42, 0.04);
+    --battery-outer-border: rgba(15, 23, 42, 0.25);
+    --battery-segment-inactive-bg: rgba(15, 23, 42, 0.03);
+    --battery-segment-inactive-border: rgba(15, 23, 42, 0.08);
+
     /* Theme-aware background for input elements and inner controls */
     --input-bg: rgba(15, 23, 42, 0.04);
 
@@ -4933,12 +4878,6 @@ body.theme-light .timeline-track {
     box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
-body.theme-light .timeline-event-item:hover, 
-body.theme-light .timeline-event-item.highlighted {
-    background: rgba(0, 0, 0, 0.03) !important;
-    box-shadow: inset 3px 0 0 0 var(--active-color, var(--work-color)) !important;
-}
-
 body.theme-light .timeline-event-item::before {
     border-color: #ffffff;
 }
@@ -4984,14 +4923,4 @@ body.theme-light .timeline-summary-pill {
     background: rgba(109, 40, 217, 0.08);
     color: var(--work-color);
     border-color: rgba(109, 40, 217, 0.25);
-}
-
-/* Light theme tooltip overrides */
-body.theme-light .timeline-tooltip {
-    background: rgba(255, 255, 255, 0.98);
-    color: #0f172a;
-    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.12);
-}
-body.theme-light .timeline-tooltip::after {
-    border-color: rgba(255, 255, 255, 0.98) transparent;
 }

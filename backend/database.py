@@ -25,20 +25,30 @@ DB_FILE = os.getenv("MINDFLOW_DB_FILE", os.path.join(DEFAULT_DATA_DIR, "mind_flo
 _keyword_regex_cache = {}
 _simulated_disk = {}
 
-def matches_keyword(kw, text):
+def matches_keyword(kw, text, pre_lowercased=False):
     """Check if a keyword matches a target text respecting word boundaries."""
     if not isinstance(kw, str) or not isinstance(text, str):
         return False
-    kw = kw.strip().lower()
-    text = text.lower()
-    if not kw:
+        
+    if not pre_lowercased:
+        text = text.lower()
+        
+    if kw in _keyword_regex_cache:
+        return bool(_keyword_regex_cache[kw].search(text))
+        
+    norm_kw = kw.strip().lower()
+    if not norm_kw:
         return False
-    if kw not in _keyword_regex_cache:
-        escaped_kw = re.escape(kw)
-        left_boundary = r"(?<![a-zA-Z0-9])" if kw and kw[0].isalnum() else ""
-        right_boundary = r"(?![a-zA-Z0-9])" if kw and kw[-1].isalnum() else ""
+        
+    if norm_kw not in _keyword_regex_cache:
+        escaped_kw = re.escape(norm_kw)
+        left_boundary = r"(?<![a-zA-Z0-9])" if norm_kw and norm_kw[0].isalnum() else ""
+        right_boundary = r"(?![a-zA-Z0-9])" if norm_kw and norm_kw[-1].isalnum() else ""
         pattern = f"{left_boundary}{escaped_kw}{right_boundary}"
-        _keyword_regex_cache[kw] = re.compile(pattern)
+        _keyword_regex_cache[norm_kw] = re.compile(pattern)
+        
+    # Cache both the original and normalized forms for future fast lookups
+    _keyword_regex_cache[kw] = _keyword_regex_cache[norm_kw]
     return bool(_keyword_regex_cache[kw].search(text))
 
 DEFAULT_SETTINGS = {

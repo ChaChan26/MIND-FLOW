@@ -37,8 +37,11 @@ function parseLocalDate(isoStr) {
     return new Date(year, month, day, hour, minute, second, ms);
 }
 
-let currentTab = 'dashboard';
+let currentTab = '';
 let statusInterval = null;
+let isSystemIdle = false;
+let isWindowFocused = true;
+let currentPollInterval = 1000;
 let lastActiveTitle = '';
 let lastExternalWindow = 'None';
 let lastExternalProcess = 'None';
@@ -104,6 +107,7 @@ document.querySelectorAll('#mood-rating .rate-btn').forEach(btn => {
 
 // Tab Navigation
 function switchTab(tabId) {
+    if (currentTab === tabId) return;
     if (tabId !== 'settings' && typeof checkSettingsDirty === 'function' && checkSettingsDirty()) {
         if (!confirm("You have unsaved preferences changes. Do you want to leave without applying?")) {
             // Restore active state on settings button
@@ -199,6 +203,7 @@ window.addEventListener('load', () => {
 });
 
 // Live Clock Update
+let clockInterval = null;
 function updateClock() {
     const now = new Date();
     let hours = now.getHours();
@@ -208,8 +213,19 @@ function updateClock() {
     hours = hours ? hours : 12; // 0 should be 12
     timeEl.textContent = `${hours}:${minutes} ${ampm}`;
 }
-setInterval(updateClock, 1000);
-updateClock();
+function startClock() {
+    if (!clockInterval) {
+        updateClock();
+        clockInterval = setInterval(updateClock, 1000);
+    }
+}
+function stopClock() {
+    if (clockInterval) {
+        clearInterval(clockInterval);
+        clockInterval = null;
+    }
+}
+startClock();
 
 
 
@@ -578,10 +594,51 @@ async function pollStatus() {
         }
 
         
-        // 7.8 Periodically reload analytics every 10 seconds on active tabs
+        // 7.8 Periodically reload analytics every 60 seconds ONLY when the analytics tab is active
         const now = Date.now();
-        if ((currentTab === 'dashboard' || currentTab === 'analytics') && (now - lastAnalyticsLoadTime >= 10000)) {
+        if (currentTab === 'analytics' && (now - lastAnalyticsLoadTime >= 60000)) {
             loadAnalytics();
+        }
+        
+        // 8. Idle Throttling to save CPU/GPU when user is away
+        const idleLimit = 30; // 30 seconds
+        if (status.idle_seconds !== undefined && status.idle_seconds >= idleLimit) {
+            if (!isSystemIdle) {
+                isSystemIdle = true;
+                console.log("[System] User went idle. Throttling animations and status polling.");
+                stopZenCanvas();
+                // Pause continuous background bubble/dripping animations to save CPU/GPU
+                if (bubbleInterval) {
+                    clearInterval(bubbleInterval);
+                    bubbleInterval = null;
+                }
+                if (hydrationBubbleInterval) {
+                    clearInterval(hydrationBubbleInterval);
+                    hydrationBubbleInterval = null;
+                }
+                if (idleDripInterval) {
+                    clearInterval(idleDripInterval);
+                    idleDripInterval = null;
+                }
+                // Reduce polling frequency to 5 seconds
+                setStatusPollInterval(5000);
+            }
+        } else {
+            if (isSystemIdle) {
+                isSystemIdle = false;
+                console.log("[System] User returned. Restoring normal operations.");
+                // Restore polling rate based on window focus state
+                setStatusPollInterval(isWindowFocused ? 1000 : 3000);
+                
+                // Restore Zen Visualizer and dripping if window is focused and tab is active
+                if (isWindowFocused) {
+                    const zenTab = document.getElementById('tab-zen');
+                    if (zenTab && zenTab.classList.contains('active')) {
+                        initZenCanvas();
+                    }
+                    startIdleDripping();
+                }
+            }
         }
         
     } catch (e) {
@@ -951,17 +1008,6 @@ function triggerParticleBurst(e, customColor) {
         if (bodyEl.classList.contains('mode-recharge')) activePalette = colors.recharge;
         else if (bodyEl.classList.contains('mode-rest')) activePalette = colors.rest;
     }
-    
-    // Spawn 1 expanding wave ring (optimized)
-    const wave = document.createElement('div');
-    wave.className = 'click-ripple-ring';
-    wave.style.left = `${x}px`;
-    wave.style.top = `${y}px`;
-    wave.style.color = activePalette[0];
-    wave.style.borderColor = 'currentColor';
-    wave.style.boxShadow = `0 0 8px ${activePalette[0]}`;
-    container.appendChild(wave);
-    setTimeout(() => wave.remove(), 500);
     
     // 2. Spawn Splash Particles (Optimized count: 10 for water, 12 for default)
     const particleCount = isWater ? 10 : 12;
@@ -1458,11 +1504,18 @@ async function loadAnalytics() {
                     const sessionStartMs = session.startMs || parseLocalDate(session.start).getTime();
                     const sessionEndMs = session.endMs || parseLocalDate(session.end).getTime();
                     
-                    const leftPct = ((sessionStartMs - startBound) / totalRangeMs) * 100;
+                    let leftPct = ((sessionStartMs - startBound) / totalRangeMs) * 100;
                     let widthPct = ((sessionEndMs - sessionStartMs) / totalRangeMs) * 100;
                     
                     if (widthPct <= 0) return;
                     widthPct = Math.max(widthPct, 0.75);
+                    
+                    // Clamp position and width to prevent horizontal overflow
+                    leftPct = Math.max(0, Math.min(100, leftPct));
+                    if (leftPct + widthPct > 100) {
+                        widthPct = 100 - leftPct;
+                    }
+                    if (widthPct < 0.1) return;
                     
                     const seg = document.createElement('div');
                     let modeClass = 'neutral-seg';
@@ -1492,23 +1545,6 @@ async function loadAnalytics() {
                     seg.dataset.endTime = endTimeStr;
                     seg.dataset.duration = durationText;
                     seg.dataset.mode = session.mode;
-                    seg.dataset.brainDump = session.brain_dump || '';
-                    
-                    // Link hover effects (track seg -> list card) and tooltip
-                    seg.addEventListener('mouseenter', () => {
-                        const eventItem = timelineEvents.querySelector(`.timeline-event-index-${index}`);
-                        if (eventItem) {
-                            eventItem.classList.add('highlighted');
-                            eventItem.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-                        }
-                        showTooltipForSegment(seg);
-                    });
-                    seg.addEventListener('mouseleave', () => {
-                        const eventItem = timelineEvents.querySelector(`.timeline-event-index-${index}`);
-                        if (eventItem) eventItem.classList.remove('highlighted');
-                        hideTooltip();
-                    });
-                    
                     timelineTrack.appendChild(seg);
                 });
                 
@@ -1579,23 +1615,6 @@ async function loadAnalytics() {
                         <span class="event-badge ${escapeHtml(badgeClass)}">${escapeHtml(session.mode)}</span>
                         <span class="event-summary">${summaryHtml}</span>
                     `;
-                    
-                    // Link hover effects (list card -> track seg)
-                    item.addEventListener('mouseenter', () => {
-                        const trackSeg = timelineTrack.querySelector(`.timeline-seg-index-${originalIndex}`);
-                        if (trackSeg) {
-                            trackSeg.classList.add('highlighted');
-                            showTooltipForSegment(trackSeg);
-                        }
-                    });
-                    item.addEventListener('mouseleave', () => {
-                        const trackSeg = timelineTrack.querySelector(`.timeline-seg-index-${originalIndex}`);
-                        if (trackSeg) {
-                            trackSeg.classList.remove('highlighted');
-                            hideTooltip();
-                        }
-                    });
-                    
                     timelineEvents.appendChild(item);
                 });
             }
@@ -2268,6 +2287,35 @@ function renderEnergyMap(weekdayData, reflections) {
 }
 
 
+// Dynamic Polling Rate Manager
+function setStatusPollInterval(ms) {
+    if (currentPollInterval === ms && statusInterval) return;
+    currentPollInterval = ms;
+    if (statusInterval) {
+        clearInterval(statusInterval);
+    }
+    statusInterval = setInterval(pollStatus, ms);
+}
+
+// Exit idle state instantly upon mouse/keyboard events on the window
+function handleUserLocalActivity() {
+    if (isSystemIdle) {
+        isSystemIdle = false;
+        console.log("[System] Local activity detected. Restoring normal operations.");
+        setStatusPollInterval(1000);
+        
+        const zenTab = document.getElementById('tab-zen');
+        if (zenTab && zenTab.classList.contains('active')) {
+            initZenCanvas();
+        }
+        startIdleDripping();
+        pollStatus();
+    }
+}
+window.addEventListener('mousemove', handleUserLocalActivity, { passive: true });
+window.addEventListener('keydown', handleUserLocalActivity, { passive: true });
+window.addEventListener('mousedown', handleUserLocalActivity, { passive: true });
+
 // Initial status load & continuous poll
 pollStatus();
 statusInterval = setInterval(pollStatus, 1000);
@@ -2275,25 +2323,83 @@ statusInterval = setInterval(pollStatus, 1000);
 // Page Visibility API throttling to save CPU/GPU when minimized/backgrounded
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        // App is minimized or backgrounded: slow down status poll and stop rendering
+        // App is minimized or backgrounded: stop status poll, clock, and animations
         if (statusInterval) {
             clearInterval(statusInterval);
-            statusInterval = setInterval(pollStatus, 5000);
+            statusInterval = null;
         }
+        stopClock();
         stopZenCanvas();
-    } else {
-        // App returned to foreground: restore normal status polling speed
-        if (statusInterval) {
-            clearInterval(statusInterval);
-            statusInterval = setInterval(pollStatus, 1000);
+        if (bubbleInterval) {
+            clearInterval(bubbleInterval);
+            bubbleInterval = null;
         }
+        if (hydrationBubbleInterval) {
+            clearInterval(hydrationBubbleInterval);
+            hydrationBubbleInterval = null;
+        }
+        if (idleDripInterval) {
+            clearInterval(idleDripInterval);
+            idleDripInterval = null;
+        }
+    } else {
+        // App returned to foreground: restore status polling speed and clock
+        if (!statusInterval) {
+            statusInterval = setInterval(pollStatus, currentPollInterval);
+        }
+        startClock();
         pollStatus();
         
-        // Restore Zen Visualizer if currently on the Zen Space tab
+        // Restore Zen Visualizer if currently on the Zen Space tab, not idle, and window is focused
+        if (!isSystemIdle && isWindowFocused) {
+            const zenTab = document.getElementById('tab-zen');
+            if (zenTab && zenTab.classList.contains('active')) {
+                initZenCanvas();
+            }
+            startIdleDripping();
+        }
+    }
+});
+
+// HTML5 Focus/Blur API throttling to save CPU/GPU when the window is in the background
+window.addEventListener('blur', () => {
+    isWindowFocused = false;
+    console.log("[Window] Focus lost. Pausing animations and throttling status polling.");
+    
+    // Halt rendering loops
+    stopZenCanvas();
+    if (bubbleInterval) {
+        clearInterval(bubbleInterval);
+        bubbleInterval = null;
+    }
+    if (hydrationBubbleInterval) {
+        clearInterval(hydrationBubbleInterval);
+        hydrationBubbleInterval = null;
+    }
+    if (idleDripInterval) {
+        clearInterval(idleDripInterval);
+        idleDripInterval = null;
+    }
+    
+    // Slow status polling down to 3 seconds when unfocused
+    setStatusPollInterval(3000);
+});
+
+window.addEventListener('focus', () => {
+    isWindowFocused = true;
+    console.log("[Window] Focus regained. Restoring normal operations.");
+    
+    // Restore normal operations (unless system is idle)
+    if (!isSystemIdle) {
+        setStatusPollInterval(1000);
+        
         const zenTab = document.getElementById('tab-zen');
         if (zenTab && zenTab.classList.contains('active')) {
             initZenCanvas();
         }
+        startIdleDripping();
+    } else {
+        setStatusPollInterval(5000);
     }
 });
 
@@ -2589,6 +2695,10 @@ function startAmbientAudio() {
     }
     
     stopSoundNodes();
+    if (ambientSchedulerInterval) {
+        clearInterval(ambientSchedulerInterval);
+        ambientSchedulerInterval = null;
+    }
     isPlayingAudio = true;
     
     const select = document.getElementById('ambient-sound-select');
@@ -2960,6 +3070,16 @@ let bubbleInterval = null;
 function updateBatteryBubbles(isCharging) {
     const container = document.getElementById('battery-bubbles');
     if (!container) return;
+    
+    // Optimize: Exit early if the container is hidden to prevent unnecessary DOM mutations and CPU consumption
+    if (window.getComputedStyle(container).display === 'none') {
+        if (bubbleInterval) {
+            clearInterval(bubbleInterval);
+            bubbleInterval = null;
+        }
+        container.innerHTML = '';
+        return;
+    }
     
     if (!isCharging) {
         if (bubbleInterval) {
@@ -3497,14 +3617,14 @@ function playSingleDrip(currentPct, effectsContainer, bubblesContainer) {
     drip.style.width = '4px';
     drip.style.height = '6px';
     drip.style.borderRadius = '50% 50% 40% 40%';
-    drip.style.transform = 'translateX(-50%)';
-    drip.style.transition = 'top 0.3s cubic-bezier(0.55, 0.055, 0.675, 0.19)';
+    drip.style.transform = 'translate(-50%, 0px)';
+    drip.style.transition = 'transform 0.3s cubic-bezier(0.55, 0.055, 0.675, 0.19)';
     
     effectsContainer.appendChild(drip);
 
     // Trigger fall
     setTimeout(() => {
-        drip.style.top = `${surfaceY}px`;
+        drip.style.transform = `translate(-50%, ${surfaceY}px)`;
         
         // When it hits
         setTimeout(() => {
@@ -3540,10 +3660,10 @@ function triggerPourAnimation(oldPct, newPct) {
     const streamStartHeight = Math.max(0, startSurfaceY);
 
     // 2. Show and extend the stream
-    stream.style.height = '0px';
+    stream.style.transform = 'translateX(-50%) scaleY(0)';
     stream.classList.add('pouring');
     void stream.offsetWidth; // force reflow
-    stream.style.height = `${streamStartHeight}px`;
+    stream.style.transform = `translateX(-50%) scaleY(${streamStartHeight / 104})`;
 
     // 3. Set timeout for the stream to hit the surface (150ms)
     setTimeout(() => {
@@ -3571,8 +3691,8 @@ function triggerPourAnimation(oldPct, newPct) {
             const currentFillPct = parseFloat(liquidFill.style.height) || oldPct;
             const currentSurfaceY = beakerHeight * (1 - currentFillPct / 100);
 
-            // Dynamically adjust stream height to meet the rising liquid
-            stream.style.height = `${Math.max(0, currentSurfaceY)}px`;
+            // Dynamically adjust stream height to meet the rising liquid via scaleY transform
+            stream.style.transform = `translateX(-50%) scaleY(${Math.max(0, currentSurfaceY) / 104})`;
 
             createSplash(currentSurfaceY, effectsContainer);
             createRipple(currentSurfaceY, effectsContainer);
@@ -3597,7 +3717,7 @@ function triggerPourAnimation(oldPct, newPct) {
             
             // Let the stream shrink down to 0
             setTimeout(() => {
-                stream.style.height = '0px';
+                stream.style.transform = 'translateX(-50%) scaleY(0)';
                 isPouring = false;
 
                 // Play a final single drip after stream stops
@@ -4710,6 +4830,23 @@ function setBreathingRhythm(rhythm) {
         }
     });
     
+    // Update detailed guide instructions dynamically
+    const guideTitle = document.getElementById('zen-breathing-guide-title');
+    const guideText = document.getElementById('zen-breathing-guide-text');
+    
+    if (guideTitle && guideText) {
+        if (rhythm === 'box') {
+            guideTitle.innerHTML = `<span>💨</span> Box Breathing Guide`;
+            guideText.innerHTML = `This room uses <strong>Box Breathing (4-4-4-4)</strong>: inhale for 4 seconds, hold for 4 seconds, exhale for 4 seconds, and hold for 4 seconds. This technique regulates your autonomic nervous system, clears mental fatigue, and restores directed attention capacity.`;
+        } else if (rhythm === 'relax') {
+            guideTitle.innerHTML = `<span>💤</span> 4-7-8 Relax Breathing Guide`;
+            guideText.innerHTML = `This room uses the <strong>4-7-8 Relax Breathing Technique</strong>: inhale quietly through your nose for 4 seconds, hold your breath for 7 seconds, and exhale completely making a whoosh sound for 8 seconds. This technique acts as a natural tranquilizer for the nervous system, helping to reduce anxiety and stress.`;
+        } else if (rhythm === 'coherent') {
+            guideTitle.innerHTML = `<span>⚖️</span> Coherent Breathing Guide`;
+            guideText.innerHTML = `This room uses <strong>Coherent Breathing (5-5)</strong>: inhale slowly for 5 seconds and exhale slowly for 5 seconds. This rhythm establishes a 0.1 Hz breathing rate, optimizing heart rate variability (HRV), balancing your autonomic system, and inducing a state of calm alert focus.`;
+        }
+    }
+    
     // Play a brief visual phase ripple
     if (zenCanvas) {
         const w = zenCanvas.width;
@@ -5117,6 +5254,7 @@ function animateZen() {
     });
     
     if (zenVisualizerMode === 'cosmic') {
+        const bins = { 1: [], 2: [], 3: [] };
         for (let i = 0; i < zenParticles.length; i++) {
             if (zenParticles[i].isTemp) continue;
             for (let j = i + 1; j < zenParticles.length; j++) {
@@ -5130,14 +5268,41 @@ function animateZen() {
                 if (distSq < 3600) {
                     const dist = Math.sqrt(distSq);
                     const alpha = (60 - dist) / 60 * 0.15;
-                    zenCtx.beginPath();
-                    zenCtx.moveTo(p1.x, p1.y);
-                    zenCtx.lineTo(p2.x, p2.y);
-                    zenCtx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
-                    zenCtx.lineWidth = 0.5;
-                    zenCtx.stroke();
+                    if (alpha <= 0) continue;
+                    let binKey = 1;
+                    if (alpha > 0.10) binKey = 3;
+                    else if (alpha > 0.05) binKey = 2;
+                    bins[binKey].push(p1.x, p1.y, p2.x, p2.y);
                 }
             }
+        }
+        zenCtx.lineWidth = 0.5;
+        if (bins[1].length > 0) {
+            zenCtx.beginPath();
+            for (let i = 0; i < bins[1].length; i += 4) {
+                zenCtx.moveTo(bins[1][i], bins[1][i+1]);
+                zenCtx.lineTo(bins[1][i+2], bins[1][i+3]);
+            }
+            zenCtx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            zenCtx.stroke();
+        }
+        if (bins[2].length > 0) {
+            zenCtx.beginPath();
+            for (let i = 0; i < bins[2].length; i += 4) {
+                zenCtx.moveTo(bins[2][i], bins[2][i+1]);
+                zenCtx.lineTo(bins[2][i+2], bins[2][i+3]);
+            }
+            zenCtx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+            zenCtx.stroke();
+        }
+        if (bins[3].length > 0) {
+            zenCtx.beginPath();
+            for (let i = 0; i < bins[3].length; i += 4) {
+                zenCtx.moveTo(bins[3][i], bins[3][i+1]);
+                zenCtx.lineTo(bins[3][i+2], bins[3][i+3]);
+            }
+            zenCtx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            zenCtx.stroke();
         }
     }
     
@@ -5553,88 +5718,6 @@ function setAppTheme(themeName, showNotification = true) {
             'light': 'Solar Breeze'
         };
         showToast(`Theme switched to ${themeNamesMap[themeName]}! 🎨`);
-    }
-}
-
-// Focus Timeline Hover Tooltip Helpers
-function showTooltipForSegment(seg) {
-    const tooltip = document.getElementById('timeline-tooltip');
-    if (!tooltip || !seg) return;
-    
-    const mode = seg.dataset.mode;
-    const startTimeStr = seg.dataset.startTime;
-    const endTimeStr = seg.dataset.endTime;
-    const durationText = seg.dataset.duration;
-    const brainDump = seg.dataset.brainDump;
-    const leftPct = parseFloat(seg.dataset.leftPct);
-    const widthPct = parseFloat(seg.dataset.widthPct);
-    
-    let modeColorVar = 'var(--neutral-color)';
-    let modeLabel = 'Neutral';
-    if (mode === 'work') {
-        modeColorVar = 'var(--work-color)';
-        modeLabel = 'Focus';
-    } else if (mode === 'recharge') {
-        modeColorVar = 'var(--recharge-color)';
-        modeLabel = 'Recharge';
-    } else if (mode === 'rest') {
-        modeColorVar = 'var(--rest-color)';
-        modeLabel = 'Rest';
-    }
-    
-    let tooltipHtml = `
-        <strong style="color: ${modeColorVar}; text-transform: uppercase; font-size: 0.8rem; display: block; margin-bottom: 0.25rem; font-weight: 700; letter-spacing: 0.05em;">${modeLabel} Session</strong>
-        <span style="display: block; color: var(--text-secondary); margin-bottom: 0.15rem; font-weight: 500;">🕒 ${startTimeStr} - ${endTimeStr} (${durationText})</span>
-    `;
-    
-    if (brainDump) {
-        tooltipHtml += `
-            <div style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 0.35rem; padding-top: 0.35rem; display: flex; flex-direction: column; gap: 0.1rem;">
-                <span style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em;">Save-State:</span>
-                <span style="color: var(--text-primary); font-style: italic; font-size: 0.72rem; white-space: normal; max-width: 260px; line-height: 1.3;">"${escapeHtml(brainDump)}"</span>
-            </div>
-        `;
-    }
-    
-    tooltip.innerHTML = tooltipHtml;
-    tooltip.style.borderColor = modeColorVar;
-    
-    // Measure width to clamp position
-    tooltip.style.visibility = 'hidden';
-    tooltip.style.opacity = '1';
-    
-    const tooltipRect = tooltip.getBoundingClientRect();
-    const tooltipWidth = tooltipRect.width || tooltip.offsetWidth || 200;
-    
-    const outer = document.querySelector('.timeline-track-outer');
-    const outerWidth = outer ? outer.getBoundingClientRect().width : window.innerWidth;
-    
-    const midPx = ((leftPct + (widthPct / 2)) / 100) * outerWidth;
-    const halfWidth = tooltipWidth / 2;
-    let finalLeftPx = midPx;
-    
-    if (finalLeftPx - halfWidth < 0) {
-        finalLeftPx = halfWidth;
-    } else if (finalLeftPx + halfWidth > outerWidth) {
-        finalLeftPx = outerWidth - halfWidth;
-    }
-    
-    // Adjust arrow to point directly to segment midpoint
-    const shiftPx = midPx - finalLeftPx;
-    const arrowPct = 50 + (shiftPx / tooltipWidth) * 100;
-    const clampedArrowPct = Math.max(5, Math.min(95, arrowPct));
-    
-    tooltip.style.setProperty('--arrow-left', `${clampedArrowPct}%`);
-    tooltip.style.left = `${finalLeftPx}px`;
-    tooltip.style.visibility = 'visible';
-    tooltip.style.opacity = '1';
-}
-
-function hideTooltip() {
-    const tooltip = document.getElementById('timeline-tooltip');
-    if (tooltip) {
-        tooltip.style.opacity = '0';
-        tooltip.style.visibility = 'hidden';
     }
 }
 
