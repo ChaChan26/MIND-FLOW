@@ -69,16 +69,51 @@
     --work-color-rgb: 167, 139, 250;
     --work-glow: hsla(260, 85%, 80%, 0.3);
     --work-glow-color: rgba(167, 139, 250, 0.4);
+    --work-color-bg-translucent: rgba(167, 139, 250, 0.08);
+    --work-color-border-translucent: rgba(167, 139, 250, 0.18);
+    --work-color-card-border: rgba(167, 139, 250, 0.25);
+    --work-color-card-shadow: rgba(167, 139, 250, 0.12);
+    --work-color-translucent: rgba(167, 139, 250, 0.85);
+    --work-color-fade: rgba(167, 139, 250, 0.80);
+    --work-badge-bg: rgba(167, 139, 250, 0.12);
+    --work-badge-border: rgba(167, 139, 250, 0.20);
+
     --recharge-color: hsl(158, 70%, 60%);
     --recharge-color-rgb: 16, 185, 129;
     --recharge-glow: hsla(158, 70%, 60%, 0.3);
     --recharge-glow-color: rgba(16, 185, 129, 0.4);
+    --recharge-color-bg-translucent: rgba(16, 185, 129, 0.08);
+    --recharge-color-border-translucent: rgba(16, 185, 129, 0.18);
+    --recharge-color-card-border: rgba(16, 185, 129, 0.25);
+    --recharge-color-card-shadow: rgba(16, 185, 129, 0.12);
+    --recharge-color-translucent: rgba(16, 185, 129, 0.85);
+    --recharge-color-fade: rgba(16, 185, 129, 0.80);
+    --recharge-badge-bg: rgba(16, 185, 129, 0.12);
+    --recharge-badge-border: rgba(16, 185, 129, 0.20);
+
     --rest-color: hsl(38, 85%, 66%);
     --rest-color-rgb: 251, 191, 36;
     --rest-glow: hsla(38, 85%, 66%, 0.3);
+    --rest-color-bg-translucent: rgba(251, 191, 36, 0.08);
+    --rest-color-border-translucent: rgba(251, 191, 36, 0.18);
+    --rest-color-card-border: rgba(251, 191, 36, 0.25);
+    --rest-color-card-shadow: rgba(251, 191, 36, 0.12);
+    --rest-color-translucent: rgba(251, 191, 36, 0.85);
+    --rest-color-fade: rgba(251, 191, 36, 0.80);
+    --rest-badge-bg: rgba(251, 191, 36, 0.12);
+    --rest-badge-border: rgba(251, 191, 36, 0.20);
+
     --neutral-color: hsl(210, 20%, 75%);
     --neutral-color-rgb: 71, 85, 105;
     --neutral-glow: hsla(210, 20%, 75%, 0.2);
+    --neutral-color-bg-translucent: rgba(71, 85, 105, 0.08);
+    --neutral-color-border-translucent: rgba(71, 85, 105, 0.18);
+    --neutral-color-card-border: rgba(71, 85, 105, 0.25);
+    --neutral-color-card-shadow: rgba(71, 85, 105, 0.12);
+    --neutral-color-translucent: rgba(71, 85, 105, 0.85);
+    --neutral-color-fade: rgba(71, 85, 105, 0.80);
+    --neutral-badge-bg: rgba(71, 85, 105, 0.12);
+    --neutral-badge-border: rgba(71, 85, 105, 0.20);
     --danger-color: hsl(355, 95%, 66%);
     
     --radius-sm: 10px;
@@ -178,8 +213,8 @@ h1, h2, h3, h4, .live-clock, .battery-pct {
 }
 .sidebar-resizer:hover,
 .sidebar-resizer.resizing {
-    background: var(--active-mode-color, var(--work-color));
-    box-shadow: 0 0 10px var(--active-mode-glow, var(--work-glow));
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: none;
 }
 
 /* Resizing Global State */
@@ -237,9 +272,10 @@ body.resizing * {
     position: absolute;
     left: 0;
     border-radius: var(--radius-md);
-    background: rgba(var(--active-mode-rgb, 167, 139, 250), 0.08);
-    border: 1px solid rgba(var(--active-mode-rgb, 167, 139, 250), 0.18);
-    box-shadow: 0 0 15px rgba(var(--active-mode-rgb, 167, 139, 250), 0.05);
+    background: var(--active-mode-bg-translucent, rgba(167, 139, 250, 0.08));
+    border: 1px solid var(--active-mode-border-translucent, rgba(167, 139, 250, 0.18));
+    /* Removed box-shadow to eliminate hover/active side light flash */
+    box-shadow: none;
     transition: top 0.3s cubic-bezier(0.25, 1, 0.5, 1), 
                 height 0.3s cubic-bezier(0.25, 1, 0.5, 1), 
                 width 0.3s cubic-bezier(0.25, 1, 0.5, 1),
@@ -278,7 +314,7 @@ body.resizing * {
 
 .nav-btn.active {
     color: var(--active-mode-color, var(--work-color));
-    text-shadow: 0 0 8px var(--active-mode-glow, rgba(139, 92, 246, 0.25));
+    /* Removed text-shadow to eliminate hover/active side light flash */
 }
 
 .system-status {
@@ -433,6 +469,7 @@ body.resizing * {
 }
 
 .card::after {
+    display: none;
     content: '';
     position: absolute;
     top: 0;
@@ -1344,32 +1381,48 @@ input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
 body.mode-work {
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
-    --active-mode-rgb: 167, 139, 250;
-    --active-mode-secondary-rgb: 56, 189, 248; /* Cyan contrast */
+    --active-mode-rgb: var(--work-color-rgb);
+    --active-mode-secondary-rgb: var(--recharge-color-rgb);
+    --active-mode-bg-translucent: var(--work-color-bg-translucent);
+    --active-mode-border-translucent: var(--work-color-border-translucent);
+    --active-mode-card-border: var(--work-color-card-border);
+    --active-mode-card-shadow: var(--work-color-card-shadow);
 }
 body.mode-recharge {
     --active-mode-color: var(--recharge-color);
     --active-mode-glow: var(--recharge-glow);
-    --active-mode-rgb: 52, 211, 153;
-    --active-mode-secondary-rgb: 20, 184, 166; /* Teal contrast */
+    --active-mode-rgb: var(--recharge-color-rgb);
+    --active-mode-secondary-rgb: var(--work-color-rgb);
+    --active-mode-bg-translucent: var(--recharge-color-bg-translucent);
+    --active-mode-border-translucent: var(--recharge-color-border-translucent);
+    --active-mode-card-border: var(--recharge-color-card-border);
+    --active-mode-card-shadow: var(--recharge-color-card-shadow);
 }
 body.mode-rest {
     --active-mode-color: var(--rest-color);
     --active-mode-glow: var(--rest-glow);
-    --active-mode-rgb: 251, 191, 36;
-    --active-mode-secondary-rgb: 244, 63, 94;  /* Rose contrast */
+    --active-mode-rgb: var(--rest-color-rgb);
+    --active-mode-secondary-rgb: var(--work-color-rgb);
+    --active-mode-bg-translucent: var(--rest-color-bg-translucent);
+    --active-mode-border-translucent: var(--rest-color-border-translucent);
+    --active-mode-card-border: var(--rest-color-card-border);
+    --active-mode-card-shadow: var(--rest-color-card-shadow);
 }
 body.mode-neutral {
     --active-mode-color: var(--neutral-color);
     --active-mode-glow: var(--neutral-glow);
-    --active-mode-rgb: 148, 163, 184;
-    --active-mode-secondary-rgb: 100, 116, 139; /* Slate secondary */
+    --active-mode-rgb: var(--neutral-color-rgb);
+    --active-mode-secondary-rgb: var(--work-color-rgb);
+    --active-mode-bg-translucent: var(--neutral-color-bg-translucent);
+    --active-mode-border-translucent: var(--neutral-color-border-translucent);
+    --active-mode-card-border: var(--neutral-color-card-border);
+    --active-mode-card-shadow: var(--neutral-color-card-shadow);
 }
 
 /* Apply active state variables to card elements */
 #state-card, .portal-sphere {
-    border-color: rgba(var(--active-mode-rgb, 148, 163, 184), 0.25);
-    box-shadow: 0 0 22px rgba(var(--active-mode-rgb, 148, 163, 184), 0.12);
+    border-color: var(--active-mode-card-border, rgba(148, 163, 184, 0.25));
+    box-shadow: 0 0 22px var(--active-mode-card-shadow, rgba(148, 163, 184, 0.12));
     transition: border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
 }
 
@@ -1702,7 +1755,8 @@ body.mode-rest .portal-sphere::after {
     height: 55%;
     background: var(--active-mode-color, var(--work-color));
     border-radius: 0 4px 4px 0;
-    box-shadow: 0 0 12px var(--active-mode-glow, var(--work-glow));
+    /* Removed glow/box-shadow to eliminate hover/active side light flash */
+    box-shadow: none;
     transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -2356,6 +2410,7 @@ body.mode-rest .portal-sphere::after {
 /* 4. Focus Timeline Widget Styling */
 .timeline-card {
     margin-top: 0.5rem;
+    overflow: visible !important;
 }
 .timeline-header {
     display: flex;
@@ -2390,15 +2445,15 @@ body.mode-rest .portal-sphere::after {
     height: 24px;
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    border-radius: 6px;
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
     overflow: visible; /* Allows hovering capsules to scale out cleanly */
 }
 .timeline-segment {
     position: absolute;
     height: 14px;
-    top: 5px;
-    border-radius: 7px;
+    top: 4px;
+    border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.04);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
@@ -2411,23 +2466,24 @@ body.mode-rest .portal-sphere::after {
     filter: brightness(1.15);
 }
 .timeline-segment.work-seg {
-    background: linear-gradient(180deg, var(--work-color) 0%, rgba(var(--work-color-rgb), 0.85) 100%);
+    background: linear-gradient(180deg, var(--work-color) 0%, var(--work-color-translucent) 100%);
     --active-glow: var(--work-glow);
 }
 .timeline-segment.recharge-seg {
-    background: linear-gradient(180deg, var(--recharge-color) 0%, rgba(var(--recharge-color-rgb), 0.85) 100%);
+    background: linear-gradient(180deg, var(--recharge-color) 0%, var(--recharge-color-translucent) 100%);
     --active-glow: var(--recharge-glow);
 }
 .timeline-segment.rest-seg {
-    background: linear-gradient(180deg, var(--rest-color) 0%, rgba(var(--rest-color-rgb), 0.85) 100%);
+    background: linear-gradient(180deg, var(--rest-color) 0%, var(--rest-color-translucent) 100%);
     --active-glow: var(--rest-glow);
 }
 .timeline-segment.neutral-seg {
-    background: linear-gradient(180deg, var(--neutral-color) 0%, rgba(var(--neutral-color-rgb), 0.85) 100%);
+    background: linear-gradient(180deg, var(--neutral-color) 0%, var(--neutral-color-translucent) 100%);
     --active-glow: rgba(255, 255, 255, 0.1);
 }
 .timeline-tooltip {
     position: absolute;
+    bottom: 100%;
     background: rgba(10, 10, 20, 0.96);
     border: 1px solid rgba(52, 211, 153, 0.35);
     color: #ffffff;
@@ -2439,7 +2495,7 @@ body.mode-rest .portal-sphere::after {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
     opacity: 0;
     transition: opacity 0.15s ease, transform 0.1s ease;
-    transform: translate(-50%, -112%);
+    transform: translate(-50%, -8px);
     font-family: 'Inter', sans-serif;
     line-height: 1.4;
     white-space: nowrap;
@@ -2510,13 +2566,14 @@ body.mode-rest .portal-sphere::after {
 /* Timeline Details Grid Layout */
 .timeline-details-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: 1.2fr 1fr;
     gap: 2rem;
     margin-top: 0.5rem;
 }
 .timeline-events-column, .app-breakdown-column {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 .column-subtitle {
     font-family: 'Outfit', sans-serif;
@@ -2529,7 +2586,7 @@ body.mode-rest .portal-sphere::after {
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     padding-bottom: 0.5rem;
 }
-@media (max-width: 768px) {
+@media (max-width: 1200px) {
     .timeline-details-grid {
         grid-template-columns: 1fr;
         gap: 1.5rem;
@@ -2541,8 +2598,9 @@ body.mode-rest .portal-sphere::after {
     display: flex;
     flex-direction: column;
     gap: 0px; /* Stream connectors */
-    max-height: 200px;
+    max-height: 280px;
     overflow-y: auto;
+    overflow-x: hidden;
     scroll-behavior: smooth;
     padding-right: 0.5rem;
     position: relative;
@@ -2560,10 +2618,10 @@ body.mode-rest .portal-sphere::after {
 .timeline-event-item {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.75rem;
     background: rgba(255, 255, 255, 0.015);
     border: 1px solid rgba(255, 255, 255, 0.03);
-    padding: 0.7rem 0.9rem;
+    padding: 0.6rem 0.75rem;
     margin-bottom: 0.5rem;
     border-radius: 8px;
     font-size: 0.82rem;
@@ -2622,27 +2680,32 @@ body.mode-rest .portal-sphere::after {
 .event-time {
     font-family: 'Outfit', sans-serif;
     font-weight: 600;
+    font-size: 0.78rem;
     color: var(--text-muted);
     min-width: 65px;
     padding-left: 36px; /* Space for timeline circle */
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .event-badge {
-    padding: 0.2rem 0.5rem;
+    padding: 0.15rem 0.4rem;
     border-radius: 6px;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 700;
     text-transform: uppercase;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
-.event-badge.work-badge { background: rgba(var(--work-color-rgb), 0.12); color: var(--work-color); border: 1px solid rgba(var(--work-color-rgb), 0.2); }
-.event-badge.recharge-badge { background: rgba(var(--recharge-color-rgb), 0.12); color: var(--recharge-color); border: 1px solid rgba(var(--recharge-color-rgb), 0.2); }
-.event-badge.rest-badge { background: rgba(var(--rest-color-rgb), 0.12); color: var(--rest-color); border: 1px solid rgba(var(--rest-color-rgb), 0.2); }
-.event-badge.neutral-badge { background: rgba(var(--neutral-color-rgb), 0.12); color: var(--neutral-color); border: 1px solid rgba(var(--neutral-color-rgb), 0.2); }
+.event-badge.work-badge { background: var(--work-badge-bg); color: var(--work-color); border: 1px solid var(--work-badge-border); }
+.event-badge.recharge-badge { background: var(--recharge-badge-bg); color: var(--recharge-color); border: 1px solid var(--recharge-badge-border); }
+.event-badge.rest-badge { background: var(--rest-badge-bg); color: var(--rest-color); border: 1px solid var(--rest-badge-border); }
+.event-badge.neutral-badge { background: var(--neutral-badge-bg); color: var(--neutral-color); border: 1px solid var(--neutral-badge-border); }
 .event-summary {
     color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-word;
     flex: 1;
+    min-width: 0;
 }
 
 /* 5. Chart Tooltip Overlay */
@@ -2911,8 +2974,9 @@ body.mode-rest .portal-sphere::after {
 .app-stats-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
     margin-bottom: 1.5rem;
 }
 
@@ -2923,6 +2987,7 @@ body.mode-rest .portal-sphere::after {
     padding: 0.2rem;
     border-radius: 30px;
     gap: 0.15rem;
+    flex-shrink: 0;
 }
 
 .filter-pill {
@@ -2952,7 +3017,8 @@ body.mode-rest .portal-sphere::after {
 .app-stats-list-wrapper {
     flex: 1;
     overflow-y: auto;
-    max-height: 200px;
+    overflow-x: hidden;
+    max-height: 280px;
     padding-right: 0.25rem;
 }
 
@@ -3062,18 +3128,18 @@ body.mode-rest .portal-sphere::after {
 }
 
 .app-progress-bar.work {
-    background-image: linear-gradient(90deg, #b49aff, #8b5cf6);
-    box-shadow: 0 0 8px rgba(180, 154, 255, 0.3);
+    background-image: linear-gradient(90deg, var(--work-color) 0%, var(--work-color-fade) 100%);
+    box-shadow: 0 0 8px var(--work-glow-color);
 }
 
 .app-progress-bar.recharge {
-    background-image: linear-gradient(90deg, #2dd4a8, #10b981);
-    box-shadow: 0 0 8px rgba(45, 212, 168, 0.3);
+    background-image: linear-gradient(90deg, var(--recharge-color) 0%, var(--recharge-color-fade) 100%);
+    box-shadow: 0 0 8px var(--recharge-glow-color);
 }
 
 .app-progress-bar.neutral {
-    background-image: linear-gradient(90deg, #94a3b8, #64748b);
-    box-shadow: 0 0 8px rgba(148, 163, 184, 0.2);
+    background-image: linear-gradient(90deg, var(--neutral-color) 0%, var(--neutral-color-fade) 100%);
+    box-shadow: 0 0 8px var(--neutral-glow);
 }
 
 /* App Statistics Category Ratio Visualizer */
@@ -3099,21 +3165,22 @@ body.mode-rest .portal-sphere::after {
 }
 
 .app-ratio-segment.work {
-    background-image: linear-gradient(90deg, #b49aff, #8b5cf6);
+    background-image: linear-gradient(90deg, var(--work-color) 0%, var(--work-color-fade) 100%);
 }
 
 .app-ratio-segment.recharge {
-    background-image: linear-gradient(90deg, #2dd4a8, #10b981);
+    background-image: linear-gradient(90deg, var(--recharge-color) 0%, var(--recharge-color-fade) 100%);
 }
 
 .app-ratio-segment.neutral {
-    background-image: linear-gradient(90deg, #94a3b8, #64748b);
+    background-image: linear-gradient(90deg, var(--neutral-color) 0%, var(--neutral-color-fade) 100%);
 }
 
 .app-ratio-legend {
     display: flex;
     justify-content: flex-start;
     gap: 1.25rem;
+    flex-wrap: wrap;
 }
 
 .ratio-legend-item {
@@ -3133,18 +3200,18 @@ body.mode-rest .portal-sphere::after {
 }
 
 .legend-dot.work {
-    background-color: #b49aff;
-    box-shadow: 0 0 6px #b49aff;
+    background-color: var(--work-color);
+    box-shadow: 0 0 6px var(--work-glow-color, var(--work-color));
 }
 
 .legend-dot.recharge {
-    background-color: #2dd4a8;
-    box-shadow: 0 0 6px #2dd4a8;
+    background-color: var(--recharge-color);
+    box-shadow: 0 0 6px var(--recharge-glow-color, var(--recharge-color));
 }
 
 .legend-dot.neutral {
-    background-color: #94a3b8;
-    box-shadow: 0 0 6px #94a3b8;
+    background-color: var(--neutral-color);
+    box-shadow: 0 0 6px var(--neutral-glow, var(--neutral-color));
 }
 
 .app-stats-hint {
@@ -4553,6 +4620,9 @@ tr.gratitude-row {
 .theme-select-btn {
     width: 32px;
     height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    flex-shrink: 0;
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, 0.08);
     background: rgba(0, 0, 0, 0.25);
@@ -4579,6 +4649,9 @@ tr.gratitude-row {
 .theme-color-preview {
     width: 18px;
     height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    flex-shrink: 0;
     border-radius: 50%;
     display: block;
     box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
@@ -4616,23 +4689,55 @@ body.theme-cosmic {
     --work-color-rgb: 167, 139, 250;
     --work-glow: hsla(258, 90%, 76%, 0.35);
     --work-glow-color: rgba(167, 139, 250, 0.45);
+    --work-color-bg-translucent: rgba(167, 139, 250, 0.08);
+    --work-color-border-translucent: rgba(167, 139, 250, 0.18);
+    --work-color-card-border: rgba(167, 139, 250, 0.25);
+    --work-color-card-shadow: rgba(167, 139, 250, 0.12);
+    --work-color-translucent: rgba(167, 139, 250, 0.85);
+    --work-color-fade: rgba(167, 139, 250, 0.80);
+    --work-badge-bg: rgba(167, 139, 250, 0.12);
+    --work-badge-border: rgba(167, 139, 250, 0.20);
     
     --recharge-color: hsl(325, 85%, 66%);
     --recharge-color-rgb: 236, 72, 153;
     --recharge-glow: hsla(325, 85%, 66%, 0.3);
     --recharge-glow-color: rgba(236, 72, 153, 0.4);
+    --recharge-color-bg-translucent: rgba(236, 72, 153, 0.08);
+    --recharge-color-border-translucent: rgba(236, 72, 153, 0.18);
+    --recharge-color-card-border: rgba(236, 72, 153, 0.25);
+    --recharge-color-card-shadow: rgba(236, 72, 153, 0.12);
+    --recharge-color-translucent: rgba(236, 72, 153, 0.85);
+    --recharge-color-fade: rgba(236, 72, 153, 0.80);
+    --recharge-badge-bg: rgba(236, 72, 153, 0.12);
+    --recharge-badge-border: rgba(236, 72, 153, 0.20);
     
     --rest-color: hsl(197, 90%, 65%);
     --rest-color-rgb: 56, 189, 248;
     --rest-glow: hsla(197, 90%, 65%, 0.35);
+    --rest-color-bg-translucent: rgba(56, 189, 248, 0.08);
+    --rest-color-border-translucent: rgba(56, 189, 248, 0.18);
+    --rest-color-card-border: rgba(56, 189, 248, 0.25);
+    --rest-color-card-shadow: rgba(56, 189, 248, 0.12);
+    --rest-color-translucent: rgba(56, 189, 248, 0.85);
+    --rest-color-fade: rgba(56, 189, 248, 0.80);
+    --rest-badge-bg: rgba(56, 189, 248, 0.12);
+    --rest-badge-border: rgba(56, 189, 248, 0.20);
     
     --neutral-color: hsl(235, 30%, 72%);
     --neutral-color-rgb: 156, 163, 219;
+    --neutral-color-bg-translucent: rgba(156, 163, 219, 0.08);
+    --neutral-color-border-translucent: rgba(156, 163, 219, 0.18);
+    --neutral-color-card-border: rgba(156, 163, 219, 0.25);
+    --neutral-color-card-shadow: rgba(156, 163, 219, 0.12);
+    --neutral-color-translucent: rgba(156, 163, 219, 0.85);
+    --neutral-color-fade: rgba(156, 163, 219, 0.80);
+    --neutral-badge-bg: rgba(156, 163, 219, 0.12);
+    --neutral-badge-border: rgba(156, 163, 219, 0.20);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
-    --active-mode-rgb: 167, 139, 250;
-    --active-mode-secondary-rgb: 236, 72, 153;
+    --active-mode-rgb: var(--work-color-rgb);
+    --active-mode-secondary-rgb: var(--recharge-color-rgb);
     
     --shadow-glow: 0 0 35px rgba(167, 139, 250, 0.18);
     
@@ -4658,23 +4763,6 @@ body.theme-cosmic .card {
     box-shadow: 0 8px 32px rgba(2, 2, 6, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.04);
 }
 
-body.theme-cosmic.mode-work {
-    --active-mode-rgb: 167, 139, 250;
-    --active-mode-secondary-rgb: 236, 72, 153;
-}
-body.theme-cosmic.mode-recharge {
-    --active-mode-rgb: 236, 72, 153;
-    --active-mode-secondary-rgb: 167, 139, 250;
-}
-body.theme-cosmic.mode-rest {
-    --active-mode-rgb: 251, 191, 36;
-    --active-mode-secondary-rgb: 56, 189, 248;
-}
-body.theme-cosmic.mode-neutral {
-    --active-mode-rgb: 129, 140, 248;
-    --active-mode-secondary-rgb: 10, 8, 22;
-}
-
 /* Theme 2: Ocean Waves (Marine Cyan & Teal) */
 body.theme-ocean {
     --bg-color: #01040a;
@@ -4692,23 +4780,55 @@ body.theme-ocean {
     --work-color-rgb: 6, 182, 212;
     --work-glow: hsla(188, 90%, 62%, 0.35);
     --work-glow-color: rgba(6, 182, 212, 0.45);
+    --work-color-bg-translucent: rgba(6, 182, 212, 0.08);
+    --work-color-border-translucent: rgba(6, 182, 212, 0.18);
+    --work-color-card-border: rgba(6, 182, 212, 0.25);
+    --work-color-card-shadow: rgba(6, 182, 212, 0.12);
+    --work-color-translucent: rgba(6, 182, 212, 0.85);
+    --work-color-fade: rgba(6, 182, 212, 0.80);
+    --work-badge-bg: rgba(6, 182, 212, 0.12);
+    --work-badge-border: rgba(6, 182, 212, 0.20);
     
     --recharge-color: hsl(164, 85%, 55%);
     --recharge-color-rgb: 16, 185, 129;
     --recharge-glow: hsla(164, 85%, 55%, 0.3);
     --recharge-glow-color: rgba(16, 185, 129, 0.4);
+    --recharge-color-bg-translucent: rgba(16, 185, 129, 0.08);
+    --recharge-color-border-translucent: rgba(16, 185, 129, 0.18);
+    --recharge-color-card-border: rgba(16, 185, 129, 0.25);
+    --recharge-color-card-shadow: rgba(16, 185, 129, 0.12);
+    --recharge-color-translucent: rgba(16, 185, 129, 0.85);
+    --recharge-color-fade: rgba(16, 185, 129, 0.80);
+    --recharge-badge-bg: rgba(16, 185, 129, 0.12);
+    --recharge-badge-border: rgba(16, 185, 129, 0.20);
     
     --rest-color: hsl(340, 85%, 65%);
     --rest-color-rgb: 244, 63, 94;
     --rest-glow: hsla(340, 85%, 65%, 0.35);
+    --rest-color-bg-translucent: rgba(244, 63, 94, 0.08);
+    --rest-color-border-translucent: rgba(244, 63, 94, 0.18);
+    --rest-color-card-border: rgba(244, 63, 94, 0.25);
+    --rest-color-card-shadow: rgba(244, 63, 94, 0.12);
+    --rest-color-translucent: rgba(244, 63, 94, 0.85);
+    --rest-color-fade: rgba(244, 63, 94, 0.80);
+    --rest-badge-bg: rgba(244, 63, 94, 0.12);
+    --rest-badge-border: rgba(244, 63, 94, 0.20);
     
     --neutral-color: hsl(206, 30%, 70%);
     --neutral-color-rgb: 125, 165, 191;
+    --neutral-color-bg-translucent: rgba(125, 165, 191, 0.08);
+    --neutral-color-border-translucent: rgba(125, 165, 191, 0.18);
+    --neutral-color-card-border: rgba(125, 165, 191, 0.25);
+    --neutral-color-card-shadow: rgba(125, 165, 191, 0.12);
+    --neutral-color-translucent: rgba(125, 165, 191, 0.85);
+    --neutral-color-fade: rgba(125, 165, 191, 0.80);
+    --neutral-badge-bg: rgba(125, 165, 191, 0.12);
+    --neutral-badge-border: rgba(125, 165, 191, 0.20);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
-    --active-mode-rgb: 6, 182, 212;
-    --active-mode-secondary-rgb: 16, 185, 129;
+    --active-mode-rgb: var(--work-color-rgb);
+    --active-mode-secondary-rgb: var(--recharge-color-rgb);
     
     --shadow-glow: 0 0 35px rgba(6, 182, 212, 0.18);
     
@@ -4734,23 +4854,6 @@ body.theme-ocean .card {
     box-shadow: 0 8px 32px rgba(1, 4, 10, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.05);
 }
 
-body.theme-ocean.mode-work {
-    --active-mode-rgb: 6, 182, 212;
-    --active-mode-secondary-rgb: 59, 130, 246;
-}
-body.theme-ocean.mode-recharge {
-    --active-mode-rgb: 16, 185, 129;
-    --active-mode-secondary-rgb: 6, 182, 212;
-}
-body.theme-ocean.mode-rest {
-    --active-mode-rgb: 244, 63, 94;
-    --active-mode-secondary-rgb: 59, 130, 246;
-}
-body.theme-ocean.mode-neutral {
-    --active-mode-rgb: 59, 130, 246;
-    --active-mode-secondary-rgb: 2, 19, 32;
-}
-
 /* Theme 3: Forest Light (Timber Woodland & Sunlight) */
 body.theme-forest {
     --bg-color: #020603;
@@ -4768,23 +4871,55 @@ body.theme-forest {
     --work-color-rgb: 52, 211, 153;
     --work-glow: hsla(150, 75%, 60%, 0.35);
     --work-glow-color: rgba(52, 211, 153, 0.45);
+    --work-color-bg-translucent: rgba(52, 211, 153, 0.08);
+    --work-color-border-translucent: rgba(52, 211, 153, 0.18);
+    --work-color-card-border: rgba(52, 211, 153, 0.25);
+    --work-color-card-shadow: rgba(52, 211, 153, 0.12);
+    --work-color-translucent: rgba(52, 211, 153, 0.85);
+    --work-color-fade: rgba(52, 211, 153, 0.80);
+    --work-badge-bg: rgba(52, 211, 153, 0.12);
+    --work-badge-border: rgba(52, 211, 153, 0.20);
     
     --recharge-color: hsl(45, 85%, 60%);
     --recharge-color-rgb: 245, 158, 11;
     --recharge-glow: hsla(45, 85%, 60%, 0.3);
     --recharge-glow-color: rgba(245, 158, 11, 0.4);
+    --recharge-color-bg-translucent: rgba(245, 158, 11, 0.08);
+    --recharge-color-border-translucent: rgba(245, 158, 11, 0.18);
+    --recharge-color-card-border: rgba(245, 158, 11, 0.25);
+    --recharge-color-card-shadow: rgba(245, 158, 11, 0.12);
+    --recharge-color-translucent: rgba(245, 158, 11, 0.85);
+    --recharge-color-fade: rgba(245, 158, 11, 0.80);
+    --recharge-badge-bg: rgba(245, 158, 11, 0.12);
+    --recharge-badge-border: rgba(245, 158, 11, 0.20);
     
     --rest-color: hsl(24, 85%, 55%);
     --rest-color-rgb: 217, 119, 6;
     --rest-glow: hsla(24, 85%, 55%, 0.35);
+    --rest-color-bg-translucent: rgba(217, 119, 6, 0.08);
+    --rest-color-border-translucent: rgba(217, 119, 6, 0.18);
+    --rest-color-card-border: rgba(217, 119, 6, 0.25);
+    --rest-color-card-shadow: rgba(217, 119, 6, 0.12);
+    --rest-color-translucent: rgba(217, 119, 6, 0.85);
+    --rest-color-fade: rgba(217, 119, 6, 0.80);
+    --rest-badge-bg: rgba(217, 119, 6, 0.12);
+    --rest-badge-border: rgba(217, 119, 6, 0.20);
     
     --neutral-color: hsl(120, 20%, 70%);
     --neutral-color-rgb: 122, 184, 122;
+    --neutral-color-bg-translucent: rgba(122, 184, 122, 0.08);
+    --neutral-color-border-translucent: rgba(122, 184, 122, 0.18);
+    --neutral-color-card-border: rgba(122, 184, 122, 0.25);
+    --neutral-color-card-shadow: rgba(122, 184, 122, 0.12);
+    --neutral-color-translucent: rgba(122, 184, 122, 0.85);
+    --neutral-color-fade: rgba(122, 184, 122, 0.80);
+    --neutral-badge-bg: rgba(122, 184, 122, 0.12);
+    --neutral-badge-border: rgba(122, 184, 122, 0.20);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
-    --active-mode-rgb: 52, 211, 153;
-    --active-mode-secondary-rgb: 245, 158, 11;
+    --active-mode-rgb: var(--work-color-rgb);
+    --active-mode-secondary-rgb: var(--recharge-color-rgb);
     
     --shadow-glow: 0 0 35px rgba(52, 211, 153, 0.18);
     
@@ -4810,23 +4945,6 @@ body.theme-forest .card {
     box-shadow: 0 8px 32px rgba(2, 6, 3, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.05);
 }
 
-body.theme-forest.mode-work {
-    --active-mode-rgb: 52, 211, 153;
-    --active-mode-secondary-rgb: 245, 158, 11;
-}
-body.theme-forest.mode-recharge {
-    --active-mode-rgb: 245, 158, 11;
-    --active-mode-secondary-rgb: 16, 185, 129;
-}
-body.theme-forest.mode-rest {
-    --active-mode-rgb: 217, 119, 6;
-    --active-mode-secondary-rgb: 245, 158, 11;
-}
-body.theme-forest.mode-neutral {
-    --active-mode-rgb: 134, 239, 172;
-    --active-mode-secondary-rgb: 6, 20, 10;
-}
-
 /* Theme 4: Solar Breeze (Clean Light Theme) */
 body.theme-light {
     --bg-color: #fcfbfa;
@@ -4844,21 +4962,56 @@ body.theme-light {
     --work-color-rgb: 99, 102, 241;
     --work-glow: rgba(99, 102, 241, 0.08);
     --work-glow-color: rgba(99, 102, 241, 0.15);
+    --work-color-bg-translucent: rgba(99, 102, 241, 0.08);
+    --work-color-border-translucent: rgba(99, 102, 241, 0.18);
+    --work-color-card-border: rgba(99, 102, 241, 0.25);
+    --work-color-card-shadow: rgba(99, 102, 241, 0.12);
+    --work-color-translucent: rgba(99, 102, 241, 0.85);
+    --work-color-fade: rgba(99, 102, 241, 0.80);
+    --work-badge-bg: rgba(99, 102, 241, 0.12);
+    --work-badge-border: rgba(99, 102, 241, 0.20);
+
     --recharge-color: hsl(172, 85%, 28%);
     --recharge-color-rgb: 15, 118, 110;
     --recharge-glow: rgba(15, 118, 110, 0.08);
     --recharge-glow-color: rgba(15, 118, 110, 0.15);
+    --recharge-color-bg-translucent: rgba(15, 118, 110, 0.08);
+    --recharge-color-border-translucent: rgba(15, 118, 110, 0.18);
+    --recharge-color-card-border: rgba(15, 118, 110, 0.25);
+    --recharge-color-card-shadow: rgba(15, 118, 110, 0.12);
+    --recharge-color-translucent: rgba(15, 118, 110, 0.85);
+    --recharge-color-fade: rgba(15, 118, 110, 0.80);
+    --recharge-badge-bg: rgba(15, 118, 110, 0.12);
+    --recharge-badge-border: rgba(15, 118, 110, 0.20);
+
     --rest-color: hsl(20, 95%, 45%);
     --rest-color-rgb: 234, 88, 12;
     --rest-glow: rgba(234, 88, 12, 0.08);
+    --rest-color-bg-translucent: rgba(234, 88, 12, 0.08);
+    --rest-color-border-translucent: rgba(234, 88, 12, 0.18);
+    --rest-color-card-border: rgba(234, 88, 12, 0.25);
+    --rest-color-card-shadow: rgba(234, 88, 12, 0.12);
+    --rest-color-translucent: rgba(234, 88, 12, 0.85);
+    --rest-color-fade: rgba(234, 88, 12, 0.80);
+    --rest-badge-bg: rgba(234, 88, 12, 0.12);
+    --rest-badge-border: rgba(234, 88, 12, 0.20);
+
     --neutral-color: hsl(215, 16%, 42%);
     --neutral-color-rgb: 71, 85, 105;
     --neutral-glow: rgba(100, 116, 139, 0.05);
+    --neutral-color-bg-translucent: rgba(71, 85, 105, 0.08);
+    --neutral-color-border-translucent: rgba(71, 85, 105, 0.18);
+    --neutral-color-card-border: rgba(71, 85, 105, 0.25);
+    --neutral-color-card-shadow: rgba(71, 85, 105, 0.12);
+    --neutral-color-translucent: rgba(71, 85, 105, 0.85);
+    --neutral-color-fade: rgba(71, 85, 105, 0.80);
+    --neutral-badge-bg: rgba(71, 85, 105, 0.12);
+    --neutral-badge-border: rgba(71, 85, 105, 0.20);
     
     --active-mode-color: var(--work-color);
     --active-mode-glow: var(--work-glow);
-    --active-mode-rgb: 99, 102, 241;
-    --active-mode-secondary-rgb: 15, 118, 110;
+    --active-mode-rgb: var(--work-color-rgb);
+    --active-mode-secondary-rgb: var(--recharge-color-rgb);
     
     --shadow-card: 0 10px 30px rgba(120, 110, 90, 0.06);
     --shadow-glow: 0 0 35px rgba(99, 102, 241, 0.06);
@@ -4874,23 +5027,6 @@ body.theme-light {
     background: radial-gradient(circle at 10% 10%, rgba(251, 146, 60, 0.08) 0%, transparent 45%),
                 radial-gradient(circle at 90% 90%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
                 radial-gradient(circle at 85% 15%, var(--bg-surface) 0%, var(--bg-color) 100%) no-repeat fixed;
-}
-
-body.theme-light.mode-work {
-    --active-mode-rgb: 99, 102, 241;
-    --active-mode-secondary-rgb: 15, 118, 110;
-}
-body.theme-light.mode-recharge {
-    --active-mode-rgb: 15, 118, 110;
-    --active-mode-secondary-rgb: 234, 88, 12;
-}
-body.theme-light.mode-rest {
-    --active-mode-rgb: 234, 88, 12;
-    --active-mode-secondary-rgb: 220, 38, 38;
-}
-body.theme-light.mode-neutral {
-    --active-mode-rgb: 71, 85, 105;
-    --active-mode-secondary-rgb: 241, 245, 249;
 }
 
 /* Light Theme Layout Adjustments */
@@ -4933,9 +5069,19 @@ body.theme-light .timeline-track {
     box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
+body.theme-light .timeline-events-list::before {
+    background: rgba(15, 23, 42, 0.08);
+}
+
+body.theme-light .timeline-event-item {
+    background: rgba(15, 23, 42, 0.015);
+    border-color: rgba(15, 23, 42, 0.04);
+}
+
 body.theme-light .timeline-event-item:hover, 
 body.theme-light .timeline-event-item.highlighted {
     background: rgba(0, 0, 0, 0.03) !important;
+    border-color: rgba(15, 23, 42, 0.08) !important;
     box-shadow: inset 3px 0 0 0 var(--active-color, var(--work-color)) !important;
 }
 

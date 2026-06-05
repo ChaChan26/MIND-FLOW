@@ -185,7 +185,8 @@ function updateNavIndicator() {
         
         indicator.style.borderColor = borderCol;
         indicator.style.background = bgCol;
-        indicator.style.boxShadow = `0 0 15px ${shadowCol}`;
+        // Removed box-shadow to eliminate hover/active side light flash
+        indicator.style.boxShadow = 'none';
     } else if (indicator) {
         indicator.style.opacity = '0';
     }
@@ -1121,6 +1122,7 @@ async function loadAnalytics() {
         const weekLabel = document.getElementById('current-week-label');
         if (weekLabel && data.week_label) {
             weekLabel.textContent = data.week_label;
+            weekLabel.title = data.week_label;
         }
         const nextBtn = document.getElementById('next-week-btn');
         if (nextBtn) {
@@ -1428,7 +1430,7 @@ async function loadAnalytics() {
             timelinePill.textContent = `${trackedH}h ${trackedM}m total track`;
             
             if (todaySessions.length === 0) {
-                timelineTrack.innerHTML = `<div class="timeline-segment neutral-seg" style="width: 100%; top: 5px; text-align: center; color: var(--text-muted); font-size: 0.75rem; line-height: 20px; cursor: default; box-shadow: none;" data-tooltip="No sessions tracked yet today.">No sessions tracked yet today.</div>`;
+                timelineTrack.innerHTML = `<div class="timeline-segment neutral-seg" style="width: 100%; top: 4px; height: 14px; line-height: 12px; font-size: 0.7rem; text-align: center; color: var(--text-muted); cursor: default; box-shadow: none;" data-tooltip="No sessions tracked yet today.">No sessions tracked yet today.</div>`;
                 timelineEvents.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 1.25rem 0;">No focus sessions or breaks logged yet today.</div>`;
             } else {
                 // Find chronological bounds
@@ -1773,11 +1775,13 @@ function renderAppStats() {
     let workDuration = 0;
     let rechargeDuration = 0;
     let neutralDuration = 0;
+    let totalAppsDuration = 0;
     
     filteredData.forEach(item => {
         workDuration += item.work_duration;
         rechargeDuration += item.recharge_duration;
         neutralDuration += item.neutral_duration;
+        totalAppsDuration += item.duration;
     });
     
     const totalDuration = workDuration + rechargeDuration + neutralDuration;
@@ -1786,9 +1790,30 @@ function renderAppStats() {
     const ratioContainer = document.getElementById('app-ratio-bar-container');
     if (totalDuration > 0 && ratioContainer) {
         ratioContainer.style.display = 'block';
-        const workPct = Math.round((workDuration / totalDuration) * 100);
-        const rechargePct = Math.round((rechargeDuration / totalDuration) * 100);
-        const neutralPct = Math.round((neutralDuration / totalDuration) * 100);
+        let workPct = Math.round((workDuration / totalDuration) * 100);
+        let rechargePct = Math.round((rechargeDuration / totalDuration) * 100);
+        let neutralPct = Math.round((neutralDuration / totalDuration) * 100);
+        
+        // Ensure they sum to exactly 100% to prevent bar overflow/wrapping
+        const sumPct = workPct + rechargePct + neutralPct;
+        if (sumPct !== 100 && sumPct > 0) {
+            const diff = 100 - sumPct;
+            // Adjust the largest non-zero value
+            const values = [
+                { name: 'work', val: workPct },
+                { name: 'recharge', val: rechargePct },
+                { name: 'neutral', val: neutralPct }
+            ];
+            values.sort((a, b) => b.val - a.val);
+            if (values[0].val > 0) {
+                values[0].val += diff;
+            }
+            values.forEach(v => {
+                if (v.name === 'work') workPct = v.val;
+                if (v.name === 'recharge') rechargePct = v.val;
+                if (v.name === 'neutral') neutralPct = v.val;
+            });
+        }
         
         document.getElementById('ratio-seg-work').style.width = `${workPct}%`;
         document.getElementById('ratio-seg-recharge').style.width = `${rechargePct}%`;
@@ -1831,7 +1856,7 @@ function renderAppStats() {
     };
     
     filteredData.forEach((item, index) => {
-        const pct = totalDuration > 0 ? (item.duration / totalDuration) * 100 : 0;
+        const pct = Math.min(totalAppsDuration > 0 ? (item.duration / totalAppsDuration) * 100 : 0, 100);
         const emoji = getAppEmoji(item.process);
         const durationText = formatAppDuration(item.duration);
         
@@ -5589,7 +5614,7 @@ function showTooltipForSegment(seg) {
     
     if (brainDump) {
         tooltipHtml += `
-            <div style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 0.35rem; padding-top: 0.35rem; display: flex; flex-direction: column; gap: 0.1rem;">
+            <div style="border-top: 1px solid var(--border-color); margin-top: 0.35rem; padding-top: 0.35rem; display: flex; flex-direction: column; gap: 0.1rem;">
                 <span style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em;">Save-State:</span>
                 <span style="color: var(--text-primary); font-style: italic; font-size: 0.72rem; white-space: normal; max-width: 260px; line-height: 1.3;">"${escapeHtml(brainDump)}"</span>
             </div>
@@ -5600,9 +5625,6 @@ function showTooltipForSegment(seg) {
     tooltip.style.borderColor = modeColorVar;
     
     // Measure width to clamp position
-    tooltip.style.visibility = 'hidden';
-    tooltip.style.opacity = '1';
-    
     const tooltipRect = tooltip.getBoundingClientRect();
     const tooltipWidth = tooltipRect.width || tooltip.offsetWidth || 200;
     

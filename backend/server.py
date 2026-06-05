@@ -545,7 +545,19 @@ def get_analytics():
             
         process = entry.get("process", "")
         title = entry.get("title", "")
-        titles = entry.get("titles", {})
+        
+        # Copy and ensure all duration is accounted for in titles dict
+        entry_titles = entry.get("titles")
+        titles = dict(entry_titles) if isinstance(entry_titles, dict) else {}
+        sum_titles_dur = sum(titles.values())
+        total_dur = entry.get("duration", 0)
+        if total_dur > sum_titles_dur:
+            untracked_dur = total_dur - sum_titles_dur
+            legacy_title = entry.get("title", "")
+            if legacy_title and legacy_title != "None":
+                titles[legacy_title] = titles.get(legacy_title, 0) + untracked_dur
+            else:
+                titles["No Title Captured"] = untracked_dur
         
         # Determine category for each title separately
         title_categories = {}
