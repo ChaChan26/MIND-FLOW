@@ -74,7 +74,7 @@ EYE_EXERCISES = [
     "Rub your hands together to warm them, cup them over closed eyes, and rest for 10 seconds."
 ]
 
-from backend.database import matches_keyword
+from backend.database import matches_keyword, matches_any_keyword
 
 class LASTINPUTINFO(ctypes.Structure):
     _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
@@ -175,41 +175,7 @@ _parent_process_cache = None
 
 def disable_ecoqos_for_process_tree():
     """Disable EcoQoS recursively for current process and all child processes (like WebView2 renderers)."""
-    global _parent_process_cache
-    if sys.platform != "win32":
-        return
-    try:
-        import psutil
-        PROCESS_SET_INFORMATION = 0x0200
-        
-        # 1. Disable for current process
-        current_pid = os.getpid()
-        current_handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, current_pid)
-        if current_handle:
-            try:
-                disable_ecoqos_for_handle(current_handle)
-            except Exception:
-                pass
-            finally:
-                ctypes.windll.kernel32.CloseHandle(current_handle)
-        
-        # 2. Disable for all child/descendant processes recursively
-        if _parent_process_cache is None:
-            _parent_process_cache = psutil.Process()
-        for child in _parent_process_cache.children(recursive=True):
-            try:
-                h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, child.pid)
-                if h_proc:
-                    try:
-                        disable_ecoqos_for_handle(h_proc)
-                    except Exception:
-                        pass
-                    finally:
-                        ctypes.windll.kernel32.CloseHandle(h_proc)
-            except Exception:
-                pass
-    except Exception:
-        pass
+    return
 
 
 def trigger_lockout_overlay(duration_seconds=20):
@@ -779,8 +745,8 @@ def main_state_machine(gui_process=None):
         if idle_sec_val >= idle_limit:
             target_mode = "rest"
         else:
-            is_work = any(matches_keyword(kw, active_process) or matches_keyword(kw, active_title) for kw in work_keywords)
-            is_recharge = any(matches_keyword(kw, active_process) or matches_keyword(kw, active_title) for kw in recharge_keywords)
+            is_work = matches_any_keyword(work_keywords, active_process) or matches_any_keyword(work_keywords, active_title)
+            is_recharge = matches_any_keyword(recharge_keywords, active_process) or matches_any_keyword(recharge_keywords, active_title)
 
             if is_work:
                 target_mode = "work"

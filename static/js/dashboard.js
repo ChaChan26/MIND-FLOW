@@ -579,9 +579,9 @@ async function pollStatus() {
         }
 
         
-        // 7.8 Periodically reload analytics every 10 seconds on active tabs
+        // 7.8 Periodically reload analytics every 30 seconds on active tabs
         const now = Date.now();
-        if ((currentTab === 'dashboard' || currentTab === 'analytics') && (now - lastAnalyticsLoadTime >= 10000)) {
+        if ((currentTab === 'dashboard' || currentTab === 'analytics') && (now - lastAnalyticsLoadTime >= 30000)) {
             loadAnalytics();
         }
         

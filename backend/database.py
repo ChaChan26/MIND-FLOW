@@ -23,7 +23,37 @@ DEFAULT_DATA_DIR = get_default_data_dir()
 DB_FILE = os.getenv("MINDFLOW_DB_FILE", os.path.join(DEFAULT_DATA_DIR, "mind_flow_data.json"))
 
 _keyword_regex_cache = {}
+_combined_regex_cache = {}
 _simulated_disk = {}
+
+def matches_any_keyword(keywords_list, text):
+    """Check if any keyword in keywords_list matches a target text respecting word boundaries."""
+    if not isinstance(text, str) or not keywords_list:
+        return False
+    
+    # Convert list to tuple to make it hashable for the cache key
+    cache_key = tuple(keywords_list)
+    if cache_key not in _combined_regex_cache:
+        patterns = []
+        for kw in keywords_list:
+            if not isinstance(kw, str):
+                continue
+            kw = kw.strip().lower()
+            if not kw:
+                continue
+            escaped_kw = re.escape(kw)
+            left_boundary = r"(?<![a-zA-Z0-9])" if kw[0].isalnum() else ""
+            right_boundary = r"(?![a-zA-Z0-9])" if kw[-1].isalnum() else ""
+            patterns.append(f"(?:{left_boundary}{escaped_kw}{right_boundary})")
+        if patterns:
+            _combined_regex_cache[cache_key] = re.compile("|".join(patterns))
+        else:
+            _combined_regex_cache[cache_key] = None
+            
+    regex = _combined_regex_cache[cache_key]
+    if not regex:
+        return False
+    return bool(regex.search(text.lower()))
 
 def matches_keyword(kw, text):
     """Check if a keyword matches a target text respecting word boundaries."""
@@ -86,6 +116,12 @@ class MindFlowDB:
             "last_reflections_len": -1,
             "last_checked_date": None,
             "last_check_time": 0.0,
+            "result": None
+        }
+        self._status_cache = {
+            "last_sessions_len": -1,
+            "last_reflections_len": -1,
+            "last_checked_date": None,
             "result": None
         }
         
@@ -583,4 +619,134 @@ class MindFlowDB:
             cache["result"] = result
             
             return result
+
+    def get_cached_status_data(self):
+        """Retrieve pre-computed, cached status stats to avoid parsing entire DB arrays every second."""
+        with self.lock:
+            today_date = datetime.today().date()
+            today_str = today_date.isoformat()
+            
+            # Check cache validity
+            cache = self._status_cache
+            if (cache["result"] is not None and
+                cache["last_sessions_len"] == len(self.data["sessions"]) and
+                cache["last_reflections_len"] == len(self.data["reflections"]) and
+                cache["last_checked_date"] == today_date):
+                return cache["result"]
+            
+            # 1. current_energy for today (reverse search)
+            current_energy = 5
+            for r in reversed(self.data["reflections"]):
+                if r["timestamp"].startswith(today_str):
+                    current_energy = r["energy_level"]
+                    break
+                try:
+                    if datetime.fromisoformat(r["timestamp"]).date() < today_date:
+                        break
+                except:
+                    pass
+            
+            # 2. Detect consecutive high stress (last 2 user reflections)
+            latest_user_reflections = []
+            for r in reversed(self.data["reflections"]):
+                is_auto = r.get("summary", "").startswith("[Autopilot]")
+                if not is_auto:
+                    latest_user_reflections.append(r)
+                    if len(latest_user_reflections) == 2:
+                        break
+            
+            high_stress_alert = False
+            latest_mood = None
+            if len(latest_user_reflections) >= 1:
+                latest_mood = latest_user_reflections[0].get("mood")
+                if len(latest_user_reflections) == 2:
+                    stress_flags = []
+                    for ur in latest_user_reflections:
+                        e = ur.get("energy_level", 5)
+                        f = ur.get("friction_level", 1)
+                        if e <= 2 or f >= 4:
+                            stress_flags.append(True)
+                        else:
+                            stress_flags.append(False)
+                    if all(stress_flags):
+                        high_stress_alert = True
+            
+            # 3. Sum up completed sessions today (O(N) reverse search)
+            today_work_seconds = 0
+            today_recharge_seconds = 0
+            today_rest_seconds = 0
+            today_bypasses = 0
+            
+            for s in reversed(self.data["sessions"]):
+                if s["start"].startswith(today_str):
+                    mode = s["mode"]
+                    duration = s["duration"]
+                    if mode == "work":
+                        today_work_seconds += duration
+                    elif mode == "recharge":
+                        today_recharge_seconds += duration
+                    elif mode == "rest":
+                        today_rest_seconds += duration
+                    if s.get("bypassed", False):
+                        today_bypasses += 1
+                else:
+                    try:
+                        if datetime.fromisoformat(s["start"]).date() < today_date:
+                            break
+                    except:
+                        pass
+            
+            # 4. Circadian forecast fatigue alert (30 days scan)
+            forecast_fatigue_alert = ""
+            try:
+                from collections import defaultdict
+                from datetime import timedelta
+                reflections_by_date = defaultdict(list)
+                thirty_days_ago = today_date - timedelta(days=30)
+                
+                for r in reversed(self.data["reflections"]):
+                    try:
+                        r_dt = datetime.fromisoformat(r["timestamp"])
+                        r_date = r_dt.date()
+                        if r_date < thirty_days_ago:
+                            break
+                        if r_date < today_date:
+                            reflections_by_date[r_date].append(r["energy_level"])
+                    except:
+                        pass
+                
+                if reflections_by_date:
+                    avg_past_daily_energy = sum(sum(levels)/len(levels) for levels in reflections_by_date.values()) / len(reflections_by_date)
+                    today_levels = []
+                    for r in reversed(self.data["reflections"]):
+                        if r["timestamp"].startswith(today_str):
+                            today_levels.append(r["energy_level"])
+                        else:
+                            break
+                    if today_levels:
+                        today_avg = sum(today_levels) / len(today_levels)
+                        if today_avg < avg_past_daily_energy - 0.5:
+                            forecast_fatigue_alert = " (Accumulated fatigue alert: Energy is running lower than your historic average)"
+            except Exception:
+                pass
+            
+            # Populate cache
+            result = {
+                "current_energy": current_energy,
+                "high_stress_alert": high_stress_alert,
+                "latest_mood": latest_mood,
+                "today_work_seconds": today_work_seconds,
+                "today_recharge_seconds": today_recharge_seconds,
+                "today_rest_seconds": today_rest_seconds,
+                "today_bypasses": today_bypasses,
+                "forecast_fatigue_alert": forecast_fatigue_alert
+            }
+            
+            cache["last_sessions_len"] = len(self.data["sessions"])
+            cache["last_reflections_len"] = len(self.data["reflections"])
+            cache["last_checked_date"] = today_date
+            cache["result"] = result
+            
+            return result
+
 
