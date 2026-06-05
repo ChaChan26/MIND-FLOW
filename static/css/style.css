@@ -334,11 +334,31 @@ body.resizing * {
 .status-pulse {
     width: 8px;
     height: 8px;
-    background-color: var(--recharge-color);
+    background-color: var(--active-mode-color, var(--recharge-color));
     border-radius: 50%;
     display: inline-block;
-    box-shadow: 0 0 8px var(--recharge-color);
-    animation: pulse 1.8s infinite;
+    position: relative;
+    transition: background-color var(--transition-speed) ease;
+}
+
+.status-pulse::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: inherit;
+    border-radius: 50%;
+    animation: pulse-ring 1.8s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+}
+
+@keyframes pulse-ring {
+    0% {
+        transform: scale(1);
+        opacity: 0.85;
+    }
+    80%, 100% {
+        transform: scale(2.6);
+        opacity: 0;
+    }
 }
 
 .toggle-btn {
@@ -452,8 +472,8 @@ body.resizing * {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     padding: 2rem;
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* backdrop-filter: blur(var(--glass-blur)); */
+    /* -webkit-backdrop-filter: blur(var(--glass-blur)); */
     transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), border-color var(--transition-speed) ease, box-shadow 0.4s ease, background var(--transition-speed) ease;
     box-shadow: var(--shadow-card);
     transform-style: preserve-3d;
@@ -577,8 +597,8 @@ body.resizing * {
 
 /* Staggered neon energy pulse when charging */
 @keyframes segment-pulse {
-    0%, 100% { opacity: 0.75; filter: brightness(1.0); }
-    50% { opacity: 1.0; filter: brightness(1.25) contrast(1.1); }
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1.0; }
 }
 
 .battery-outer.charging .battery-segment.active {
@@ -671,9 +691,14 @@ body.resizing * {
     border: 2px solid transparent;
     border-bottom: 2px solid var(--neutral-color);
     border-radius: 50%;
-    animation: rotate 3s linear infinite reverse;
     opacity: 0.35;
     transition: border-bottom-color var(--transition-speed) ease;
+}
+
+body.mode-work .status-ring-outer::after,
+body.mode-recharge .status-ring-outer::after,
+body.mode-rest .status-ring-outer::after {
+    animation: rotate 3s linear infinite reverse;
 }
 
 .status-icon {
@@ -2841,6 +2866,9 @@ body.mode-rest .portal-sphere::after {
     width: 3px;
     background: var(--ambient-active-color, var(--recharge-color));
     border-radius: 1px;
+}
+
+.audio-waveform.active .audio-waveform-bar {
     animation: waveform-bounce 1.2s ease-in-out infinite;
 }
 
@@ -3715,6 +3743,11 @@ tr.roadblock-row {
     animation: waveMoveLeft 12s infinite linear;
     top: -18px;
     height: 20px;
+}
+
+body.mode-work .water-wave,
+body.mode-neutral .water-wave {
+    animation-play-state: paused !important;
 }
 
 @keyframes waveMoveLeft {
@@ -5140,4 +5173,9 @@ body.theme-light .timeline-tooltip {
 }
 body.theme-light .timeline-tooltip::after {
     border-color: rgba(255, 255, 255, 0.98) transparent;
+}
+
+/* Pause all CSS animations on the page when hidden/minimized to save CPU/GPU */
+body.page-hidden * {
+    animation-play-state: paused !important;
 }

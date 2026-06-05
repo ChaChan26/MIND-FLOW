@@ -606,15 +606,11 @@ def main_state_machine(gui_process=None):
         "last_checked_date": None
     }
 
-    # Set up loop counter and run initial EcoQoS disabling
-    loop_counter = 0
+    # Run initial EcoQoS disabling
     disable_ecoqos_for_process_tree()
 
     while True:
         time.sleep(1.0)
-        loop_counter += 1
-        if loop_counter % 5 == 0:
-            disable_ecoqos_for_process_tree()
         
         # Check if standalone GUI process exited
         if gui_process and hasattr(gui_process, 'poll') and gui_process.poll() is not None:
@@ -884,7 +880,8 @@ def run_webview_gui(url):
         except Exception:
             os._exit(0)
         while True:
-            time.sleep(1.0)
+            # Check every 3 seconds instead of 1 second to reduce CPU wakeups
+            time.sleep(3.0)
             if not parent.is_running():
                 os._exit(0)
                 

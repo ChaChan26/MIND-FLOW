@@ -140,14 +140,46 @@ function switchTab(tabId) {
     if (tabId === 'analytics') {
         loadAnalytics();
         stopZenCanvas();
+        clearDashboardIntervals();
     } else if (tabId === 'settings') {
         loadSettings();
         stopZenCanvas();
+        clearDashboardIntervals();
     } else if (tabId === 'zen') {
         initZenCanvas();
+        clearDashboardIntervals();
     } else {
         stopZenCanvas();
+        restoreDashboardIntervals();
     }
+}
+
+// Clear and restore intervals to save CPU/GPU when dashboard is hidden
+function clearDashboardIntervals() {
+    if (hydrationBubbleInterval) {
+        clearInterval(hydrationBubbleInterval);
+        hydrationBubbleInterval = null;
+    }
+    const hydBubbles = document.getElementById('hydration-bubbles');
+    if (hydBubbles) hydBubbles.innerHTML = '';
+    
+    if (bubbleInterval) {
+        clearInterval(bubbleInterval);
+        bubbleInterval = null;
+    }
+    const batBubbles = document.getElementById('battery-bubbles');
+    if (batBubbles) batBubbles.innerHTML = '';
+}
+
+function restoreDashboardIntervals() {
+    if (document.hidden) return;
+    
+    if (lastHydrationPct > 0) {
+        updateHydrationBubbles(true);
+    }
+    
+    const isCharging = bodyEl.classList.contains('mode-recharge') || bodyEl.classList.contains('mode-rest');
+    updateBatteryBubbles(isCharging);
 }
 
 // Update Sidebar Sliding Tab Indicator Position and Colors
@@ -2300,13 +2332,16 @@ statusInterval = setInterval(pollStatus, 1000);
 // Page Visibility API throttling to save CPU/GPU when minimized/backgrounded
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+        document.body.classList.add('page-hidden');
         // App is minimized or backgrounded: slow down status poll and stop rendering
         if (statusInterval) {
             clearInterval(statusInterval);
             statusInterval = setInterval(pollStatus, 5000);
         }
         stopZenCanvas();
+        clearDashboardIntervals();
     } else {
+        document.body.classList.remove('page-hidden');
         // App returned to foreground: restore normal status polling speed
         if (statusInterval) {
             clearInterval(statusInterval);
@@ -2318,6 +2353,12 @@ document.addEventListener('visibilitychange', () => {
         const zenTab = document.getElementById('tab-zen');
         if (zenTab && zenTab.classList.contains('active')) {
             initZenCanvas();
+        }
+        
+        // Restore Dashboard visual elements if on dashboard tab
+        const dashboardTab = document.getElementById('tab-dashboard');
+        if (dashboardTab && dashboardTab.classList.contains('active')) {
+            restoreDashboardIntervals();
         }
     }
 });
@@ -2995,6 +3036,18 @@ function updateBatteryBubbles(isCharging) {
         return;
     }
     
+    // Only start if the dashboard tab is active and document is not hidden
+    const dashboardTab = document.getElementById('tab-dashboard');
+    const isTabActive = dashboardTab && dashboardTab.classList.contains('active');
+    if (document.hidden || !isTabActive) {
+        if (bubbleInterval) {
+            clearInterval(bubbleInterval);
+            bubbleInterval = null;
+        }
+        container.innerHTML = '';
+        return;
+    }
+    
     if (bubbleInterval) return; // already active
     
     bubbleInterval = setInterval(() => {
@@ -3422,6 +3475,18 @@ function updateHydrationBubbles(hasWater) {
     if (!container) return;
     
     if (!hasWater) {
+        if (hydrationBubbleInterval) {
+            clearInterval(hydrationBubbleInterval);
+            hydrationBubbleInterval = null;
+        }
+        container.innerHTML = '';
+        return;
+    }
+    
+    // Only start if the dashboard tab is active and document is not hidden
+    const dashboardTab = document.getElementById('tab-dashboard');
+    const isTabActive = dashboardTab && dashboardTab.classList.contains('active');
+    if (document.hidden || !isTabActive) {
         if (hydrationBubbleInterval) {
             clearInterval(hydrationBubbleInterval);
             hydrationBubbleInterval = null;
