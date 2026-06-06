@@ -5292,6 +5292,11 @@ function animateZen() {
     });
     
     if (zenVisualizerMode === 'cosmic') {
+        const bins = {
+            1: [], // alpha ~ 0.05
+            2: [], // alpha ~ 0.10
+            3: []  // alpha ~ 0.15
+        };
         for (let i = 0; i < zenParticles.length; i++) {
             if (zenParticles[i].isTemp) continue;
             for (let j = i + 1; j < zenParticles.length; j++) {
@@ -5305,14 +5310,42 @@ function animateZen() {
                 if (distSq < 3600) {
                     const dist = Math.sqrt(distSq);
                     const alpha = (60 - dist) / 60 * 0.15;
-                    zenCtx.beginPath();
-                    zenCtx.moveTo(p1.x, p1.y);
-                    zenCtx.lineTo(p2.x, p2.y);
-                    zenCtx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
-                    zenCtx.lineWidth = 0.5;
-                    zenCtx.stroke();
+                    if (alpha <= 0) continue;
+                    let binKey = 1;
+                    if (alpha > 0.10) binKey = 3;
+                    else if (alpha > 0.05) binKey = 2;
+                    bins[binKey].push(p1.x, p1.y, p2.x, p2.y);
                 }
             }
+        }
+        
+        zenCtx.lineWidth = 0.5;
+        if (bins[1].length > 0) {
+            zenCtx.beginPath();
+            for (let i = 0; i < bins[1].length; i += 4) {
+                zenCtx.moveTo(bins[1][i], bins[1][i+1]);
+                zenCtx.lineTo(bins[1][i+2], bins[1][i+3]);
+            }
+            zenCtx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            zenCtx.stroke();
+        }
+        if (bins[2].length > 0) {
+            zenCtx.beginPath();
+            for (let i = 0; i < bins[2].length; i += 4) {
+                zenCtx.moveTo(bins[2][i], bins[2][i+1]);
+                zenCtx.lineTo(bins[2][i+2], bins[2][i+3]);
+            }
+            zenCtx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+            zenCtx.stroke();
+        }
+        if (bins[3].length > 0) {
+            zenCtx.beginPath();
+            for (let i = 0; i < bins[3].length; i += 4) {
+                zenCtx.moveTo(bins[3][i], bins[3][i+1]);
+                zenCtx.lineTo(bins[3][i+2], bins[3][i+3]);
+            }
+            zenCtx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            zenCtx.stroke();
         }
     }
     

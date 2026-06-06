@@ -3,7 +3,7 @@ import sys
 import io
 
 # Force high-performance discrete GPU (dGPU) for hardware accelerated rendering in WebView2/Chromium
-os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--force-high-performance-gpu --gpu-preference=2"
+os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--force-high-performance-gpu --gpu-preference=2 --ignore-gpu-blocklist --disable-gpu-driver-bug-workarounds"
 
 
 class Unbuffered:
@@ -952,7 +952,7 @@ if __name__ == "__main__":
             if hasattr(sys, "_base_executable") and sys._base_executable != sys.executable:
                 winreg.SetValueEx(key, sys._base_executable, 0, winreg.REG_SZ, gpu_pref_val)
                 
-            # Register all msedgewebview2.exe executables (system runtime, Edge WebView versions, running processes, etc.)
+            # Register all msedgewebview2.exe and msedge.exe executables (system runtime, Edge WebView versions, running processes, etc.)
             webview_exes = set()
             
             # 1. Common system paths
@@ -960,23 +960,44 @@ if __name__ == "__main__":
             if os.path.exists(system_webview):
                 webview_exes.add(system_webview)
                 
-            # 2. Scanning common directories recursively for msedgewebview2.exe
+            # 2. Scanning common directories recursively for executables
             search_roots = [
                 r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
                 r"C:\Program Files (x86)\Microsoft\EdgeCore",
                 r"C:\Program Files\Microsoft\EdgeWebView\Application",
                 r"C:\Program Files\Microsoft\EdgeCore",
             ]
+            
+            # Add user-level AppData paths to capture user-level WebView2 and Edge installations
+            local_appdata = os.environ.get("LOCALAPPDATA")
+            if local_appdata:
+                search_roots.append(os.path.join(local_appdata, "Microsoft", "EdgeWebView", "Application"))
+                search_roots.append(os.path.join(local_appdata, "Microsoft", "EdgeCore"))
+                search_roots.append(os.path.join(local_appdata, "Microsoft", "Edge", "Application"))
+                
+            # Add other system ProgramFiles locations for Edge
+            pf_x86 = os.environ.get("ProgramFiles(x86)")
+            if pf_x86:
+                search_roots.append(os.path.join(pf_x86, "Microsoft", "Edge", "Application"))
+            pf = os.environ.get("ProgramFiles")
+            if pf:
+                search_roots.append(os.path.join(pf, "Microsoft", "Edge", "Application"))
+                
+            # Normalize and filter search roots
+            search_roots = list(set(os.path.abspath(r) for r in search_roots if r))
+            
             for root in search_roots:
                 if os.path.exists(root):
-                    for p in glob.glob(os.path.join(root, "**", "msedgewebview2.exe"), recursive=True):
-                        webview_exes.add(os.path.abspath(p))
+                    for exe_name in ["msedgewebview2.exe", "msedge.exe"]:
+                        for p in glob.glob(os.path.join(root, "**", exe_name), recursive=True):
+                            webview_exes.add(os.path.abspath(p))
             
-            # 3. Check currently running processes for any msedgewebview2.exe
+            # 3. Check currently running processes for any msedgewebview2.exe or msedge.exe
             try:
                 for proc in psutil.process_iter(['name', 'exe']):
                     try:
-                        if proc.info['name'] and proc.info['name'].lower() == 'msedgewebview2.exe':
+                        name = proc.info['name']
+                        if name and name.lower() in ['msedgewebview2.exe', 'msedge.exe']:
                             exe_path = proc.info['exe']
                             if exe_path and os.path.exists(exe_path):
                                 webview_exes.add(os.path.abspath(exe_path))
