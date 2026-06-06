@@ -5179,3 +5179,8 @@ body.theme-light .timeline-tooltip::after {
 body.page-hidden * {
     animation-play-state: paused !important;
 }
+
+/* Pause all CSS animations on the page when user/system is idle to save CPU/GPU */
+body.system-idle * {
+    animation-play-state: paused !important;
+}

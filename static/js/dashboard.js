@@ -39,6 +39,7 @@ function parseLocalDate(isoStr) {
 
 let currentTab = 'dashboard';
 let statusInterval = null;
+let isSystemIdle = false;
 let lastActiveTitle = '';
 let lastExternalWindow = 'None';
 let lastExternalProcess = 'None';
@@ -615,6 +616,50 @@ async function pollStatus() {
         const now = Date.now();
         if ((currentTab === 'dashboard' || currentTab === 'analytics') && (now - lastAnalyticsLoadTime >= 30000)) {
             loadAnalytics();
+        }
+
+        // 8. Idle Throttling to save CPU/GPU when user is away
+        const idleLimit = 30; // 30 seconds
+        if (status.idle_seconds !== undefined && status.idle_seconds >= idleLimit) {
+            if (!isSystemIdle) {
+                isSystemIdle = true;
+                console.log("[System] User went idle. Throttling animations and status polling.");
+                document.body.classList.add('system-idle');
+                
+                // Slow down polling to 5 seconds
+                if (statusInterval) {
+                    clearInterval(statusInterval);
+                    statusInterval = setInterval(pollStatus, 5000);
+                }
+                
+                stopZenCanvas();
+                clearDashboardIntervals();
+            }
+        } else {
+            if (isSystemIdle) {
+                isSystemIdle = false;
+                document.body.classList.remove('system-idle');
+                
+                // Restore polling rate to 1 second (if not hidden)
+                if (!document.hidden) {
+                    if (statusInterval) {
+                        clearInterval(statusInterval);
+                        statusInterval = setInterval(pollStatus, 1000);
+                    }
+                    
+                    // Restore Zen Visualizer if currently on the Zen Space tab
+                    const zenTab = document.getElementById('tab-zen');
+                    if (zenTab && zenTab.classList.contains('active')) {
+                        initZenCanvas();
+                    }
+                    
+                    // Restore Dashboard visual elements if on dashboard tab
+                    const dashboardTab = document.getElementById('tab-dashboard');
+                    if (dashboardTab && dashboardTab.classList.contains('active')) {
+                        restoreDashboardIntervals();
+                    }
+                }
+            }
         }
         
     } catch (e) {
@@ -2342,26 +2387,66 @@ document.addEventListener('visibilitychange', () => {
         clearDashboardIntervals();
     } else {
         document.body.classList.remove('page-hidden');
-        // App returned to foreground: restore normal status polling speed
+        // App returned to foreground: restore status polling speed depending on idle state
+        const targetInterval = isSystemIdle ? 5000 : 1000;
         if (statusInterval) {
             clearInterval(statusInterval);
-            statusInterval = setInterval(pollStatus, 1000);
+            statusInterval = setInterval(pollStatus, targetInterval);
         }
         pollStatus();
         
-        // Restore Zen Visualizer if currently on the Zen Space tab
-        const zenTab = document.getElementById('tab-zen');
-        if (zenTab && zenTab.classList.contains('active')) {
-            initZenCanvas();
-        }
-        
-        // Restore Dashboard visual elements if on dashboard tab
-        const dashboardTab = document.getElementById('tab-dashboard');
-        if (dashboardTab && dashboardTab.classList.contains('active')) {
-            restoreDashboardIntervals();
+        // Restore elements only if not system idle
+        if (!isSystemIdle) {
+            // Restore Zen Visualizer if currently on the Zen Space tab
+            const zenTab = document.getElementById('tab-zen');
+            if (zenTab && zenTab.classList.contains('active')) {
+                initZenCanvas();
+            }
+            
+            // Restore Dashboard visual elements if on dashboard tab
+            const dashboardTab = document.getElementById('tab-dashboard');
+            if (dashboardTab && dashboardTab.classList.contains('active')) {
+                restoreDashboardIntervals();
+            }
         }
     }
 });
+
+// Exit system idle state instantly upon mouse/keyboard events on the window
+function handleUserActivity() {
+    if (isSystemIdle) {
+        isSystemIdle = false;
+        document.body.classList.remove('system-idle');
+        
+        // Restore normal polling speed (if not hidden)
+        if (!document.hidden) {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+                statusInterval = setInterval(pollStatus, 1000);
+            }
+            
+            // Trigger status poll immediately to update UI
+            pollStatus();
+            
+            // Restore Zen Visualizer if currently on the Zen Space tab
+            const zenTab = document.getElementById('tab-zen');
+            if (zenTab && zenTab.classList.contains('active')) {
+                initZenCanvas();
+            }
+            
+            // Restore Dashboard visual elements if on dashboard tab
+            const dashboardTab = document.getElementById('tab-dashboard');
+            if (dashboardTab && dashboardTab.classList.contains('active')) {
+                restoreDashboardIntervals();
+            }
+        }
+    }
+}
+
+window.addEventListener('mousemove', handleUserActivity);
+window.addEventListener('keydown', handleUserActivity);
+window.addEventListener('click', handleUserActivity);
+window.addEventListener('touchstart', handleUserActivity);
 
 // Helper to extract a high-quality keyword from active window titles or processes, discarding browser names
 function extractCleanKeyword(title, process) {
