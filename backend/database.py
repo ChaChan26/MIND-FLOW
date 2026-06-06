@@ -88,7 +88,16 @@ DEFAULT_SETTINGS = {
     "eye_care_mode": False,
     "hydration_target": 8,
     "hydration_unit": "cups",
-    "hydration_increment": 1
+    "hydration_increment": 1,
+    "circadian_forecast_enabled": True,
+    "circadian_forecast_sensitivity": "medium"
+}
+
+DEFAULT_CIRCADIAN_CURVE = {
+    0: 1.5, 1: 1.2, 2: 1.0, 3: 1.0, 4: 1.0, 5: 1.2,
+    6: 2.0, 7: 3.0, 8: 3.8, 9: 4.5, 10: 4.8, 11: 4.6,
+    12: 3.8, 13: 3.2, 14: 3.0, 15: 3.6, 16: 4.0, 17: 4.2,
+    18: 4.0, 19: 3.6, 20: 3.2, 21: 2.8, 22: 2.2, 23: 1.8
 }
 
 class MindFlowDB:
@@ -122,6 +131,7 @@ class MindFlowDB:
             "last_sessions_len": -1,
             "last_reflections_len": -1,
             "last_checked_date": None,
+            "last_check_time": 0.0,
             "result": None
         }
         
@@ -365,11 +375,15 @@ class MindFlowDB:
                         val = str(v).strip().lower()
                         if val in ["cups", "ml", "oz"]:
                             self.data["settings"][k] = val
-                    elif k in ["adaptive_timers_enabled", "eye_care_mode"]:
+                    elif k in ["adaptive_timers_enabled", "eye_care_mode", "circadian_forecast_enabled"]:
                         if isinstance(v, str):
                             self.data["settings"][k] = v.lower() in ["true", "1", "yes"]
                         else:
                             self.data["settings"][k] = bool(v)
+                    elif k == "circadian_forecast_sensitivity":
+                        val = str(v).strip().lower()
+                        if val in ["low", "medium", "high"]:
+                            self.data["settings"][k] = val
                     elif isinstance(v, list):
                         # Filter, lowercase, and exclude generic browser names to prevent tracking hijacks
                         disallowed = {"chrome.exe", "chrome", "msedge.exe", "msedge", "firefox.exe", "firefox", "opera.exe", "opera", "brave.exe", "brave", "iexplore.exe", "iexplore", "browser", "explorer"}
@@ -467,8 +481,105 @@ class MindFlowDB:
         with self.lock:
             return self.data.setdefault("app_usage", []).copy()
 
+    def get_circadian_forecast(self):
+        """
+        Calculate circadian fatigue forecast using historical reflection ratings (last 30 days)
+        blended with a standard circadian curve.
+        """
+        with self.lock:
+            # 1. Parse historical reflections grouped by hour of day
+            from datetime import timedelta
+            now = datetime.now()
+            thirty_days_ago = now - timedelta(days=30)
+            
+            hourly_ratings = {i: [] for i in range(24)}
+            for r in self.data.get("reflections", []):
+                try:
+                    r_dt = datetime.fromisoformat(r["timestamp"])
+                    if r_dt.tzinfo is not None:
+                        r_dt = r_dt.replace(tzinfo=None)
+                    if thirty_days_ago <= r_dt <= now:
+                        h = r_dt.hour
+                        hourly_ratings[h].append(r["energy_level"])
+                except Exception:
+                    pass
+            
+            # 2. Compute blended forecast for all 24 hours
+            forecast_curve = []
+            for h in range(24):
+                ratings = hourly_ratings[h]
+                cnt = len(ratings)
+                def_val = DEFAULT_CIRCADIAN_CURVE[h]
+                if cnt > 0:
+                    avg_historical = sum(ratings) / cnt
+                    # Blending weight: max out at 3 samples
+                    w = min(1.0, cnt / 3.0)
+                    predicted_energy = w * avg_historical + (1.0 - w) * def_val
+                else:
+                    predicted_energy = def_val
+                forecast_curve.append({
+                    "hour": h,
+                    "energy": round(predicted_energy, 2)
+                })
+                
+            # Helper to interpolate predicted energy at any decimal hour
+            def energy_at_hour(hour_val):
+                h_floor = int(hour_val) % 24
+                h_ceil = (h_floor + 1) % 24
+                fraction = hour_val - int(hour_val)
+                val_floor = forecast_curve[h_floor]["energy"]
+                val_ceil = forecast_curve[h_ceil]["energy"]
+                return val_floor * (1.0 - fraction) + val_ceil * fraction
+            
+            # 3. Impending slump detection (next 90 minutes)
+            settings = self.get_settings()
+            enabled = settings.get("circadian_forecast_enabled", True)
+            sensitivity = settings.get("circadian_forecast_sensitivity", "medium")
+            
+            # Sensitivity thresholds
+            # low: drop >= 0.8 OR drops below 2.5
+            # medium: drop >= 0.5 OR drops below 3.2
+            # high: drop >= 0.3 OR drops below 3.6
+            if sensitivity == "low":
+                drop_threshold = 0.8
+                low_threshold = 2.5
+            elif sensitivity == "high":
+                drop_threshold = 0.3
+                low_threshold = 3.6
+            else: # medium
+                drop_threshold = 0.5
+                low_threshold = 3.2
+                
+            impending_drop = False
+            slump_minutes = 0
+            lowest_future_energy = 5.0
+            
+            current_hour_val = now.hour + now.minute / 60.0
+            current_energy = energy_at_hour(current_hour_val)
+            
+            if enabled:
+                # Look ahead in 15-minute intervals up to 90 minutes
+                for offset_mins in range(15, 105, 15):
+                    future_hour_val = (current_hour_val + offset_mins / 60.0) % 24
+                    future_energy = energy_at_hour(future_hour_val)
+                    
+                    drop = current_energy - future_energy
+                    if (drop >= drop_threshold or future_energy <= low_threshold) and future_energy < current_energy:
+                        if future_energy < lowest_future_energy:
+                            lowest_future_energy = future_energy
+                            impending_drop = True
+                            slump_minutes = offset_mins
+            
+            return {
+                "forecast_curve": forecast_curve,
+                "impending_drop": impending_drop,
+                "slump_minutes": slump_minutes,
+                "current_predicted_energy": round(current_energy, 2),
+                "lowest_predicted_energy": round(lowest_future_energy, 2) if impending_drop else round(current_energy, 2)
+            }
+
     def get_adaptive_times(self):
-        """Calculate dynamic work minutes and rest seconds based on reflections and bypasses."""
+        """Calculate dynamic work minutes and rest seconds based on reflections, bypasses, and circadian forecast."""
         with self.lock:
             settings = self.get_settings()
             
@@ -491,7 +602,7 @@ class MindFlowDB:
                 result = {
                     "work_minutes": base_work_minutes,
                     "work_modifier": 0,
-                    "rest_seconds": 20,
+                    "rest_seconds": settings.get("rest_duration_seconds", 20),
                     "rest_modifier": 0,
                     "reason": "Autopilot Off"
                 }
@@ -522,10 +633,10 @@ class MindFlowDB:
                 try:
                     refl_dt = datetime.fromisoformat(r["timestamp"])
                     age_hours = (datetime.now() - refl_dt).total_seconds() / 3600.0
-                    if age_hours <= 3.0:
+                    if 0.0 <= age_hours <= 3.0:
                         latest_refl = r
                         break
-                    else:
+                    elif age_hours > 3.0:
                         # Since list is chronological, older reflections will only be older
                         break
                 except:
@@ -546,7 +657,24 @@ class MindFlowDB:
             bypass_work_mod = -5 * bypasses_today
             bypass_work_mod = max(bypass_work_mod, -15)
             
-            total_work_modifier = ref_work_mod + bypass_work_mod
+            # Circadian slump work adjustment
+            forecast_adjusted_work = 0
+            forecast_adjusted_rest = 0
+            if settings.get("circadian_forecast_enabled", True):
+                forecast = self.get_circadian_forecast()
+                if forecast["impending_drop"]:
+                    sensitivity = settings.get("circadian_forecast_sensitivity", "medium")
+                    if sensitivity == "low":
+                        forecast_adjusted_work = -5
+                        forecast_adjusted_rest = 10
+                    elif sensitivity == "high":
+                        forecast_adjusted_work = -15
+                        forecast_adjusted_rest = 25
+                    else: # medium
+                        forecast_adjusted_work = -10
+                        forecast_adjusted_rest = 15
+
+            total_work_modifier = ref_work_mod + bypass_work_mod + forecast_adjusted_work
             work_minutes = max(10, min(90, base_work_minutes + total_work_modifier))
             
             # Compute Rest Lockout Duration
@@ -569,7 +697,7 @@ class MindFlowDB:
                     if refl_dt.date() == today_date:
                         if not r.get("summary", "").startswith("[Autopilot]"):
                             today_reflections.append(r)
-                    else:
+                    elif refl_dt.date() < today_date:
                         break
                 except:
                     pass
@@ -579,7 +707,7 @@ class MindFlowDB:
                 friction_rest_mod = int((avg_friction - 2.0) * 8)  # 3.0 average friction -> +8s, 4.0 -> +16s, etc.
                 friction_rest_mod = min(25, friction_rest_mod)
             
-            total_rest_modifier = ref_rest_mod + deficit_rest_mod + friction_rest_mod
+            total_rest_modifier = ref_rest_mod + deficit_rest_mod + friction_rest_mod + forecast_adjusted_rest
             rest_seconds = min(600, base_rest_seconds + total_rest_modifier)
             
             # Formulate dynamic status reason text
@@ -592,6 +720,9 @@ class MindFlowDB:
             if bypass_work_mod < 0:
                 reasons.append(f"Bypasses ({bypass_work_mod}m)")
                 
+            if forecast_adjusted_work < 0:
+                reasons.append(f"Slump Forecast ({forecast_adjusted_work}m)")
+                
             if ref_rest_mod > 0:
                 reasons.append(f"Rest Alert (+{ref_rest_mod}s)")
                 
@@ -600,6 +731,9 @@ class MindFlowDB:
                 
             if friction_rest_mod > 0:
                 reasons.append(f"Friction Deficit (+{friction_rest_mod}s)")
+                
+            if forecast_adjusted_rest > 0:
+                reasons.append(f"Rest Pacing (+{forecast_adjusted_rest}s)")
                 
             reason_str = " | ".join(reasons) if reasons else "Default"
             
@@ -625,13 +759,15 @@ class MindFlowDB:
         with self.lock:
             today_date = datetime.today().date()
             today_str = today_date.isoformat()
+            now_time = time.time()
             
             # Check cache validity
             cache = self._status_cache
             if (cache["result"] is not None and
                 cache["last_sessions_len"] == len(self.data["sessions"]) and
                 cache["last_reflections_len"] == len(self.data["reflections"]) and
-                cache["last_checked_date"] == today_date):
+                cache["last_checked_date"] == today_date and
+                (now_time - cache.get("last_check_time", 0.0)) < 10.0):
                 return cache["result"]
             
             # 1. current_energy for today (reverse search)
@@ -722,13 +858,21 @@ class MindFlowDB:
                         if r["timestamp"].startswith(today_str):
                             today_levels.append(r["energy_level"])
                         else:
-                            break
+                            try:
+                                r_dt = datetime.fromisoformat(r["timestamp"])
+                                if r_dt.date() < today_date:
+                                    break
+                            except:
+                                pass
                     if today_levels:
                         today_avg = sum(today_levels) / len(today_levels)
                         if today_avg < avg_past_daily_energy - 0.5:
                             forecast_fatigue_alert = " (Accumulated fatigue alert: Energy is running lower than your historic average)"
             except Exception:
                 pass
+            
+            # 5. Calculate circadian forecast
+            forecast = self.get_circadian_forecast()
             
             # Populate cache
             result = {
@@ -739,12 +883,14 @@ class MindFlowDB:
                 "today_recharge_seconds": today_recharge_seconds,
                 "today_rest_seconds": today_rest_seconds,
                 "today_bypasses": today_bypasses,
-                "forecast_fatigue_alert": forecast_fatigue_alert
+                "forecast_fatigue_alert": forecast_fatigue_alert,
+                "circadian_forecast": forecast
             }
             
             cache["last_sessions_len"] = len(self.data["sessions"])
             cache["last_reflections_len"] = len(self.data["reflections"])
             cache["last_checked_date"] = today_date
+            cache["last_check_time"] = now_time
             cache["result"] = result
             
             return result

@@ -611,6 +611,11 @@ async function pollStatus() {
             updateHydrationUI(status.hydration);
         }
 
+        // 7.6 Update Circadian Forecast UI if set
+        if (status.circadian_forecast !== undefined) {
+            updateCircadianForecastUI(status.circadian_forecast);
+        }
+
         
         // 7.8 Periodically reload analytics every 30 seconds on active tabs
         const now = Date.now();
@@ -689,6 +694,14 @@ toggleShieldBtn.addEventListener('click', async () => {
 let initialSettings = null;
 let dirtyTrackingInitialized = false;
 
+function toggleCircadianSensitivityVisibility() {
+    const enabledInput = document.getElementById('circadian-forecast-enabled-input');
+    const groupEl = document.getElementById('circadian-sensitivity-group');
+    if (enabledInput && groupEl) {
+        groupEl.style.display = enabledInput.checked ? 'block' : 'none';
+    }
+}
+
 function checkSettingsDirty() {
     if (!initialSettings) return false;
     
@@ -702,8 +715,10 @@ function checkSettingsDirty() {
     const hydrationTarget = document.getElementById('hydration-target-input');
     const hydrationUnit = document.getElementById('hydration-unit-input');
     const hydrationIncrement = document.getElementById('hydration-increment-input');
+    const circadianEnabled = document.getElementById('circadian-forecast-enabled-input');
+    const circadianSensitivity = document.getElementById('circadian-forecast-sensitivity-input');
     
-    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare || !hydrationTarget || !hydrationUnit || !hydrationIncrement) {
+    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare || !hydrationTarget || !hydrationUnit || !hydrationIncrement || !circadianEnabled || !circadianSensitivity) {
         return false;
     }
     
@@ -717,7 +732,9 @@ function checkSettingsDirty() {
         eye_care_mode: eyecare.checked,
         hydration_target: parseInt(hydrationTarget.value) || 8,
         hydration_unit: hydrationUnit.value,
-        hydration_increment: parseFloat(hydrationIncrement.value) || 1
+        hydration_increment: parseFloat(hydrationIncrement.value) || 1,
+        circadian_forecast_enabled: circadianEnabled.checked,
+        circadian_forecast_sensitivity: circadianSensitivity.value
     };
     
     const isDirty = (
@@ -730,7 +747,9 @@ function checkSettingsDirty() {
         current.eye_care_mode !== initialSettings.eye_care_mode ||
         current.hydration_target !== initialSettings.hydration_target ||
         current.hydration_unit !== initialSettings.hydration_unit ||
-        current.hydration_increment !== initialSettings.hydration_increment
+        current.hydration_increment !== initialSettings.hydration_increment ||
+        current.circadian_forecast_enabled !== initialSettings.circadian_forecast_enabled ||
+        current.circadian_forecast_sensitivity !== initialSettings.circadian_forecast_sensitivity
     );
     
     const banner = document.getElementById('unsaved-changes-banner');
@@ -757,6 +776,8 @@ function discardSettingsChanges() {
     const hydrationTarget = document.getElementById('hydration-target-input');
     const hydrationUnit = document.getElementById('hydration-unit-input');
     const hydrationIncrement = document.getElementById('hydration-increment-input');
+    const circadianEnabled = document.getElementById('circadian-forecast-enabled-input');
+    const circadianSensitivity = document.getElementById('circadian-forecast-sensitivity-input');
     
     if (workLimit) workLimit.value = initialSettings.work_duration_minutes;
     if (idleTimeout) idleTimeout.value = initialSettings.idle_timeout_seconds;
@@ -775,7 +796,10 @@ function discardSettingsChanges() {
     if (hydrationTarget) hydrationTarget.value = initialSettings.hydration_target;
     if (hydrationUnit) hydrationUnit.value = initialSettings.hydration_unit;
     if (hydrationIncrement) hydrationIncrement.value = initialSettings.hydration_increment;
+    if (circadianEnabled) circadianEnabled.checked = initialSettings.circadian_forecast_enabled;
+    if (circadianSensitivity) circadianSensitivity.value = initialSettings.circadian_forecast_sensitivity;
     
+    toggleCircadianSensitivityVisibility();
     checkSettingsDirty();
 }
 
@@ -798,6 +822,10 @@ function initSettingsDirtyTracking() {
             input.addEventListener('input', checkSettingsDirty);
             input.addEventListener('change', checkSettingsDirty);
         });
+        const circadianEnabled = document.getElementById('circadian-forecast-enabled-input');
+        if (circadianEnabled) {
+            circadianEnabled.addEventListener('change', toggleCircadianSensitivityVisibility);
+        }
         dirtyTrackingInitialized = true;
     }
 }
@@ -827,6 +855,12 @@ async function loadSettings() {
         document.getElementById('hydration-unit-input').value = settings.hydration_unit || "cups";
         document.getElementById('hydration-increment-input').value = settings.hydration_increment !== undefined ? settings.hydration_increment : 1;
         
+        const circadianEnabled = settings.circadian_forecast_enabled !== false;
+        document.getElementById('circadian-forecast-enabled-input').checked = circadianEnabled;
+        document.getElementById('circadian-forecast-sensitivity-input').value = settings.circadian_forecast_sensitivity || "medium";
+        
+        toggleCircadianSensitivityVisibility();
+        
         // Cache initial settings
         initialSettings = {
             work_duration_minutes: settings.work_duration_minutes,
@@ -838,7 +872,9 @@ async function loadSettings() {
             eye_care_mode: settings.eye_care_mode === true,
             hydration_target: settings.hydration_target !== undefined ? settings.hydration_target : 8,
             hydration_unit: settings.hydration_unit || "cups",
-            hydration_increment: settings.hydration_increment !== undefined ? settings.hydration_increment : 1
+            hydration_increment: settings.hydration_increment !== undefined ? settings.hydration_increment : 1,
+            circadian_forecast_enabled: circadianEnabled,
+            circadian_forecast_sensitivity: settings.circadian_forecast_sensitivity || "medium"
         };
         
         initSettingsDirtyTracking();
@@ -863,7 +899,9 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         eye_care_mode: document.getElementById('eyecare-input').checked,
         hydration_target: parseInt(document.getElementById('hydration-target-input').value),
         hydration_unit: document.getElementById('hydration-unit-input').value,
-        hydration_increment: parseFloat(document.getElementById('hydration-increment-input').value)
+        hydration_increment: parseFloat(document.getElementById('hydration-increment-input').value),
+        circadian_forecast_enabled: document.getElementById('circadian-forecast-enabled-input').checked,
+        circadian_forecast_sensitivity: document.getElementById('circadian-forecast-sensitivity-input').value
     };
     
     try {
@@ -898,7 +936,9 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
                 eye_care_mode: settings.eye_care_mode,
                 hydration_target: settings.hydration_target,
                 hydration_unit: settings.hydration_unit,
-                hydration_increment: settings.hydration_increment
+                hydration_increment: settings.hydration_increment,
+                circadian_forecast_enabled: settings.circadian_forecast_enabled,
+                circadian_forecast_sensitivity: settings.circadian_forecast_sensitivity
             };
             checkSettingsDirty();
             
@@ -5862,5 +5902,127 @@ function navigateWeek(offsetChange) {
     }
     
     loadAnalytics();
+}
+
+function updateCircadianForecastUI(forecast) {
+    const cardEl = document.getElementById('forecast-card');
+    if (!cardEl) return;
+    
+    // Check if forecast data is invalid or disabled
+    if (!forecast || !forecast.forecast_curve) {
+        cardEl.style.opacity = '0.5';
+        const alertText = document.getElementById('forecast-alert-text');
+        if (alertText) alertText.textContent = "Forecast unavailable or disabled.";
+        return;
+    }
+    cardEl.style.opacity = '1';
+    
+    const curve = forecast.forecast_curve;
+    
+    // Interpolate energy value helper
+    function getEnergyAtHour(hourVal) {
+        const h_floor = Math.floor(hourVal) % 24;
+        const h_ceil = (h_floor + 1) % 24;
+        const fraction = hourVal - Math.floor(hourVal);
+        
+        const pt_floor = curve.find(p => p.hour === h_floor) || { energy: 3.0 };
+        const pt_ceil = curve.find(p => p.hour === h_ceil) || { energy: 3.0 };
+        
+        return pt_floor.energy * (1.0 - fraction) + pt_ceil.energy * fraction;
+    }
+    
+    const now = new Date();
+    const currentHourVal = now.getHours() + now.getMinutes() / 60.0;
+    
+    // Sample 4 points: Now, +1h, +2h, +3h
+    const sampledPoints = [];
+    for (let i = 0; i < 4; i++) {
+        const t = (currentHourVal + i) % 24;
+        sampledPoints.push({
+            t: t,
+            energy: getEnergyAtHour(t)
+        });
+    }
+    
+    // Map sampled points to SVG coordinates: viewBox="0 0 260 90"
+    // Pad left/right = 20, top/bottom = 15
+    const xCoords = [20, 93.3, 166.7, 240];
+    const yCoords = sampledPoints.map(p => {
+        // Map energy [1.0, 5.0] to Y [75, 15]
+        return 75 - (p.energy - 1.0) * 15;
+    });
+    
+    // Generate cubic bezier curve path
+    const p0_x = xCoords[0], p0_y = yCoords[0];
+    const p1_x = xCoords[1], p1_y = yCoords[1];
+    const p2_x = xCoords[2], p2_y = yCoords[2];
+    const p3_x = xCoords[3], p3_y = yCoords[3];
+    
+    const linePathD = `M ${p0_x} ${p0_y} ` +
+                     `C ${(p0_x + p1_x)/2} ${p0_y}, ${(p0_x + p1_x)/2} ${p1_y}, ${p1_x} ${p1_y} ` +
+                     `C ${(p1_x + p2_x)/2} ${p1_y}, ${(p1_x + p2_x)/2} ${p2_y}, ${p2_x} ${p2_y} ` +
+                     `C ${(p2_x + p3_x)/2} ${p2_y}, ${(p2_x + p3_x)/2} ${p3_y}, ${p3_x} ${p3_y}`;
+                     
+    const areaPathD = linePathD + ` L ${p3_x} 90 L ${p0_x} 90 Z`;
+    
+    // Update SVG elements
+    const linePathEl = document.getElementById('forecast-line-path');
+    const areaPathEl = document.getElementById('forecast-area-path');
+    const currentLineEl = document.getElementById('forecast-current-line');
+    const currentDotEl = document.getElementById('forecast-current-dot');
+    
+    if (linePathEl) linePathEl.setAttribute('d', linePathD);
+    if (areaPathEl) areaPathEl.setAttribute('d', areaPathD);
+    
+    if (currentLineEl) {
+        currentLineEl.setAttribute('x1', p0_x);
+        currentLineEl.setAttribute('x2', p0_x);
+    }
+    if (currentDotEl) {
+        currentDotEl.setAttribute('cx', p0_x);
+        currentDotEl.setAttribute('cy', p0_y);
+    }
+    
+    // Update timeline labels
+    const formatHourLabel = (hourVal) => {
+        let h = Math.floor(hourVal) % 24;
+        let ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12;
+        h = h ? h : 12;
+        return `${h}${ampm}`;
+    };
+    
+    const labelsEl = document.getElementById('forecast-timeline-labels');
+    if (labelsEl) {
+        labelsEl.innerHTML = `
+            <span>Now (${formatHourLabel(currentHourVal)})</span>
+            <span>${formatHourLabel(currentHourVal + 1)}</span>
+            <span>${formatHourLabel(currentHourVal + 2)}</span>
+            <span>${formatHourLabel(currentHourVal + 3)}</span>
+        `;
+    }
+    
+    // Update forecast status message and classes
+    const alertEl = document.getElementById('forecast-status-alert');
+    const alertTextEl = document.getElementById('forecast-alert-text');
+    
+    if (alertEl && alertTextEl) {
+        alertEl.className = 'forecast-status-alert';
+        if (forecast.impending_drop) {
+            alertEl.classList.add('slump');
+            const iconEl = alertEl.querySelector('.alert-icon');
+            if (iconEl) iconEl.textContent = '⚠️';
+            alertTextEl.textContent = `Impending slump expected in ~${forecast.slump_minutes}m. Autopilot pacing applied.`;
+        } else if (sampledPoints[0].energy >= 4.0) {
+            alertEl.classList.add('peak');
+            const iconEl = alertEl.querySelector('.alert-icon');
+            if (iconEl) iconEl.textContent = '⚡';
+            alertTextEl.textContent = `Peak Focus Window active. Stamina predicts high capacity.`;
+        } else {
+            const iconEl = alertEl.querySelector('.alert-icon');
+            if (iconEl) iconEl.textContent = '🌿';
+            alertTextEl.textContent = `Stamina stable. Autopilot monitoring focus pacing.`;
+        }
+    }
 }
 

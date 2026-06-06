@@ -366,6 +366,106 @@ class TestMindFlowComponents(unittest.TestCase):
             self.db.data["reflections"] = original_reflections
             self.db.save()
 
+    def test_circadian_forecast_generation(self):
+        """Verify the database correctly calculates and interpolates the circadian forecast."""
+        original_settings = self.db.get_settings().copy()
+        original_reflections = self.db.data["reflections"].copy()
+        try:
+            # Clean reflections for predictable environment
+            self.db.data["reflections"] = []
+            
+            # Scenario A: Default Curve (no reflections)
+            forecast = self.db.get_circadian_forecast()
+            # Predicted energy should match default curve at current hour
+            now = datetime.now()
+            from backend.database import DEFAULT_CIRCADIAN_CURVE
+            expected_current = DEFAULT_CIRCADIAN_CURVE[now.hour]
+            self.assertTrue(1.0 <= forecast["current_predicted_energy"] <= 5.0)
+            self.assertEqual(len(forecast["forecast_curve"]), 24)
+            
+            # Scenario B: Blend with reflections
+            from datetime import timedelta
+            t_now = datetime.now()
+            # Add 3 reflections today in current hour
+            self.db.add_reflection(2, 2, "Tired reflection")
+            self.db.add_reflection(2, 2, "Still tired")
+            self.db.add_reflection(2, 2, "Very tired")
+            
+            forecast_blended = self.db.get_circadian_forecast()
+            # The current hour prediction should be shifted downwards towards 2.0
+            self.assertLessEqual(forecast_blended["forecast_curve"][t_now.hour]["energy"], 3.2)
+            
+        finally:
+            self.db.update_settings(original_settings)
+            self.db.data["reflections"] = original_reflections
+            self.db.save()
+
+    def test_circadian_schedule_adjustment(self):
+        """Verify the autopilot adjust sprint/rest duration based on forecasted slump."""
+        original_settings = self.db.get_settings().copy()
+        original_reflections = self.db.data["reflections"].copy()
+        try:
+            self.db.data["reflections"] = []
+            self.db.update_settings({
+                "work_duration_minutes": 45,
+                "rest_duration_seconds": 20,
+                "circadian_forecast_enabled": True,
+                "circadian_forecast_sensitivity": "medium"
+            })
+            
+            # Inject peak reflections now and in 1 hour, and a crash reflection in 2 hours
+            # to trigger a clear, robust impending drop forecast at any time of day
+            from datetime import timedelta
+            now_dt = datetime.now()
+            time_0 = now_dt - timedelta(days=1)
+            time_1 = now_dt + timedelta(hours=1) - timedelta(days=1)
+            time_2 = now_dt + timedelta(hours=2) - timedelta(days=1)
+            self.db.data["reflections"].append({
+                "timestamp": time_0.isoformat(),
+                "energy_level": 5,
+                "friction_level": 1,
+                "summary": "Current peak reflection",
+                "mood": "Focused"
+            })
+            self.db.data["reflections"].append({
+                "timestamp": time_1.isoformat(),
+                "energy_level": 5,
+                "friction_level": 1,
+                "summary": "Current peak reflection 2",
+                "mood": "Focused"
+            })
+            self.db.data["reflections"].append({
+                "timestamp": time_2.isoformat(),
+                "energy_level": 1,
+                "friction_level": 5,
+                "summary": "Imminent crash reflection",
+                "mood": "Exhausted"
+            })
+            self.db.save()
+            
+            forecast = self.db.get_circadian_forecast()
+            self.assertTrue(forecast["impending_drop"])
+            
+            # Verify adaptive times adjusts sprint pacing
+            res = self.db.get_adaptive_times()
+            # Medium sensitivity should subtract 10m from work and add 15s to rest
+            self.assertEqual(res["work_minutes"], 35) # 45 - 10
+            self.assertEqual(res["rest_seconds"], 35) # 20 + 15
+            self.assertIn("Slump Forecast (-10m)", res["reason"])
+            self.assertIn("Rest Pacing (+15s)", res["reason"])
+            
+            # Verify disabling circadian forecast turns off the adjustment
+            self.db.update_settings({"circadian_forecast_enabled": False})
+            res_disabled = self.db.get_adaptive_times()
+            self.assertEqual(res_disabled["work_minutes"], 45)
+            self.assertEqual(res_disabled["rest_seconds"], 20)
+            self.assertNotIn("Slump Forecast", res_disabled["reason"])
+            
+        finally:
+            self.db.update_settings(original_settings)
+            self.db.data["reflections"] = original_reflections
+            self.db.save()
+
     def test_database_goal_handling(self):
         """Verify micro-goal set/get and clean serialization."""
         orig_goal = self.db.get_current_goal()

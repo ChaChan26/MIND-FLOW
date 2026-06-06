@@ -208,6 +208,49 @@
                         </div>
                     </div>
 
+                    <!-- Circadian Forecast Card -->
+                    <div class="card glass-card forecast-card" id="forecast-card">
+                        <h3>Circadian Energy Forecast</h3>
+                        <p class="card-desc">Impending slumps and peak windows based on your daily rhythms.</p>
+                        
+                        <div class="forecast-visual">
+                            <svg class="forecast-chart-svg" id="forecast-chart-svg" viewBox="0 0 260 90" width="100%" height="90">
+                                <defs>
+                                    <linearGradient id="forecast-line-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stop-color="var(--work-color)" stop-opacity="0.85" />
+                                        <stop offset="50%" stop-color="var(--recharge-color)" stop-opacity="0.85" />
+                                        <stop offset="100%" stop-color="var(--rest-color)" stop-opacity="0.85" />
+                                    </linearGradient>
+                                    <linearGradient id="forecast-area-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                        <stop offset="0%" stop-color="var(--active-mode-color, var(--work-color))" stop-opacity="0.12" />
+                                        <stop offset="100%" stop-color="var(--active-mode-color, var(--work-color))" stop-opacity="0.00" />
+                                    </linearGradient>
+                                </defs>
+                                <!-- Chart background grid lines -->
+                                <line x1="0" y1="45" x2="260" y2="45" stroke="rgba(255,255,255,0.03)" stroke-dasharray="2,3" />
+                                <!-- Chart paths will be injected dynamically -->
+                                <path id="forecast-area-path" d="" fill="url(#forecast-area-grad)" />
+                                <path id="forecast-line-path" d="" fill="none" stroke="url(#forecast-line-grad)" stroke-width="2.5" stroke-linecap="round" />
+                                <!-- Current time indicator line & circle -->
+                                <line id="forecast-current-line" x1="0" y1="0" x2="0" y2="90" stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-dasharray="2,2" />
+                                <circle id="forecast-current-dot" cx="0" cy="0" r="4.5" fill="var(--active-mode-color, var(--recharge-color))" stroke="#ffffff" stroke-width="1.5" />
+                            </svg>
+                            <div class="forecast-timeline-labels" id="forecast-timeline-labels">
+                                <span>Now</span>
+                                <span>+1h</span>
+                                <span>+2h</span>
+                                <span>+3h</span>
+                            </div>
+                        </div>
+                        
+                        <div class="forecast-status-info">
+                            <div class="forecast-status-alert" id="forecast-status-alert">
+                                <span class="alert-icon">🌿</span>
+                                <span id="forecast-alert-text">Stamina optimal. Pacing window active.</span>
+                            </div>
+                        </div>
+                    </div>
+
 
 
                     <!-- Quick Check-in / Reflection Widget -->
@@ -544,6 +587,24 @@
                                     <label for="eyecare-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Eye Care Shield</label>
                                     <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Apply a warm, low-contrast night light filter to reduce fatigue.</p>
                                 </div>
+                            </div>
+
+                            <div class="form-group checkbox-group" style="margin-top: 1rem; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 1rem;">
+                                <input type="checkbox" id="circadian-forecast-enabled-input" style="width: 18px; height: 18px; cursor: pointer;">
+                                <div>
+                                    <label for="circadian-forecast-enabled-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Circadian Forecast</label>
+                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Predict energy slumps and adjust sprint pacing.</p>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-top: 1rem;" id="circadian-sensitivity-group">
+                                <label for="circadian-forecast-sensitivity-input">Forecast Pacing Sensitivity</label>
+                                <p class="setting-desc">Adjust how aggressively Autopilot pacing shortens focus blocks.</p>
+                                <select id="circadian-forecast-sensitivity-input" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.95rem; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.9rem;">
+                                    <option value="low">Low (Mild scaling)</option>
+                                    <option value="medium">Medium (Standard scaling)</option>
+                                    <option value="high">High (Proactive scaling)</option>
+                                </select>
                             </div>
 
                         </div>

@@ -214,6 +214,7 @@ def get_status():
     today_rest = stats["today_rest_seconds"]
     today_bypasses = stats["today_bypasses"]
     forecast_message = stats["forecast_fatigue_alert"]
+    circadian_forecast = stats.get("circadian_forecast")
 
     if high_stress_alert:
         adaptive_rest_limit_seconds = max(120, adaptive_rest_limit_seconds * 2)
@@ -301,7 +302,8 @@ def get_status():
         "hydration": db.get_hydration(),
         "forecast_message": forecast_message,
         "high_stress_alert": high_stress_alert,
-        "latest_mood": latest_mood
+        "latest_mood": latest_mood,
+        "circadian_forecast": circadian_forecast
     })
 
 @app.route("/api/status/toggle", methods=["POST"])
