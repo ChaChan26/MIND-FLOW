@@ -3751,6 +3751,7 @@ async function logHydrationDelta(delta, e) {
         if (res.ok) {
             const data = await res.json();
             updateHydrationUI(data.hydration);
+            pollStatus();
             if (safeDelta > 0) {
                 showToast(`Logged +${safeDelta} water! Stay hydrated. 💧`);
             } else {
@@ -4046,11 +4047,37 @@ function updateHydrationUI(hydration) {
     const liquidFill = document.getElementById('hydration-liquid-fill');
     const quickBtn = document.getElementById('hydration-quick-add-btn');
     
+    // Calculate expected hydration progression
+    const now = new Date();
+    const currentHour = now.getHours();
+    let expectedFraction = 0.0;
+    if (currentHour < 8) {
+        expectedFraction = 0.0;
+    } else if (currentHour >= 22) {
+        expectedFraction = 1.0;
+    } else {
+        expectedFraction = (currentHour - 8) / 14.0;
+    }
+    const expectedAmount = target * expectedFraction;
+    let ratio = 1.0;
+    if (expectedAmount > 0.0) {
+        ratio = cups / expectedAmount;
+    }
+    if (cups >= target) {
+        ratio = 1.0;
+    }
+
     if (pctText) pctText.textContent = `${pct}%`;
     if (msgText) {
         if (cups >= target) {
             msgText.textContent = `Goal met! (${cups}/${target} ${unit}) 💧`;
             msgText.style.color = "var(--recharge-color)";
+        } else if (currentHour >= 10 && ratio < 0.5) {
+            msgText.textContent = `${cups}/${target} ${unit} logged. Dehydrated! (-0.3 energy) ⚠️`;
+            msgText.style.color = "#f97316"; // Warning orange
+        } else if (ratio >= 0.9) {
+            msgText.textContent = `${cups}/${target} ${unit} logged. Optimal (+0.15 energy) 💧`;
+            msgText.style.color = "var(--work-color)"; // Work theme color
         } else {
             msgText.textContent = `${cups}/${target} ${unit} logged.`;
             msgText.style.color = "var(--text-muted)";
@@ -6254,6 +6281,42 @@ function updateCircadianForecastUI(forecast) {
             sleepAlertEl.style.borderColor = 'rgba(255, 255, 255, 0.05)';
             sleepAlertEl.style.color = 'var(--text-muted)';
             sleepTextEl.innerHTML = `💡 Log last night's sleep in Check-in to adapt circadian baseline.`;
+        }
+    }
+    
+    // Update Hydration Status alert
+    const hydAlertEl = document.getElementById('forecast-hydration-alert');
+    const hydTextEl = document.getElementById('forecast-hydration-text');
+    if (hydAlertEl && hydTextEl) {
+        if (forecast.hydration_cups !== undefined && forecast.hydration_cups !== null) {
+            hydAlertEl.style.display = 'flex';
+            const cupsVal = forecast.hydration_cups;
+            const targetVal = forecast.hydration_target || 8;
+            const modVal = forecast.hydration_modifier;
+            
+            let modStr = modVal > 0 ? `+${modVal}` : `${modVal}`;
+            if (modVal === 0) modStr = "0.0";
+            
+            let desc = `Logged hydration: ${cupsVal}/${targetVal} cups. Fatigue modifier: ${modStr} energy.`;
+            
+            if (modVal < 0) {
+                hydAlertEl.style.background = 'rgba(249, 115, 22, 0.08)'; // Warning orange
+                hydAlertEl.style.borderColor = 'rgba(249, 115, 22, 0.2)';
+                hydAlertEl.style.color = '#f97316';
+                desc = `⚠️ Dehydration fatigue penalty: ${modStr} energy. Drink water to restore focus.`;
+            } else if (modVal > 0) {
+                hydAlertEl.style.background = 'rgba(16, 185, 129, 0.08)';
+                hydAlertEl.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                hydAlertEl.style.color = 'var(--recharge-color)';
+                desc = `💧 Optimal hydration bonus: ${modStr} energy.`;
+            } else {
+                hydAlertEl.style.background = 'rgba(56, 189, 248, 0.08)';
+                hydAlertEl.style.borderColor = 'rgba(56, 189, 248, 0.2)';
+                hydAlertEl.style.color = '#38bdf8';
+            }
+            hydTextEl.textContent = desc;
+        } else {
+            hydAlertEl.style.display = 'none';
         }
     }
 }

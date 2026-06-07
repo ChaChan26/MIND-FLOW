@@ -932,6 +932,91 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.data["reflections"] = original_reflections
             self.db.save()
 
+    @patch('backend.database.datetime')
+    def test_hydration_energy_synergy_and_timer_adaptation(self, mock_datetime):
+        """Verify that hydration progress, expectations, and timer modifications work correctly."""
+        import datetime as dt
+        # Mock current time to 12:00 PM (hour 12)
+        t_now = datetime(2026, 6, 1, 12, 0, 0)
+        mock_datetime.now.return_value = t_now
+        mock_datetime.fromisoformat.side_effect = lambda x: datetime.fromisoformat(x)
+        mock_datetime.today.return_value = t_now
+        
+        original_hydration = self.db.data.get("hydration", {}).copy()
+        original_settings = self.db.get_settings().copy()
+        
+        try:
+            # 1. Reset hydration
+            self.db.data["hydration"] = {"date": "2026-06-01", "cups": 0}
+            self.db.save()
+            
+            # Target is 8 cups. Hour is 12. Active day: 8:00 AM to 10:00 PM (14 hours elapsed).
+            # Expected fraction: (12 - 8) / 14 = 4 / 14 = 0.2857.
+            # Expected amount: 8 * 4 / 14 = 2.29.
+            # Logged: 0 cups. Ratio: 0 / 2.29 = 0.0 (dehydrated).
+            # Penalty should be -0.30 since current_hour >= 10.
+            forecast = self.db.get_circadian_forecast()
+            self.assertEqual(forecast["hydration_cups"], 0.0)
+            self.assertEqual(forecast["hydration_modifier"], -0.30)
+            
+            # Check curve shift at hour 10: 4.8 baseline - 0.3 = 4.5
+            hour_10_energy = forecast["forecast_curve"][10]["energy"]
+            self.assertAlmostEqual(hour_10_energy, 4.5, places=2)
+            
+            # 2. Check Autopilot timer adjustments (work sprint -5m, rest break +15s)
+            self.db.update_settings({
+                "work_duration_minutes": 45,
+                "rest_duration_seconds": 20,
+                "circadian_forecast_enabled": False
+            })
+            times = self.db.get_adaptive_times()
+            self.assertEqual(times["work_modifier"], -5)
+            self.assertEqual(times["rest_modifier"], 15)
+            self.assertIn("Dehydration", times["reason"])
+            
+            # 3. Log water to trigger optimal hydration bonus
+            # If we log 3 cups, ratio = 3 / 2.29 = 1.31 >= 0.9.
+            # Modifier should be +0.15.
+            self.db.data["hydration"] = {"date": "2026-06-01", "cups": 3}
+            self.db.save()
+            
+            forecast_hydrated = self.db.get_circadian_forecast()
+            self.assertEqual(forecast_hydrated["hydration_cups"], 3.0)
+            self.assertEqual(forecast_hydrated["hydration_modifier"], 0.15)
+            
+            # Check curve shift at hour 10: 4.8 baseline + 0.15 = 4.95
+            hour_10_energy_hydrated = forecast_hydrated["forecast_curve"][10]["energy"]
+            self.assertAlmostEqual(hour_10_energy_hydrated, 4.95, places=2)
+            
+            # Autopilot timers should return to neutral/normal
+            self.db._adaptive_cache["result"] = None
+            times_hydrated = self.db.get_adaptive_times()
+            self.assertEqual(times_hydrated["work_modifier"], 0)
+            self.assertEqual(times_hydrated["rest_modifier"], 0)
+            
+            # 4. Grace period check: mock time to 9:00 AM (hour 9)
+            t_morning = datetime(2026, 6, 1, 9, 0, 0)
+            mock_datetime.now.return_value = t_morning
+            mock_datetime.today.return_value = t_morning
+            
+            self.db.data["hydration"] = {"date": "2026-06-01", "cups": 0}
+            self.db.save()
+            
+            # Expected amount: 8 * (9 - 8)/14 = 0.57. Logged: 0. Ratio: 0.
+            # But since h = 9 (< 10), modifier should be 0.0.
+            forecast_morning = self.db.get_circadian_forecast()
+            self.assertEqual(forecast_morning["hydration_modifier"], 0.0)
+            
+            self.db._adaptive_cache["result"] = None
+            times_morning = self.db.get_adaptive_times()
+            self.assertEqual(times_morning["work_modifier"], 0)
+            self.assertEqual(times_morning["rest_modifier"], 0)
+            
+        finally:
+            self.db.data["hydration"] = original_hydration
+            self.db.update_settings(original_settings)
+            self.db.save()
+
     @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
         response = self.client.post('/api/shutdown')

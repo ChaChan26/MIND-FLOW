@@ -483,6 +483,58 @@ class MindFlowDB:
         with self.lock:
             return self.data.setdefault("app_usage", []).copy()
 
+    def _get_hydration_context(self, now=None):
+        if now is None:
+            now = datetime.now()
+        settings = self.get_settings()
+        target = settings.get("hydration_target", 8)
+        
+        today_date = now.date()
+        today_str = today_date.isoformat()
+        with self.lock:
+            hyd = self.data.setdefault("hydration", {"date": today_str, "cups": 0})
+            if not isinstance(hyd, dict):
+                hyd = {"date": today_str, "cups": 0}
+                self.data["hydration"] = hyd
+            if hyd.get("date") != today_str:
+                cups = 0.0
+            else:
+                cups = float(hyd.get("cups", 0))
+                
+        h = now.hour
+        if h < 8:
+            expected_fraction = 0.0
+        elif h >= 22:
+            expected_fraction = 1.0
+        else:
+            expected_fraction = (h - 8) / 14.0
+            
+        expected_amount = round(target * expected_fraction, 2)
+        if expected_amount <= 0.0:
+            ratio = 1.0
+        else:
+            ratio = round(min(1.0, cups / expected_amount), 2)
+            
+        if cups >= target:
+            ratio = 1.0
+            
+        modifier = 0.0
+        if ratio >= 0.9:
+            modifier = 0.15
+        elif 0.5 <= ratio < 0.9:
+            modifier = 0.0
+        else:
+            if h >= 10:
+                modifier = -0.30
+                
+        return {
+            "cups": cups,
+            "target": target,
+            "expected_amount": expected_amount,
+            "ratio": ratio,
+            "modifier": modifier
+        }
+
     def get_circadian_forecast(self):
         """
         Calculate circadian fatigue forecast using historical reflection ratings (last 30 days)
@@ -545,6 +597,10 @@ class MindFlowDB:
                     pass
             
             # 2. Compute blended forecast for all 24 hours
+            hyd_ctx = self._get_hydration_context(now)
+            hydration_modifier = hyd_ctx["modifier"]
+            total_modifier = max(-1.75, min(0.65, sleep_modifier + hydration_modifier))
+
             forecast_curve = []
             for h in range(24):
                 ratings = hourly_ratings[h]
@@ -558,8 +614,8 @@ class MindFlowDB:
                 else:
                     predicted_energy = def_val
                 
-                # Apply sleep modifier baseline shift
-                predicted_energy = max(1.0, min(5.0, predicted_energy + sleep_modifier))
+                # Apply combined modifier baseline shift
+                predicted_energy = max(1.0, min(5.0, predicted_energy + total_modifier))
                 
                 forecast_curve.append({
                     "hour": h,
@@ -619,7 +675,12 @@ class MindFlowDB:
                 "lowest_predicted_energy": round(lowest_future_energy, 2) if impending_drop else round(current_energy, 2),
                 "sleep_hours": sleep_hours,
                 "sleep_quality": sleep_quality,
-                "sleep_modifier": round(sleep_modifier, 2)
+                "sleep_modifier": round(sleep_modifier, 2),
+                "hydration_cups": hyd_ctx["cups"],
+                "hydration_target": hyd_ctx["target"],
+                "expected_hydration": hyd_ctx["expected_amount"],
+                "hydration_ratio": hyd_ctx["ratio"],
+                "hydration_modifier": round(hydration_modifier, 2)
             }
 
     def get_adaptive_times(self):
@@ -718,7 +779,15 @@ class MindFlowDB:
                         forecast_adjusted_work = -10
                         forecast_adjusted_rest = 15
 
-            total_work_modifier = ref_work_mod + bypass_work_mod + forecast_adjusted_work
+            # Hydration dynamic adjustment
+            hydration_work_mod = 0
+            hydration_rest_mod = 0
+            hyd_ctx = self._get_hydration_context(datetime.now())
+            if datetime.now().hour >= 10 and hyd_ctx["ratio"] < 0.5:
+                hydration_work_mod = -5
+                hydration_rest_mod = 15
+
+            total_work_modifier = ref_work_mod + bypass_work_mod + forecast_adjusted_work + hydration_work_mod
             work_minutes = max(10, min(90, base_work_minutes + total_work_modifier))
             
             # Compute Rest Lockout Duration
@@ -751,7 +820,7 @@ class MindFlowDB:
                 friction_rest_mod = int((avg_friction - 2.0) * 8)  # 3.0 average friction -> +8s, 4.0 -> +16s, etc.
                 friction_rest_mod = min(25, friction_rest_mod)
             
-            total_rest_modifier = ref_rest_mod + deficit_rest_mod + friction_rest_mod + forecast_adjusted_rest
+            total_rest_modifier = ref_rest_mod + deficit_rest_mod + friction_rest_mod + forecast_adjusted_rest + hydration_rest_mod
             rest_seconds = min(600, base_rest_seconds + total_rest_modifier)
             
             # Formulate dynamic status reason text
@@ -767,6 +836,9 @@ class MindFlowDB:
             if forecast_adjusted_work < 0:
                 reasons.append(f"Slump Forecast ({forecast_adjusted_work}m)")
                 
+            if hydration_work_mod < 0:
+                reasons.append(f"Dehydration ({hydration_work_mod}m)")
+                
             if ref_rest_mod > 0:
                 reasons.append(f"Rest Alert (+{ref_rest_mod}s)")
                 
@@ -778,6 +850,9 @@ class MindFlowDB:
                 
             if forecast_adjusted_rest > 0:
                 reasons.append(f"Rest Pacing (+{forecast_adjusted_rest}s)")
+                
+            if hydration_rest_mod > 0:
+                reasons.append(f"Dehydration Break (+{hydration_rest_mod}s)")
                 
             reason_str = " | ".join(reasons) if reasons else "Default"
             
