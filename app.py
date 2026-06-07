@@ -175,7 +175,37 @@ _parent_process_cache = None
 
 def disable_ecoqos_for_process_tree():
     """Disable EcoQoS recursively for current process and all child processes (like WebView2 renderers)."""
-    return
+    try:
+        import psutil
+    except ImportError:
+        return
+    
+    try:
+        current_proc = psutil.Process()
+        # Disable for current process
+        try:
+            h_process = ctypes.windll.kernel32.OpenProcess(0x0200, False, current_proc.pid)
+            if h_process:
+                try:
+                    disable_ecoqos_for_handle(h_process)
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(h_process)
+        except Exception:
+            pass
+            
+        # Disable for child processes recursively
+        for child in current_proc.children(recursive=True):
+            try:
+                h_child = ctypes.windll.kernel32.OpenProcess(0x0200, False, child.pid)
+                if h_child:
+                    try:
+                        disable_ecoqos_for_handle(h_child)
+                    finally:
+                        ctypes.windll.kernel32.CloseHandle(h_child)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def trigger_lockout_overlay(duration_seconds=20):
