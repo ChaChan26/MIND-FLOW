@@ -4828,8 +4828,9 @@ class ZenParticle {
             if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
                 const mdx = zenMouse.x - this.x;
                 const mdy = zenMouse.y - this.y;
-                const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 0.001; // Avoid division by zero/NaN
-                if (mdist < 100) {
+                const mdistSq = mdx * mdx + mdy * mdy;
+                if (mdistSq < 10000) { // 100^2
+                    const mdist = Math.sqrt(mdistSq) || 0.001;
                     const force = (100 - mdist) / 100;
                     this.x -= (mdx / mdist) * force * 2.0;
                     this.y -= (mdy / mdist) * force * 2.0;
@@ -4850,8 +4851,9 @@ class ZenParticle {
                 if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
                     const mdx = zenMouse.x - this.x;
                     const mdy = zenMouse.y - this.y;
-                    const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 0.001; // Avoid division by zero/NaN
-                    if (mdist < 120) {
+                    const mdistSq = mdx * mdx + mdy * mdy;
+                    if (mdistSq < 14400) { // 120^2
+                        const mdist = Math.sqrt(mdistSq) || 0.001;
                         const force = (120 - mdist) / 120;
                         this.x -= (mdx / mdist) * force * 2.5;
                         this.y -= (mdy / mdist) * force * 2.5;
@@ -4872,8 +4874,9 @@ class ZenParticle {
             if (zenMouse.active && zenMouse.x !== null && zenMouse.y !== null) {
                 const mdx = zenMouse.x - this.x;
                 const mdy = zenMouse.y - this.y;
-                const mdist = Math.sqrt(mdx * mdx + mdy * mdy) || 0.001; // Avoid division by zero/NaN
-                if (mdist < 150) {
+                const mdistSq = mdx * mdx + mdy * mdy;
+                if (mdistSq < 22500) { // 150^2
+                    const mdist = Math.sqrt(mdistSq) || 0.001;
                     const force = (150 - mdist) / 150;
                     this.x += (mdx / mdist) * force * 0.5;
                     this.y += (mdy / mdist) * force * 0.5;
