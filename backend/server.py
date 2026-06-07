@@ -178,6 +178,7 @@ shared_state = ThreadSafeDict({
     "elapsed_seconds": 0,
     "idle_seconds": 0,
     "tracking_active": True,
+    "mode_start_time": None,
     "last_lockout_time": None,
     "last_external_window": "None",
     "last_external_process": "None",
@@ -894,8 +895,13 @@ def shutdown_app():
             db.log_app_usage(last_proc, last_title, accum_sec)
         except Exception as e:
             print(f"Error logging app usage on shutdown: {e}")
-            
-    db.log_session(cur_mode, datetime.now(), datetime.now()) # log final block close if any
+
+    mode_start_time = shared_state.get("mode_start_time")
+    if cur_mode in {"work", "recharge", "rest"} and hasattr(mode_start_time, "isoformat"):
+        try:
+            db.log_session(cur_mode, mode_start_time, datetime.now())
+        except Exception as e:
+            print(f"Error logging session on shutdown: {e}")
     
     # Graceful shutdown: flush database and exit cleanly
     def terminate():

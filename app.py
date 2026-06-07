@@ -618,6 +618,7 @@ def main_state_machine(gui_process=None):
     current_mode = "neutral"
     shared_state["current_mode"] = current_mode
     state_start_time = datetime.now()
+    shared_state["mode_start_time"] = state_start_time
     
     # Initialize shared app tracking variables
     shared_state["last_app_process"] = None
@@ -674,11 +675,13 @@ def main_state_machine(gui_process=None):
                 shared_state["last_app_process"] = None
                 shared_state["last_app_title"] = None
                 shared_state["app_accumulated_seconds"] = 0
-                
+            
             if current_mode != "neutral":
                 print(f"Companion disabled: transitioning {current_mode} -> neutral")
                 db.log_session(current_mode, state_start_time, datetime.now())
                 current_mode = "neutral"
+                state_start_time = datetime.now()
+                shared_state["mode_start_time"] = state_start_time
             
             shared_state["active_window_title"] = "Companion Paused"
             shared_state["active_process_name"] = "Paused"
@@ -792,7 +795,8 @@ def main_state_machine(gui_process=None):
             else:
                 db.log_session(current_mode, state_start_time, now)
                 state_start_time = now
-                
+            shared_state["mode_start_time"] = state_start_time
+
             current_mode = target_mode
             shared_state["current_mode"] = current_mode
             shared_state["elapsed_seconds"] = 0
@@ -822,10 +826,12 @@ def main_state_machine(gui_process=None):
                 if snoozed:
                     print("Hard focus ceiling snoozed. Giving 2 minutes grace period.")
                     state_start_time = datetime.now() - timedelta(seconds=max(0, work_limit_sec - 120))
+                    shared_state["mode_start_time"] = state_start_time
                     shared_state["elapsed_seconds"] = int((datetime.now() - state_start_time).total_seconds())
                 else:
                     db.log_session("work", state_start_time, datetime.now(), brain_dump=brain_dump, bypassed=not completed)
                     state_start_time = datetime.now()
+                    shared_state["mode_start_time"] = state_start_time
                     shared_state["elapsed_seconds"] = 0
 
         # Automated energy battery tracking (Auto-decay/recharge check)
