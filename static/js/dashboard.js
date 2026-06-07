@@ -69,6 +69,7 @@ const trackingStatusText = document.getElementById('tracking-status-text');
 let selectedEnergy = 5;
 let selectedFriction = 2;
 let selectedMood = 'Neutral';
+let selectedSleepQuality = 3;
 
 document.querySelectorAll('#energy-rating .rate-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -97,6 +98,17 @@ document.querySelectorAll('#mood-rating .rate-btn').forEach(btn => {
         document.querySelectorAll('#mood-rating .rate-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         selectedMood = btn.getAttribute('data-val');
+        
+        btn.classList.add('clicked');
+        setTimeout(() => btn.classList.remove('clicked'), 400);
+    });
+});
+
+document.querySelectorAll('#sleep-quality-rating .rate-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#sleep-quality-rating .rate-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedSleepQuality = parseInt(btn.getAttribute('data-val'));
         
         btn.classList.add('clicked');
         setTimeout(() => btn.classList.remove('clicked'), 400);
@@ -982,11 +994,20 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
     e.preventDefault();
     
     const summaryInput = document.getElementById('reflection-summary');
+    const sleepHoursInput = document.getElementById('sleep-hours');
+    
+    let sleepHoursVal = null;
+    if (sleepHoursInput && sleepHoursInput.value !== '') {
+        sleepHoursVal = parseFloat(sleepHoursInput.value);
+    }
+    
     const payload = {
         energy_level: selectedEnergy,
         friction_level: selectedFriction,
         summary: summaryInput.value,
-        mood: selectedMood
+        mood: selectedMood,
+        sleep_hours: sleepHoursVal,
+        sleep_quality: sleepHoursVal !== null ? selectedSleepQuality : null
     };
     
     try {
@@ -1000,11 +1021,22 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
             showToast("Reflection logged inside private vault.");
             triggerParticleBurst(lastSubmitClick);
             summaryInput.value = '';
+            if (sleepHoursInput) sleepHoursInput.value = '';
             
             // Reset selected mood
             selectedMood = 'Neutral';
             document.querySelectorAll('#mood-rating .rate-btn').forEach(btn => {
                 if (btn.getAttribute('data-val') === 'Neutral') {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            // Reset selected sleep quality
+            selectedSleepQuality = 3;
+            document.querySelectorAll('#sleep-quality-rating .rate-btn').forEach(btn => {
+                if (btn.getAttribute('data-val') === '3') {
                     btn.classList.add('active');
                 } else {
                     btn.classList.remove('active');
@@ -6183,6 +6215,45 @@ function updateCircadianForecastUI(forecast) {
             const iconEl = alertEl.querySelector('.alert-icon');
             if (iconEl) iconEl.textContent = '🌿';
             alertTextEl.textContent = `Stamina stable. Autopilot monitoring focus pacing.`;
+        }
+    }
+    
+    // Update Sleep Recovery Status alert
+    const sleepAlertEl = document.getElementById('forecast-sleep-alert');
+    const sleepTextEl = document.getElementById('forecast-sleep-text');
+    if (sleepAlertEl && sleepTextEl) {
+        if (forecast.sleep_hours !== null || forecast.sleep_quality !== null) {
+            sleepAlertEl.style.display = 'flex';
+            
+            const qualityLabels = { 1: "Poor", 2: "Fair", 3: "Okay", 4: "Good", 5: "Restored" };
+            const qStr = qualityLabels[forecast.sleep_quality] || "Okay";
+            const hStr = forecast.sleep_hours !== null ? `${forecast.sleep_hours}h` : "?";
+            
+            let modStr = forecast.sleep_modifier > 0 ? `+${forecast.sleep_modifier}` : `${forecast.sleep_modifier}`;
+            if (forecast.sleep_modifier === 0) modStr = "0.0";
+            
+            let desc = `Logged sleep: ${hStr} (${qStr}). Fatigue modifier: ${modStr} energy.`;
+            if (forecast.sleep_modifier < 0) {
+                sleepAlertEl.style.background = 'rgba(239, 68, 68, 0.08)';
+                sleepAlertEl.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+                sleepAlertEl.style.color = '#ef4444';
+            } else if (forecast.sleep_modifier > 0) {
+                sleepAlertEl.style.background = 'rgba(16, 185, 129, 0.08)';
+                sleepAlertEl.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                sleepAlertEl.style.color = 'var(--recharge-color)';
+            } else {
+                sleepAlertEl.style.background = 'rgba(56, 189, 248, 0.08)';
+                sleepAlertEl.style.borderColor = 'rgba(56, 189, 248, 0.2)';
+                sleepAlertEl.style.color = '#38bdf8';
+            }
+            sleepTextEl.textContent = desc;
+        } else {
+            // Show prompt to log sleep
+            sleepAlertEl.style.display = 'flex';
+            sleepAlertEl.style.background = 'rgba(255, 255, 255, 0.02)';
+            sleepAlertEl.style.borderColor = 'rgba(255, 255, 255, 0.05)';
+            sleepAlertEl.style.color = 'var(--text-muted)';
+            sleepTextEl.innerHTML = `💡 Log last night's sleep in Check-in to adapt circadian baseline.`;
         }
     }
 }

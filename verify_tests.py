@@ -867,6 +867,71 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.data["app_usage"] = original_app_usage
             self.db.save()
 
+    def test_sleep_recovery_circadian_adaptation(self):
+        """Verify that logging sleep hours and quality adapts the circadian forecast curve correctly."""
+        original_reflections = self.db.data.get("reflections", []).copy()
+        try:
+            self.db.data["reflections"] = []
+            self.db.save()
+            
+            # 1. Test case: No sleep logged yet (should return None and 0.0 modifier)
+            forecast = self.db.get_circadian_forecast()
+            self.assertIsNone(forecast["sleep_hours"])
+            self.assertIsNone(forecast["sleep_quality"])
+            self.assertEqual(forecast["sleep_modifier"], 0.0)
+            
+            # 2. Test case: Bad sleep (penalty check)
+            # 5.0 hours of sleep (2.0h deficit -> -0.5 points)
+            # Poor quality (1) (2.0 deficit -> -0.6 points)
+            # Total penalty: -1.1 points
+            self.db.add_reflection(3, 3, "Poor sleep reflection", sleep_hours=5.0, sleep_quality=1)
+            
+            forecast_penalty = self.db.get_circadian_forecast()
+            self.assertEqual(forecast_penalty["sleep_hours"], 5.0)
+            self.assertEqual(forecast_penalty["sleep_quality"], 1)
+            self.assertEqual(forecast_penalty["sleep_modifier"], -1.1)
+            
+            # Peak of fallback circadian curve is normally at hour 10 (value 4.8).
+            # With -1.1 penalty, it should be adjusted to 4.8 - 1.1 = 3.7.
+            hour_10_energy = forecast_penalty["forecast_curve"][10]["energy"]
+            self.assertAlmostEqual(hour_10_energy, 3.7, places=2)
+            
+            # 3. Test case: API submission
+            payload = {
+                "energy_level": 4,
+                "friction_level": 2,
+                "summary": "Good sleep check",
+                "mood": "Calm",
+                "sleep_hours": 9.0,
+                "sleep_quality": 5
+            }
+            # Clean reflections list for clean test
+            self.db.data["reflections"] = []
+            self.db.save()
+            
+            response = self.client.post('/api/reflections', json=payload)
+            self.assertEqual(response.status_code, 200)
+            
+            # Verify the reflection has stored the sleep values
+            reflections = self.db.get_reflections()
+            self.assertEqual(len(reflections), 1)
+            self.assertEqual(reflections[0]["sleep_hours"], 9.0)
+            self.assertEqual(reflections[0]["sleep_quality"], 5)
+            
+            # Verify the API status returns the updated sleep details in forecast
+            status_res = self.client.get('/api/status')
+            self.assertEqual(status_res.status_code, 200)
+            status_data = status_res.get_json()
+            cf = status_data["circadian_forecast"]
+            self.assertEqual(cf["sleep_hours"], 9.0)
+            self.assertEqual(cf["sleep_quality"], 5)
+            # 9.0 hours sleep -> +0.15 modifier. 5 quality -> +0.2 modifier. Total +0.35.
+            self.assertEqual(cf["sleep_modifier"], 0.35)
+            
+        finally:
+            self.db.data["reflections"] = original_reflections
+            self.db.save()
+
     @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
         response = self.client.post('/api/shutdown')

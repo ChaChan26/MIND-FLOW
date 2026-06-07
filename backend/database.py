@@ -414,13 +414,15 @@ class MindFlowDB:
         self.data["sessions"].append(session_entry)
         self.save()
 
-    def add_reflection(self, energy_level, friction_level, summary, mood=None):
+    def add_reflection(self, energy_level, friction_level, summary, mood=None, sleep_hours=None, sleep_quality=None):
         reflection_entry = {
             "timestamp": datetime.now().isoformat(),
             "energy_level": int(energy_level),
             "friction_level": int(friction_level),
             "summary": str(summary).strip(),
-            "mood": str(mood).strip() if mood else None
+            "mood": str(mood).strip() if mood else None,
+            "sleep_hours": float(sleep_hours) if sleep_hours is not None else None,
+            "sleep_quality": int(sleep_quality) if sleep_quality is not None else None
         }
         self.data["reflections"].append(reflection_entry)
         self.save()
@@ -484,7 +486,7 @@ class MindFlowDB:
     def get_circadian_forecast(self):
         """
         Calculate circadian fatigue forecast using historical reflection ratings (last 30 days)
-        blended with a standard circadian curve.
+        blended with a standard circadian curve, and adapted by last night's sleep context.
         """
         with self.lock:
             # 1. Parse historical reflections grouped by hour of day
@@ -492,6 +494,44 @@ class MindFlowDB:
             now = datetime.now()
             thirty_days_ago = now - timedelta(days=30)
             
+            # 1.5 Scan reflections logged today to find the latest sleep details
+            today_date = now.date()
+            sleep_hours = None
+            sleep_quality = None
+            sleep_modifier = 0.0
+            
+            for r in reversed(self.data.get("reflections", [])):
+                try:
+                    r_dt = datetime.fromisoformat(r["timestamp"])
+                    if r_dt.tzinfo is not None:
+                        r_dt = r_dt.replace(tzinfo=None)
+                    if r_dt.date() == today_date:
+                        if r.get("sleep_hours") is not None or r.get("sleep_quality") is not None:
+                            sleep_hours = r.get("sleep_hours")
+                            sleep_quality = r.get("sleep_quality")
+                            break
+                    elif r_dt.date() < today_date:
+                        break
+                except Exception:
+                    pass
+            
+            # Compute Sleep Recovery Modifier
+            if sleep_hours is not None or sleep_quality is not None:
+                if sleep_hours is not None:
+                    if sleep_hours < 7.0:
+                        sleep_modifier += (sleep_hours - 7.0) * 0.25
+                    elif sleep_hours >= 8.0:
+                        sleep_modifier += min(0.3, (sleep_hours - 8.0) * 0.15)
+                
+                if sleep_quality is not None:
+                    if sleep_quality < 3:
+                        sleep_modifier += (sleep_quality - 3) * 0.3
+                    elif sleep_quality > 3:
+                        sleep_modifier += (sleep_quality - 3) * 0.1
+                
+                # Clamp sleep modifier between -1.5 and +0.5
+                sleep_modifier = max(-1.5, min(0.5, sleep_modifier))
+
             hourly_ratings = {i: [] for i in range(24)}
             for r in self.data.get("reflections", []):
                 try:
@@ -517,6 +557,10 @@ class MindFlowDB:
                     predicted_energy = w * avg_historical + (1.0 - w) * def_val
                 else:
                     predicted_energy = def_val
+                
+                # Apply sleep modifier baseline shift
+                predicted_energy = max(1.0, min(5.0, predicted_energy + sleep_modifier))
+                
                 forecast_curve.append({
                     "hour": h,
                     "energy": round(predicted_energy, 2)
@@ -537,9 +581,6 @@ class MindFlowDB:
             sensitivity = settings.get("circadian_forecast_sensitivity", "medium")
             
             # Sensitivity thresholds
-            # low: drop >= 0.8 OR drops below 2.5
-            # medium: drop >= 0.5 OR drops below 3.2
-            # high: drop >= 0.3 OR drops below 3.6
             if sensitivity == "low":
                 drop_threshold = 0.8
                 low_threshold = 2.5
@@ -575,7 +616,10 @@ class MindFlowDB:
                 "impending_drop": impending_drop,
                 "slump_minutes": slump_minutes,
                 "current_predicted_energy": round(current_energy, 2),
-                "lowest_predicted_energy": round(lowest_future_energy, 2) if impending_drop else round(current_energy, 2)
+                "lowest_predicted_energy": round(lowest_future_energy, 2) if impending_drop else round(current_energy, 2),
+                "sleep_hours": sleep_hours,
+                "sleep_quality": sleep_quality,
+                "sleep_modifier": round(sleep_modifier, 2)
             }
 
     def get_adaptive_times(self):

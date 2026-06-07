@@ -379,6 +379,8 @@ def manage_reflections():
         friction = data.get("friction_level")
         summary = data.get("summary", "")
         mood = data.get("mood")
+        sleep_hours = data.get("sleep_hours")
+        sleep_quality = data.get("sleep_quality")
         
         if energy is None or friction is None:
             return jsonify({"error": "energy_level and friction_level are required"}), 400
@@ -397,7 +399,26 @@ def manage_reflections():
             mood_map = {m.lower(): m for m in ["Calm", "Focused", "Anxious", "Overwhelmed", "Frustrated", "Exhausted", "Neutral"]}
             validated_mood = mood_map.get(mood_str.lower(), None)
             
-        entry = db.add_reflection(energy, friction, summary, mood=validated_mood)
+        validated_sleep_hours = None
+        if sleep_hours is not None:
+            try:
+                validated_sleep_hours = max(0.0, min(24.0, float(sleep_hours)))
+            except (ValueError, TypeError):
+                return jsonify({"error": "sleep_hours must be a number between 0 and 24"}), 400
+                
+        validated_sleep_quality = None
+        if sleep_quality is not None:
+            try:
+                validated_sleep_quality = max(1, min(5, int(sleep_quality)))
+            except (ValueError, TypeError):
+                return jsonify({"error": "sleep_quality must be an integer 1-5"}), 400
+            
+        entry = db.add_reflection(
+            energy, friction, summary, 
+            mood=validated_mood, 
+            sleep_hours=validated_sleep_hours, 
+            sleep_quality=validated_sleep_quality
+        )
         return jsonify({"status": "success", "reflection": entry})
     else:
         return jsonify(db.get_reflections())
