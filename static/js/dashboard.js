@@ -5559,14 +5559,16 @@ function animateZen() {
         };
         for (let i = 0; i < zenParticles.length; i++) {
             if (zenParticles[i].isTemp) continue;
+            const p1 = zenParticles[i];
             for (let j = i + 1; j < zenParticles.length; j++) {
                 if (zenParticles[j].isTemp) continue;
-                const p1 = zenParticles[i];
                 const p2 = zenParticles[j];
                 const dx = p1.x - p2.x;
+                if (dx > 60 || dx < -60) continue;
                 const dy = p1.y - p2.y;
-                const distSq = dx * dx + dy * dy;
+                if (dy > 60 || dy < -60) continue;
                 
+                const distSq = dx * dx + dy * dy;
                 if (distSq < 3600) {
                     const dist = Math.sqrt(distSq);
                     const alpha = (60 - dist) / 60 * 0.15;
