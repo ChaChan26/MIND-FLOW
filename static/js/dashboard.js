@@ -1728,6 +1728,7 @@ async function loadAnalytics() {
         // 4. Render App Usage Statistics
         appStatsData = data.app_usage || [];
         renderAppStats();
+        renderAppProductivity(appStatsData);
         
     } catch (e) {
         showToast("Error loading analytics data", true);
@@ -2037,6 +2038,166 @@ function renderAppStats() {
             if (bar) bar.style.width = `${pct}%`;
         }, 50);
     });
+}
+
+// Render weekly application focus vs distraction analytics
+function renderAppProductivity(appStats) {
+    const listWorkEl = document.getElementById('prod-focus-apps-list');
+    const listDistractEl = document.getElementById('prod-distract-apps-list');
+    const prodPctNum = document.getElementById('prod-pct-num');
+    const prodFocusDur = document.getElementById('prod-focus-dur');
+    const prodDistractDur = document.getElementById('prod-distract-dur');
+    const prodNeutralDur = document.getElementById('prod-neutral-dur');
+
+    if (!listWorkEl || !listDistractEl) return;
+
+    listWorkEl.innerHTML = '';
+    listDistractEl.innerHTML = '';
+
+    // Aggregate app stats over the whole weekly dataset
+    let workDuration = 0;
+    let rechargeDuration = 0;
+    let neutralDuration = 0;
+
+    const aggregated = {};
+
+    appStats.forEach(entry => {
+        const key = entry.process;
+        if (!aggregated[key]) {
+            aggregated[key] = {
+                process: entry.process,
+                work_duration: 0,
+                recharge_duration: 0,
+                neutral_duration: 0,
+                duration: 0
+            };
+        }
+
+        let workD = entry.work_duration || 0;
+        let rechargeD = entry.recharge_duration || 0;
+        let neutralD = entry.neutral_duration || 0;
+        if (workD === 0 && rechargeD === 0 && neutralD === 0) {
+            if (entry.category === 'work') workD = entry.duration;
+            else if (entry.category === 'recharge') rechargeD = entry.duration;
+            else neutralD = entry.duration;
+        }
+
+        aggregated[key].work_duration += workD;
+        aggregated[key].recharge_duration += rechargeD;
+        aggregated[key].neutral_duration += neutralD;
+        aggregated[key].duration += entry.duration;
+
+        workDuration += workD;
+        rechargeDuration += rechargeD;
+        neutralDuration += neutralD;
+    });
+
+    const totalDuration = workDuration + rechargeDuration + neutralDuration;
+
+    // Calculate Productivity Score
+    let prodPct = 0;
+    if (workDuration + rechargeDuration > 0) {
+        prodPct = Math.round((workDuration / (workDuration + rechargeDuration)) * 100);
+    } else {
+        prodPct = 100;
+    }
+
+    if (prodPctNum) prodPctNum.textContent = `${prodPct}%`;
+
+    const formatDurationHours = (sec) => {
+        if (sec <= 0) return '0m';
+        const mins = Math.round(sec / 60);
+        if (mins < 60) return `${mins}m`;
+        const hrs = (mins / 60).toFixed(1);
+        return `${hrs}h`;
+    };
+
+    if (prodFocusDur) prodFocusDur.textContent = formatDurationHours(workDuration);
+    if (prodDistractDur) prodDistractDur.textContent = formatDurationHours(rechargeDuration);
+    if (prodNeutralDur) prodNeutralDur.textContent = formatDurationHours(neutralDuration);
+
+    // Render stacked donut SVG arcs
+    const donutWork = document.querySelector('.donut-work');
+    const donutDistract = document.querySelector('.donut-distract');
+
+    if (donutWork && donutDistract) {
+        const circumference = 314.16;
+        if (totalDuration > 0) {
+            const focusPctRatio = workDuration / totalDuration;
+            const distractPctRatio = rechargeDuration / totalDuration;
+
+            const workDashoffset = circumference - (circumference * focusPctRatio);
+            const distractDashoffset = circumference - (circumference * distractPctRatio);
+
+            donutWork.setAttribute('stroke-dashoffset', workDashoffset);
+            donutDistract.setAttribute('stroke-dashoffset', distractDashoffset);
+
+            // Rotate distraction arc so it starts immediately after work arc
+            const workAngle = focusPctRatio * 360;
+            const distractRotation = -90 + workAngle;
+            donutDistract.setAttribute('transform', `rotate(${distractRotation} 60 60)`);
+        } else {
+            donutWork.setAttribute('stroke-dashoffset', circumference);
+            donutDistract.setAttribute('stroke-dashoffset', circumference);
+        }
+    }
+
+    // Sort apps
+    const sortedApps = Object.values(aggregated);
+    const workApps = sortedApps.filter(a => a.work_duration > 0).sort((a, b) => b.work_duration - a.work_duration);
+    const distractApps = sortedApps.filter(a => a.recharge_duration > 0).sort((a, b) => b.recharge_duration - a.recharge_duration);
+
+    // Render list of top productive apps (max 3)
+    if (workApps.length === 0) {
+        listWorkEl.innerHTML = `<div style="color: var(--text-muted); font-size: 0.8rem; font-style: italic; padding: 0.5rem 0;">No productive app usage logged this week. Start a work session!</div>`;
+    } else {
+        workApps.slice(0, 3).forEach(app => {
+            const pct = Math.round((app.work_duration / workDuration) * 100);
+            const row = document.createElement('div');
+            row.className = 'prod-app-row';
+            row.innerHTML = `
+                <div class="prod-app-row-top">
+                    <span class="prod-app-name" title="${escapeHtml(app.process)}">💻 ${escapeHtml(app.process)}</span>
+                    <span class="prod-app-val">${formatDurationHours(app.work_duration)} (${pct}%)</span>
+                </div>
+                <div class="prod-app-bar-bg">
+                    <div class="prod-app-bar-fill" style="width: 0%;"></div>
+                </div>
+            `;
+            listWorkEl.appendChild(row);
+            // Trigger animation
+            setTimeout(() => {
+                const fill = row.querySelector('.prod-app-bar-fill');
+                if (fill) fill.style.width = `${pct}%`;
+            }, 50);
+        });
+    }
+
+    // Render list of top distraction apps (max 3)
+    if (distractApps.length === 0) {
+        listDistractEl.innerHTML = `<div style="color: var(--text-muted); font-size: 0.8rem; font-style: italic; padding: 0.5rem 0;">No distraction apps tracked. Fantastic job!</div>`;
+    } else {
+        distractApps.slice(0, 3).forEach(app => {
+            const pct = Math.round((app.recharge_duration / rechargeDuration) * 100);
+            const row = document.createElement('div');
+            row.className = 'prod-app-row';
+            row.innerHTML = `
+                <div class="prod-app-row-top">
+                    <span class="prod-app-name" title="${escapeHtml(app.process)}">🎮 ${escapeHtml(app.process)}</span>
+                    <span class="prod-app-val">${formatDurationHours(app.recharge_duration)} (${pct}%)</span>
+                </div>
+                <div class="prod-app-bar-bg">
+                    <div class="prod-app-bar-fill" style="width: 0%;"></div>
+                </div>
+            `;
+            listDistractEl.appendChild(row);
+            // Trigger animation
+            setTimeout(() => {
+                const fill = row.querySelector('.prod-app-bar-fill');
+                if (fill) fill.style.width = `${pct}%`;
+            }, 50);
+        });
+    }
 }
 
 // Toggle expansion of specific window titles list

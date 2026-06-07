@@ -5284,3 +5284,242 @@ body.theme-light .forecast-status-alert.peak {
 body.theme-light #forecast-current-dot {
     stroke: #ffffff;
 }
+
+/* App Productivity & Distraction Analytics Card */
+.app-productivity-card {
+    grid-column: span 3;
+}
+
+.app-productivity-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1.4fr 1.4fr;
+    gap: 2.5rem;
+    align-items: flex-start;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 1.5rem;
+    margin-top: 0.5rem;
+}
+
+.prod-donut-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    padding-right: 2.5rem;
+}
+
+.productivity-score-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 140px;
+    height: 140px;
+}
+
+.productivity-donut-svg {
+    transform: rotate(0deg);
+}
+
+.productivity-donut-svg .donut-bg {
+    stroke: rgba(255, 255, 255, 0.03);
+}
+
+.productivity-donut-svg .donut-work {
+    stroke: var(--work-color, #10b981);
+    transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.productivity-donut-svg .donut-distract {
+    stroke: #ef4444;
+    transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.productivity-pct-label {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.productivity-pct-label .pct-num {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1;
+}
+
+.productivity-pct-label .pct-text {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+.prod-duration-breakdown {
+    width: 100%;
+    margin-top: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+}
+
+.prod-breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.breakdown-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.breakdown-val {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.prod-apps-column {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    justify-content: flex-start;
+}
+
+.prod-work-column {
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    padding-right: 2.5rem;
+}
+
+.prod-apps-column .column-subtitle {
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0;
+    margin-bottom: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.prod-work-column .column-subtitle {
+    color: var(--work-color, #10b981);
+}
+
+.prod-distract-column .column-subtitle {
+    color: #ef4444;
+}
+
+.prod-apps-sublist {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.prod-app-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.prod-app-row-top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+}
+
+.prod-app-name {
+    color: var(--text-secondary);
+    font-weight: 500;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 170px;
+}
+
+.prod-app-val {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.prod-app-bar-bg {
+    width: 100%;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.prod-app-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    width: 0%; /* Initial width for transition effect */
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.prod-work-column .prod-app-bar-fill {
+    background: var(--work-color, #10b981);
+    box-shadow: 0 0 6px var(--work-glow, rgba(16, 185, 129, 0.3));
+}
+
+.prod-distract-column .prod-app-bar-fill {
+    background: #ef4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.3);
+}
+
+/* Light Theme overrides for the Donut Widget */
+body.theme-light .productivity-donut-svg .donut-bg {
+    stroke: rgba(0, 0, 0, 0.05);
+}
+
+body.theme-light .app-productivity-grid {
+    border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+body.theme-light .prod-donut-column,
+body.theme-light .prod-work-column {
+    border-right-color: rgba(0, 0, 0, 0.06);
+}
+
+body.theme-light .prod-app-bar-bg {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+/* Responsive grid for smaller screens */
+@media (max-width: 900px) {
+    .app-productivity-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    
+    .prod-donut-column {
+        border-right: none;
+        padding-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding-bottom: 1.5rem;
+    }
+    
+    .prod-work-column {
+        border-right: none;
+        padding-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding-bottom: 1.5rem;
+    }
+    
+    body.theme-light .prod-donut-column,
+    body.theme-light .prod-work-column {
+        border-bottom-color: rgba(0, 0, 0, 0.06);
+    }
+}

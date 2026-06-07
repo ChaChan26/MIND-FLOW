@@ -801,6 +801,72 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.data["reflections"] = original_reflections
             self.db.save()
 
+    def test_analytics_app_classification(self):
+        """Verify that app classification in analytics handles work, recharge, and neutral correctly."""
+        original_settings = self.db.get_settings().copy()
+        original_app_usage = self.db.data.get("app_usage", []).copy()
+        
+        self.db.update_settings({
+            "work_keywords": ["code.exe", "github"],
+            "recharge_keywords": ["steam.exe", "youtube"]
+        })
+        
+        # Inject custom app usage logs
+        today_str = datetime.today().date().isoformat()
+        self.db.data["app_usage"] = [
+            {
+                "date": today_str,
+                "process": "code.exe",
+                "title": "MIND-FLOW - index.html",
+                "titles": {"MIND-FLOW - index.html": 1000},
+                "duration": 1000
+            },
+            {
+                "date": today_str,
+                "process": "steam.exe",
+                "title": "Steam Store",
+                "titles": {"Steam Store": 500},
+                "duration": 500
+            },
+            {
+                "date": today_str,
+                "process": "explorer.exe",
+                "title": "File Explorer",
+                "titles": {"File Explorer": 200},
+                "duration": 200
+            }
+        ]
+        self.db.save()
+        
+        try:
+            response = self.client.get('/api/analytics')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            app_usage = data.get("app_usage", [])
+            
+            # Verify we have entries
+            self.assertTrue(len(app_usage) >= 3)
+            
+            # Check code.exe (should be work)
+            code_entry = next(e for e in app_usage if e["process"] == "code.exe")
+            self.assertEqual(code_entry["category"], "work")
+            self.assertEqual(code_entry["work_duration"], 1000)
+            
+            # Check steam.exe (should be recharge)
+            steam_entry = next(e for e in app_usage if e["process"] == "steam.exe")
+            self.assertEqual(steam_entry["category"], "recharge")
+            self.assertEqual(steam_entry["recharge_duration"], 500)
+            
+            # Check explorer.exe (should be neutral)
+            explorer_entry = next(e for e in app_usage if e["process"] == "explorer.exe")
+            self.assertEqual(explorer_entry["category"], "neutral")
+            self.assertEqual(explorer_entry["neutral_duration"], 200)
+            
+        finally:
+            self.db.update_settings(original_settings)
+            self.db.data["app_usage"] = original_app_usage
+            self.db.save()
+
     @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
         response = self.client.post('/api/shutdown')

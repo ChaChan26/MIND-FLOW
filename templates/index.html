@@ -536,6 +536,73 @@
                             </table>
                         </div>
                     </div>
+
+                    <!-- Application Focus & Distraction Dashboard Card -->
+                    <div class="card glass-card span-3 app-productivity-card" id="app-productivity-card">
+                        <div class="card-header">
+                            <div>
+                                <h3>Productivity & Distraction Analytics</h3>
+                                <p class="card-desc">Comprehensive analysis of productive focus hours versus distracting and leisure application usage.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="app-productivity-grid">
+                            <!-- Column 1: Donut & Summary -->
+                            <div class="prod-donut-column">
+                                <div class="productivity-score-container">
+                                    <svg width="140" height="140" viewBox="0 0 120 120" class="productivity-donut-svg">
+                                        <circle cx="60" cy="60" r="50" class="donut-bg" fill="none" stroke-width="8"></circle>
+                                        <circle cx="60" cy="60" r="50" class="donut-work" fill="none" stroke-width="8" stroke-dasharray="314.16" stroke-dashoffset="314.16" stroke-linecap="round" transform="rotate(-90 60 60)"></circle>
+                                        <circle cx="60" cy="60" r="50" class="donut-distract" fill="none" stroke-width="8" stroke-dasharray="314.16" stroke-dashoffset="314.16" stroke-linecap="round" transform="rotate(-90 60 60)"></circle>
+                                    </svg>
+                                    <div class="productivity-pct-label">
+                                        <span class="pct-num" id="prod-pct-num">--%</span>
+                                        <span class="pct-text">Productive</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="prod-duration-breakdown">
+                                    <div class="prod-breakdown-row">
+                                        <span class="breakdown-label">
+                                            <span class="legend-dot work"></span>
+                                            Productive Focus
+                                        </span>
+                                        <span id="prod-focus-dur" class="breakdown-val">--</span>
+                                    </div>
+                                    <div class="prod-breakdown-row">
+                                        <span class="breakdown-label">
+                                            <span class="legend-dot distract"></span>
+                                            Distracting Leisure
+                                        </span>
+                                        <span id="prod-distract-dur" class="breakdown-val">--</span>
+                                    </div>
+                                    <div class="prod-breakdown-row">
+                                        <span class="breakdown-label">
+                                            <span class="legend-dot neutral"></span>
+                                            Neutral / System
+                                        </span>
+                                        <span id="prod-neutral-dur" class="breakdown-val">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Column 2: Productive Apps -->
+                            <div class="prod-apps-column prod-work-column">
+                                <h4 class="column-subtitle">🎯 Productive Apps</h4>
+                                <div id="prod-focus-apps-list" class="prod-apps-sublist">
+                                    <!-- Dynamic rows -->
+                                </div>
+                            </div>
+                            
+                            <!-- Column 3: Distracting Apps -->
+                            <div class="prod-apps-column prod-distract-column">
+                                <h4 class="column-subtitle">🎮 Distractions & Leisure</h4>
+                                <div id="prod-distract-apps-list" class="prod-apps-sublist">
+                                    <!-- Dynamic rows -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
