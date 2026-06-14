@@ -1,5 +1,44 @@
 // MIND-FLOW Dashboard Logic
 
+// Global Fetch Interceptor to automatically attach the security API token
+(function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    let token = urlParams.get('token');
+    if (token) {
+        sessionStorage.setItem('api_token', token);
+        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+    } else {
+        token = sessionStorage.getItem('api_token') || "";
+    }
+
+    const originalFetch = window.fetch;
+    window.fetch = async function(resource, options) {
+        if (typeof resource === 'string' && resource.startsWith('/api')) {
+            options = options || {};
+            options.headers = options.headers || {};
+            if (options.headers instanceof Headers) {
+                options.headers.set('X-MIND-FLOW-TOKEN', token);
+            } else if (Array.isArray(options.headers)) {
+                let hasToken = false;
+                for (let i = 0; i < options.headers.length; i++) {
+                    if (options.headers[i][0].toLowerCase() === 'x-mind-flow-token') {
+                        options.headers[i][1] = token;
+                        hasToken = true;
+                        break;
+                    }
+                }
+                if (!hasToken) {
+                    options.headers.push(['X-MIND-FLOW-TOKEN', token]);
+                }
+            } else {
+                options.headers['X-MIND-FLOW-TOKEN'] = token;
+            }
+        }
+        return originalFetch(resource, options);
+    };
+})();
+
 // Global Uncaught Error Tracker for debugging WebView2 client issues
 window.addEventListener('error', function(event) {
     const errorMsg = `JS Error: ${event.message} at ${event.filename || 'script'}:${event.lineno}:${event.colno}`;
@@ -48,6 +87,21 @@ let lastReflections = null;
 let appStatsFilter = 'today';
 let weekOffset = 0;
 let lastAnalyticsLoadTime = 0;
+let lastVitalityLoadTime = 0;
+
+// Zenith Ethereal Theme Globals
+let dashboardBreathingInterval = null;
+let communityBreaths = 10482;
+let communityInterval = null;
+const communityPrompts = [
+    "Take a moment to listen to the furthest sound you can hear.",
+    "Feel the contact between your feet and the ground.",
+    "Notice three things in your room that are blue.",
+    "Breathe in slowly. Let your shoulders drop as you exhale.",
+    "Observe the quiet space between your breaths.",
+    "Appreciate one small victory you achieved today."
+];
+const joinedCircles = { morning: false, focus: false };
 
 // DOM Elements
 const bodyEl = document.body;
@@ -124,6 +178,7 @@ function switchTab(tabId) {
             if (settingsBtn) {
                 document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
                 settingsBtn.classList.add('active');
+                updateNavIndicator();
             }
             return;
         } else {
@@ -182,6 +237,11 @@ function clearDashboardIntervals() {
     }
     const batBubbles = document.getElementById('battery-bubbles');
     if (batBubbles) batBubbles.innerHTML = '';
+
+    if (dashboardBreathingInterval) {
+        clearInterval(dashboardBreathingInterval);
+        dashboardBreathingInterval = null;
+    }
 }
 
 function restoreDashboardIntervals() {
@@ -193,6 +253,10 @@ function restoreDashboardIntervals() {
     
     const isCharging = bodyEl.classList.contains('mode-recharge') || bodyEl.classList.contains('mode-rest');
     updateBatteryBubbles(isCharging);
+    
+    if (typeof startDashboardBreathing === 'function') {
+        startDashboardBreathing();
+    }
 }
 
 // Update Sidebar Sliding Tab Indicator Position and Colors
@@ -628,7 +692,45 @@ async function pollStatus() {
             updateCircadianForecastUI(status.circadian_forecast);
         }
 
-        
+        // Update mood-responsive greeting on the focus dashboard
+        const dashboardSubtitle = document.getElementById('dashboard-subtitle');
+        if (dashboardSubtitle) {
+            const mood = status.latest_mood;
+            let greeting = '';
+            
+            if (mood === 'Anxious') {
+                greeting = 'Breathe slowly, let go of expectations.';
+            } else if (mood === 'Overwhelmed') {
+                greeting = "Let's pause. Focus on a single micro-goal.";
+            } else if (mood === 'Frustrated') {
+                greeting = 'Frustration is just a sign to step back and breathe.';
+            } else if (mood === 'Exhausted') {
+                greeting = 'Stamina is low. Rest is a productive choice.';
+            } else if (mood === 'Calm') {
+                greeting = 'Peace is within. Enjoy this moment of flow.';
+            } else if (mood === 'Focused') {
+                greeting = 'Your cognitive shield is strong. Maintain the flow.';
+            } else {
+                // Time-based fallback greeting
+                const hour = new Date().getHours();
+                if (hour < 12) {
+                    greeting = 'Good morning. Breathe in, let go of the sprint.';
+                } else if (hour < 17) {
+                    greeting = 'Good afternoon. Stay centered and flow gently.';
+                } else {
+                    greeting = 'Good evening. Rest is the foundation of energy.';
+                }
+            }
+            
+            dashboardSubtitle.textContent = greeting;
+        }
+
+        // Periodically load vitality stats every 10 seconds
+        const nowMs = Date.now();
+        if (typeof loadVitality === 'function' && (nowMs - lastVitalityLoadTime >= 10000)) {
+            lastVitalityLoadTime = nowMs;
+            loadVitality();
+        }
         // 7.8 Periodically reload analytics every 30 seconds on active tabs
         const now = Date.now();
         if ((currentTab === 'dashboard' || currentTab === 'analytics') && (now - lastAnalyticsLoadTime >= 30000)) {
@@ -729,8 +831,9 @@ function checkSettingsDirty() {
     const hydrationIncrement = document.getElementById('hydration-increment-input');
     const circadianEnabled = document.getElementById('circadian-forecast-enabled-input');
     const circadianSensitivity = document.getElementById('circadian-forecast-sensitivity-input');
+    const zenLevel = document.getElementById('zen-level-input');
     
-    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare || !hydrationTarget || !hydrationUnit || !hydrationIncrement || !circadianEnabled || !circadianSensitivity) {
+    if (!workLimit || !idleTimeout || !restDuration || !workKeywords || !rechargeKeywords || !autopilot || !eyecare || !hydrationTarget || !hydrationUnit || !hydrationIncrement || !circadianEnabled || !circadianSensitivity || !zenLevel) {
         return false;
     }
     
@@ -746,7 +849,8 @@ function checkSettingsDirty() {
         hydration_unit: hydrationUnit.value,
         hydration_increment: parseFloat(hydrationIncrement.value) || 1,
         circadian_forecast_enabled: circadianEnabled.checked,
-        circadian_forecast_sensitivity: circadianSensitivity.value
+        circadian_forecast_sensitivity: circadianSensitivity.value,
+        zen_level: zenLevel.value
     };
     
     const isDirty = (
@@ -761,7 +865,8 @@ function checkSettingsDirty() {
         current.hydration_unit !== initialSettings.hydration_unit ||
         current.hydration_increment !== initialSettings.hydration_increment ||
         current.circadian_forecast_enabled !== initialSettings.circadian_forecast_enabled ||
-        current.circadian_forecast_sensitivity !== initialSettings.circadian_forecast_sensitivity
+        current.circadian_forecast_sensitivity !== initialSettings.circadian_forecast_sensitivity ||
+        current.zen_level !== initialSettings.zen_level
     );
     
     const banner = document.getElementById('unsaved-changes-banner');
@@ -790,6 +895,7 @@ function discardSettingsChanges() {
     const hydrationIncrement = document.getElementById('hydration-increment-input');
     const circadianEnabled = document.getElementById('circadian-forecast-enabled-input');
     const circadianSensitivity = document.getElementById('circadian-forecast-sensitivity-input');
+    const zenLevel = document.getElementById('zen-level-input');
     
     if (workLimit) workLimit.value = initialSettings.work_duration_minutes;
     if (idleTimeout) idleTimeout.value = initialSettings.idle_timeout_seconds;
@@ -810,6 +916,7 @@ function discardSettingsChanges() {
     if (hydrationIncrement) hydrationIncrement.value = initialSettings.hydration_increment;
     if (circadianEnabled) circadianEnabled.checked = initialSettings.circadian_forecast_enabled;
     if (circadianSensitivity) circadianSensitivity.value = initialSettings.circadian_forecast_sensitivity;
+    if (zenLevel) zenLevel.value = initialSettings.zen_level;
     
     toggleCircadianSensitivityVisibility();
     checkSettingsDirty();
@@ -871,6 +978,10 @@ async function loadSettings() {
         document.getElementById('circadian-forecast-enabled-input').checked = circadianEnabled;
         document.getElementById('circadian-forecast-sensitivity-input').value = settings.circadian_forecast_sensitivity || "medium";
         
+        if (document.getElementById('zen-level-input')) {
+            document.getElementById('zen-level-input').value = settings.zen_level || "balanced";
+        }
+        
         toggleCircadianSensitivityVisibility();
         
         // Cache initial settings
@@ -886,7 +997,8 @@ async function loadSettings() {
             hydration_unit: settings.hydration_unit || "cups",
             hydration_increment: settings.hydration_increment !== undefined ? settings.hydration_increment : 1,
             circadian_forecast_enabled: circadianEnabled,
-            circadian_forecast_sensitivity: settings.circadian_forecast_sensitivity || "medium"
+            circadian_forecast_sensitivity: settings.circadian_forecast_sensitivity || "medium",
+            zen_level: settings.zen_level || "balanced"
         };
         
         initSettingsDirtyTracking();
@@ -913,7 +1025,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         hydration_unit: document.getElementById('hydration-unit-input').value,
         hydration_increment: parseFloat(document.getElementById('hydration-increment-input').value),
         circadian_forecast_enabled: document.getElementById('circadian-forecast-enabled-input').checked,
-        circadian_forecast_sensitivity: document.getElementById('circadian-forecast-sensitivity-input').value
+        circadian_forecast_sensitivity: document.getElementById('circadian-forecast-sensitivity-input').value,
+        zen_level: document.getElementById('zen-level-input') ? document.getElementById('zen-level-input').value : "balanced"
     };
     
     try {
@@ -950,7 +1063,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
                 hydration_unit: settings.hydration_unit,
                 hydration_increment: settings.hydration_increment,
                 circadian_forecast_enabled: settings.circadian_forecast_enabled,
-                circadian_forecast_sensitivity: settings.circadian_forecast_sensitivity
+                circadian_forecast_sensitivity: settings.circadian_forecast_sensitivity,
+                zen_level: settings.zen_level
             };
             checkSettingsDirty();
             
@@ -1022,6 +1136,26 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
             triggerParticleBurst(lastSubmitClick);
             summaryInput.value = '';
             if (sleepHoursInput) sleepHoursInput.value = '';
+            
+            // Reset selected energy
+            selectedEnergy = 5;
+            document.querySelectorAll('#energy-rating .rate-btn').forEach(btn => {
+                if (btn.getAttribute('data-val') === '5') {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            // Reset selected friction
+            selectedFriction = 2;
+            document.querySelectorAll('#friction-rating .rate-btn').forEach(btn => {
+                if (btn.getAttribute('data-val') === '2') {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
             
             // Reset selected mood
             selectedMood = 'Neutral';
@@ -1266,6 +1400,12 @@ async function loadAnalytics() {
         const res = await fetch(`/api/analytics?week_offset=${weekOffset}`);
         const data = await res.json();
         hideSkeletons();
+        
+        // Update calming narrative
+        const calmingNarrativeText = document.getElementById('calming-narrative-text');
+        if (calmingNarrativeText && data.calming_narrative) {
+            calmingNarrativeText.textContent = data.calming_narrative;
+        }
         
         // Update week navigation UI
         const weekLabel = document.getElementById('current-week-label');
@@ -3674,6 +3814,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initAppTheme();
     loadGoal();
     loadAnalytics();
+    
+    // Initialize Zenith Ethereal widgets
+    if (typeof startDashboardBreathing === 'function') startDashboardBreathing();
+    if (typeof initCommunitySimulation === 'function') initCommunitySimulation();
+    if (typeof loadVitality === 'function') loadVitality();
+
     // Fetch initial hydration
     fetch('/api/hydration')
         .then(r => r.json())
@@ -5980,16 +6126,23 @@ async function saveZenWordReflection() {
 
 // Global App Theme Switcher
 function initAppTheme() {
-    const savedTheme = localStorage.getItem('mindflow-theme') || 'cosmic';
+    const savedTheme = localStorage.getItem('mindflow-theme') || 'zenith';
     setAppTheme(savedTheme, false); // Apply theme on boot without visual toast
 }
 
 function setAppTheme(themeName, showNotification = true) {
     // 1. Clean theme body classes
-    document.body.classList.remove('theme-cosmic', 'theme-ocean', 'theme-forest', 'theme-light');
+    document.body.classList.remove('theme-cosmic', 'theme-ocean', 'theme-forest', 'theme-light', 'theme-zenith');
     
     // 2. Add current theme class
     document.body.classList.add('theme-' + themeName);
+    
+    // Toggle root dark/light class depending on theme type
+    if (themeName === 'light' || themeName === 'zenith') {
+        document.documentElement.classList.remove('dark');
+    } else {
+        document.documentElement.classList.add('dark');
+    }
     
     // 3. Save choice in local storage
     localStorage.setItem('mindflow-theme', themeName);
@@ -6014,6 +6167,8 @@ function setAppTheme(themeName, showNotification = true) {
             setZenVisualizerMode('forest');
         } else if (themeName === 'light' && typeof zenVisualizerMode !== 'undefined' && zenVisualizerMode !== 'forest') {
             setZenVisualizerMode('forest');
+        } else if (themeName === 'zenith' && typeof zenVisualizerMode !== 'undefined' && zenVisualizerMode !== 'forest') {
+            setZenVisualizerMode('forest');
         }
     }
     
@@ -6023,7 +6178,8 @@ function setAppTheme(themeName, showNotification = true) {
             'cosmic': 'Cosmic Flow',
             'ocean': 'Ocean Waves',
             'forest': 'Forest Light',
-            'light': 'Solar Breeze'
+            'light': 'Solar Breeze',
+            'zenith': 'Zenith Ethereal'
         };
         showToast(`Theme switched to ${themeNamesMap[themeName]}! 🎨`);
     }
@@ -6323,6 +6479,216 @@ function updateCircadianForecastUI(forecast) {
         } else {
             hydAlertEl.style.display = 'none';
         }
+    }
+}
+
+// Zenith Ethereal Custom Logic & Handlers
+function startDashboardBreathing() {
+    const circle = document.getElementById('dashboard-breathing-circle');
+    const text = document.getElementById('dashboard-breathing-text');
+    if (!circle || !text) return;
+    
+    let step = 0; // 0 = Inhale, 1 = Hold In, 2 = Exhale, 3 = Hold Out
+    
+    if (dashboardBreathingInterval) {
+        clearInterval(dashboardBreathingInterval);
+    }
+    
+    const breathe = () => {
+        if (step === 0) {
+            circle.className = 'zenith-breathing-circle inhale';
+            text.textContent = 'Breathe In';
+            step = 1;
+        } else if (step === 1) {
+            text.textContent = 'Hold';
+            step = 2;
+        } else if (step === 2) {
+            circle.className = 'zenith-breathing-circle exhale';
+            text.textContent = 'Breathe Out';
+            step = 3;
+        } else {
+            text.textContent = 'Hold';
+            step = 0;
+        }
+    };
+    
+    breathe();
+    dashboardBreathingInterval = setInterval(breathe, 4000);
+}
+
+function updateStressLabel(val) {
+    const label = document.getElementById('stress-slider-value');
+    const ratings = {
+        1: 'Smooth (1)',
+        2: 'Easy (2)',
+        3: 'Neutral (3)',
+        4: 'Tough (4)',
+        5: 'Blocked (5)'
+    };
+    if (label) {
+        label.textContent = ratings[val] || `Level ${val}`;
+    }
+}
+
+async function submitStressCheckIn() {
+    const slider = document.getElementById('stress-level-slider');
+    if (!slider) return;
+    const stressVal = parseInt(slider.value) || 3;
+    
+    const payload = {
+        energy_level: selectedEnergy || 3,
+        friction_level: stressVal,
+        summary: "[Autopilot] Stress check-in",
+        mood: selectedMood || 'Neutral',
+        sleep_hours: null,
+        sleep_quality: null
+    };
+    
+    try {
+        const res = await fetch('/api/reflections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            showToast("Stress level logged.");
+            selectedFriction = stressVal;
+            document.querySelectorAll('#friction-rating .rate-btn').forEach(btn => {
+                if (parseInt(btn.getAttribute('data-val')) === stressVal) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            pollStatus();
+        } else {
+            showToast("Failed to save stress check-in", true);
+        }
+    } catch (e) {
+        showToast("Error saving stress check-in", true);
+    }
+}
+
+async function loadVitality() {
+    try {
+        const res = await fetch('/api/vitality');
+        if (res.ok) {
+            const data = await res.json();
+            updateVitalityUI(data);
+        }
+    } catch (e) {
+        console.error("Error loading vitality stats:", e);
+    }
+}
+
+function updateRing(elementId, textId, current, target) {
+    const ring = document.getElementById(elementId);
+    const text = document.getElementById(textId);
+    if (!ring) return;
+    
+    const pct = Math.min(100, Math.max(0, Math.round((current / (target || 1)) * 100))) || 0;
+    if (text) {
+        text.textContent = `${pct}%`;
+    }
+    
+    const circumference = 251.2;
+    const offset = circumference - (pct / 100) * circumference;
+    ring.style.strokeDasharray = `${circumference}`;
+    ring.style.strokeDashoffset = offset;
+}
+
+function updateVitalityUI(data) {
+    updateRing('ring-steps', 'ring-steps-text', data.steps, data.step_target);
+    updateRing('ring-sleep', 'ring-sleep-text', data.sleep_hours, data.sleep_target);
+    updateRing('ring-hydration', 'ring-hydration-text', data.hydration_cups, data.hydration_target);
+    
+    const stepsInput = document.getElementById('vitality-steps-input');
+    const sleepInput = document.getElementById('vitality-sleep-input');
+    if (stepsInput && !stepsInput.value) stepsInput.value = data.steps || '';
+    if (sleepInput && !sleepInput.value) sleepInput.value = data.sleep_hours || '';
+}
+
+async function submitVitalitySteps() {
+    const input = document.getElementById('vitality-steps-input');
+    if (!input) return;
+    const steps = parseInt(input.value) || 0;
+    try {
+        const res = await fetch('/api/vitality', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ steps: steps })
+        });
+        if (res.ok) {
+            showToast("Steps logged.");
+            const data = await res.json();
+            updateVitalityUI(data);
+            loadAnalytics();
+        }
+    } catch (e) {
+        showToast("Error saving steps", true);
+    }
+}
+
+async function submitVitalitySleep() {
+    const input = document.getElementById('vitality-sleep-input');
+    if (!input) return;
+    const sleepHours = parseFloat(input.value) || 0.0;
+    try {
+        const res = await fetch('/api/vitality', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sleep_hours: sleepHours })
+        });
+        if (res.ok) {
+            showToast("Sleep logged.");
+            const data = await res.json();
+            updateVitalityUI(data);
+            loadAnalytics();
+        }
+    } catch (e) {
+        showToast("Error saving sleep", true);
+    }
+}
+
+function initCommunitySimulation() {
+    const promptEl = document.getElementById('community-prompt');
+    if (promptEl) {
+        const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+        promptEl.textContent = `"${communityPrompts[dayOfYear % communityPrompts.length]}"`;
+    }
+    
+    const counterEl = document.getElementById('collective-breaths-counter');
+    const progressEl = document.getElementById('collective-breaths-progress');
+    if (counterEl && !communityInterval) {
+        communityInterval = setInterval(() => {
+            communityBreaths += Math.floor(Math.random() * 3) + 1;
+            counterEl.textContent = communityBreaths.toLocaleString();
+            
+            const pct = Math.min(100, (communityBreaths / 15000) * 100);
+            if (progressEl) {
+                progressEl.style.width = `${pct}%`;
+            }
+        }, 2500);
+    }
+}
+
+function toggleJoinCircle(circleType) {
+    const btn = document.getElementById(`circle-join-btn-${circleType}`);
+    if (!btn) return;
+    
+    joinedCircles[circleType] = !joinedCircles[circleType];
+    if (joinedCircles[circleType]) {
+        btn.textContent = 'Joined';
+        btn.style.background = 'var(--recharge-color)';
+        btn.style.borderColor = 'var(--recharge-color)';
+        btn.style.color = '#0b0f19';
+        showToast(`Joined the ${circleType === 'morning' ? 'Morning Calm' : 'Deep Focus'} circle.`);
+    } else {
+        btn.textContent = 'Join';
+        btn.style.background = '';
+        btn.style.borderColor = '';
+        btn.style.color = '';
+        showToast(`Left the ${circleType === 'morning' ? 'Morning Calm' : 'Deep Focus'} circle.`);
     }
 }
 

@@ -2,6 +2,8 @@ import os
 os.environ["MINDFLOW_DB_FILE"] = ":memory:"
 import shutil
 import unittest
+import sqlite3
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -9,16 +11,31 @@ from backend.database import MindFlowDB
 import time
 import subprocess
 import webbrowser
-from app import get_active_window_title, get_active_process_name, get_idle_seconds, matches_keyword, shared_state, launch_app_window, trigger_lockout_overlay
+from app import get_active_window_title, get_active_process_name, get_idle_seconds, matches_keyword, shared_state, launch_app_window
 from backend.server import app as flask_app, db as server_db
+
+def clear_db(db):
+    with db.connection() as conn:
+        conn.execute("DELETE FROM sessions")
+        conn.execute("DELETE FROM reflections")
+        conn.execute("DELETE FROM app_usage")
+        conn.execute("DELETE FROM hydration")
+        conn.execute("DELETE FROM steps")
+        conn.execute("DELETE FROM sleep")
+        conn.execute("DELETE FROM settings")
+        conn.execute("DELETE FROM metadata")
+    db._init_db()
 
 class TestMindFlowComponents(unittest.TestCase):
     
     def setUp(self):
+        self._master_conn = sqlite3.connect("file::memory:?cache=shared", uri=True)
         self.db = MindFlowDB()
+        clear_db(self.db)
 
     def tearDown(self):
-        pass
+        self.db.close()
+        self._master_conn.close()
 
     def test_database_settings_handling(self):
         """Verify settings updates work correctly and types are safe."""
@@ -86,9 +103,8 @@ class TestMindFlowComponents(unittest.TestCase):
 
     def test_database_session_aggregation(self):
         """Verify dynamic calculation of today's work/recharge/rest seconds."""
-        # Clean current session list for mock tests (we can temporarily mock sessions array)
-        original_sessions = self.db.data["sessions"].copy()
-        self.db.data["sessions"] = []
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM sessions")
         
         t_now = datetime.now()
         
@@ -113,15 +129,11 @@ class TestMindFlowComponents(unittest.TestCase):
         self.assertEqual(recharge_sessions[0]["duration"], 80)
         self.assertIsNone(recharge_sessions[0]["brain_dump"])
         self.assertFalse(recharge_sessions[0]["bypassed"])
-        
-        # Restore database sessions
-        self.db.data["sessions"] = original_sessions
-        self.db.save()
 
     def test_database_app_usage(self):
         """Verify logging and fetching application usage statistics in database."""
-        original_app_usage = self.db.data.get("app_usage", []).copy()
-        self.db.data["app_usage"] = []
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM app_usage")
         
         # Log app usage
         self.db.log_app_usage("code.exe", "index.html - MIND-FLOW", 15)
@@ -149,10 +161,6 @@ class TestMindFlowComponents(unittest.TestCase):
         self.assertEqual(chrome_entries[0]["title"], "Google Search")
         self.assertIn("titles", chrome_entries[0])
         self.assertEqual(chrome_entries[0]["titles"]["Google Search"], 45)
-        
-        # Restore original
-        self.db.data["app_usage"] = original_app_usage
-        self.db.save()
 
     def test_dual_mode_decision_logic(self):
         """Verify the state machine decision engine for processes vs title keywords."""
@@ -218,7 +226,7 @@ class TestMindFlowComponents(unittest.TestCase):
 
     def test_rigorous_edge_cases(self):
         """Perform rigorous edge-case testing on word segmentation, filters, and thread safety."""
-        # 1. Prohibited Browser Keyword Filtering
+        # 1. Prohibited Browser Keyword Filtering (Now allowed, but handled at classification level)
         original_settings = self.db.get_settings().copy()
         try:
             self.db.update_settings({
@@ -227,15 +235,35 @@ class TestMindFlowComponents(unittest.TestCase):
             })
             settings = self.db.get_settings()
             
-            # Prohibited browser terms should be filtered out
-            self.assertNotIn("chrome.exe", settings["work_keywords"])
-            self.assertNotIn("firefox", settings["work_keywords"])
-            self.assertNotIn("msedge", settings["recharge_keywords"])
+            # Browser terms should be retained in settings now
+            self.assertIn("chrome.exe", settings["work_keywords"])
+            self.assertIn("firefox", settings["work_keywords"])
+            self.assertIn("msedge", settings["recharge_keywords"])
             
             # Allowed terms should be retained
             self.assertIn("google docs", settings["work_keywords"])
             self.assertIn("antigravity", settings["work_keywords"])
             self.assertIn("youtube", settings["recharge_keywords"])
+            
+            # Verify classification logic for browsers vs titles
+            from backend.database import is_browser_process, matches_any_keyword
+            self.assertTrue(is_browser_process("chrome.exe"))
+            self.assertTrue(is_browser_process("firefox"))
+            
+            def decide_mode_v2(active_title, active_process):
+                if is_browser_process(active_process):
+                    is_work = matches_any_keyword(settings["work_keywords"], active_title)
+                    is_recharge = matches_any_keyword(settings["recharge_keywords"], active_title)
+                else:
+                    is_work = matches_any_keyword(settings["work_keywords"], active_process) or matches_any_keyword(settings["work_keywords"], active_title)
+                    is_recharge = matches_any_keyword(settings["recharge_keywords"], active_process) or matches_any_keyword(settings["recharge_keywords"], active_title)
+                if is_work: return "work"
+                if is_recharge: return "recharge"
+                return "neutral"
+                
+            self.assertEqual(decide_mode_v2("YouTube Video", "chrome.exe"), "recharge")
+            self.assertEqual(decide_mode_v2("Random Page", "chrome.exe"), "neutral")
+            self.assertEqual(decide_mode_v2("Google Docs - Editor", "chrome.exe"), "work")
         finally:
             self.db.update_settings(original_settings)
 
@@ -284,18 +312,23 @@ class TestMindFlowComponents(unittest.TestCase):
         # No exceptions should have occurred during concurrent load/saves
         self.assertEqual(len(exceptions), 0, f"Thread-safety locks failed: {exceptions}")
 
-    def test_adaptive_times(self):
+    @patch('backend.database.datetime')
+    def test_adaptive_times(self, mock_datetime):
         """Verify dynamic calculations for work sprint and rest recovery modifiers, ceilings, and floors."""
+        import datetime as dt
+        t_now = dt.datetime(2026, 6, 1, 9, 0, 0)
+        mock_datetime.now.return_value = t_now
+        mock_datetime.fromisoformat.side_effect = lambda x: dt.datetime.fromisoformat(x)
+        mock_datetime.today.return_value = t_now
         original_settings = self.db.get_settings().copy()
-        original_sessions = self.db.data["sessions"].copy()
-        original_reflections = self.db.data["reflections"].copy()
         
         try:
             self.db.update_settings({"work_duration_minutes": 45, "adaptive_timers_enabled": True})
             
             # Scenario A: Default (no reflections, no bypasses)
-            self.db.data["sessions"] = []
-            self.db.data["reflections"] = []
+            with self.db.connection() as conn:
+                conn.execute("DELETE FROM sessions")
+                conn.execute("DELETE FROM reflections")
             res = self.db.get_adaptive_times()
             self.assertEqual(res["work_minutes"], 45)
             self.assertEqual(res["rest_seconds"], 20)
@@ -311,8 +344,8 @@ class TestMindFlowComponents(unittest.TestCase):
             self.assertIn("Flow (+15m)", res["reason"])
             
             # Scenario C: Flow reflection + 1 bypass penalty today
-            from datetime import datetime, timedelta
-            self.db.log_session("work", datetime.now() - timedelta(minutes=10), datetime.now(), bypassed=True)
+            from datetime import timedelta
+            self.db.log_session("work", t_now - timedelta(minutes=10), t_now, bypassed=True)
             res = self.db.get_adaptive_times()
             # work: 45 + 15 (flow) - 5 (bypass) = 55 mins
             # rest: 20 + 10 (bypass) = 30 seconds
@@ -323,28 +356,29 @@ class TestMindFlowComponents(unittest.TestCase):
             self.assertIn("Rest Deficit (+10s)", res["reason"])
             
             # Scenario D: High fatigue reflection (energy 1, friction 5) + 3 bypasses -> Severe constraint
-            self.db.data["reflections"] = []
+            with self.db.connection() as conn:
+                conn.execute("DELETE FROM reflections")
             self.db.add_reflection(1, 5, "Exhausted and stuck")
             # Log two more bypasses to make it 3 total
-            self.db.log_session("work", datetime.now() - timedelta(minutes=10), datetime.now(), bypassed=True)
-            self.db.log_session("work", datetime.now() - timedelta(minutes=10), datetime.now(), bypassed=True)
+            self.db.log_session("work", t_now - timedelta(minutes=10), t_now, bypassed=True)
+            self.db.log_session("work", t_now - timedelta(minutes=10), t_now, bypassed=True)
             res = self.db.get_adaptive_times()
             
             # fatigue modifier: -((3-1)*5 + (5-3)*5) = -20, capped at -15
-            # bypass modifier: 3 * -5 = -15
-            # Total modifier: -30
-            # Target work minutes: 45 - 30 = 15 minutes
-            self.assertEqual(res["work_minutes"], 15)
+            # bypass modifier: 3 * -5 = -15, capped at -10 now
+            # Total modifier: -25
+            # Target work minutes: 45 - 25 = 20 minutes
+            self.assertEqual(res["work_minutes"], 20)
             
             # rest fatigue addition: +10 seconds
-            # rest bypass deficit: 3 * 10 = 30 seconds
+            # rest bypass deficit: 3 * 10 = 30 seconds, capped at 20 now
             # friction rest addition: +24 seconds (avg friction 5.0 -> +24s)
-            # Total rest: 20 + 10 + 30 + 24 = 84 seconds
-            self.assertEqual(res["rest_seconds"], 84)
+            # Total rest: 20 + 10 + 20 + 24 = 74 seconds
+            self.assertEqual(res["rest_seconds"], 74)
             self.assertIn("Fatigue (-15m)", res["reason"])
-            self.assertIn("Bypasses (-15m)", res["reason"])
+            self.assertIn("Bypasses (-10m)", res["reason"])
             self.assertIn("Rest Alert (+10s)", res["reason"])
-            self.assertIn("Rest Deficit (+30s)", res["reason"])
+            self.assertIn("Rest Deficit (+20s)", res["reason"])
             self.assertIn("Friction Deficit (+24s)", res["reason"])
             
             # Scenario E: Verify Floor Safety bounds (Work must not fall below 10 mins)
@@ -362,50 +396,45 @@ class TestMindFlowComponents(unittest.TestCase):
             
         finally:
             self.db.update_settings(original_settings)
-            self.db.data["sessions"] = original_sessions
-            self.db.data["reflections"] = original_reflections
-            self.db.save()
 
     def test_circadian_forecast_generation(self):
         """Verify the database correctly calculates and interpolates the circadian forecast."""
-        original_settings = self.db.get_settings().copy()
-        original_reflections = self.db.data["reflections"].copy()
-        try:
-            # Clean reflections for predictable environment
-            self.db.data["reflections"] = []
-            
-            # Scenario A: Default Curve (no reflections)
-            forecast = self.db.get_circadian_forecast()
-            # Predicted energy should match default curve at current hour
-            now = datetime.now()
-            from backend.database import DEFAULT_CIRCADIAN_CURVE
-            expected_current = DEFAULT_CIRCADIAN_CURVE[now.hour]
-            self.assertTrue(1.0 <= forecast["current_predicted_energy"] <= 5.0)
-            self.assertEqual(len(forecast["forecast_curve"]), 24)
-            
-            # Scenario B: Blend with reflections
-            from datetime import timedelta
-            t_now = datetime.now()
-            # Add 3 reflections today in current hour
-            self.db.add_reflection(2, 2, "Tired reflection")
-            self.db.add_reflection(2, 2, "Still tired")
-            self.db.add_reflection(2, 2, "Very tired")
-            
-            forecast_blended = self.db.get_circadian_forecast()
-            # The current hour prediction should be shifted downwards towards 2.0
-            self.assertLessEqual(forecast_blended["forecast_curve"][t_now.hour]["energy"], 3.2)
-            
-        finally:
-            self.db.update_settings(original_settings)
-            self.db.data["reflections"] = original_reflections
-            self.db.save()
+        # Clean reflections for predictable environment
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM reflections")
+        
+        # Scenario A: Default Curve (no reflections)
+        forecast = self.db.get_circadian_forecast()
+        # Predicted energy should match default curve at current hour
+        now = datetime.now()
+        from backend.database import DEFAULT_CIRCADIAN_CURVE
+        expected_current = DEFAULT_CIRCADIAN_CURVE[now.hour]
+        self.assertTrue(1.0 <= forecast["current_predicted_energy"] <= 5.0)
+        self.assertEqual(len(forecast["forecast_curve"]), 24)
+        
+        # Scenario B: Blend with reflections
+        from datetime import timedelta
+        t_now = datetime.now()
+        # Add 3 reflections today in current hour
+        self.db.add_reflection(2, 2, "Tired reflection")
+        self.db.add_reflection(2, 2, "Still tired")
+        self.db.add_reflection(2, 2, "Very tired")
+        
+        forecast_blended = self.db.get_circadian_forecast()
+        # The current hour prediction should be shifted downwards towards 2.0
+        self.assertLessEqual(forecast_blended["forecast_curve"][t_now.hour]["energy"], 3.2)
 
-    def test_circadian_schedule_adjustment(self):
+
+    @patch('backend.database.datetime')
+    def test_circadian_schedule_adjustment(self, mock_datetime):
         """Verify the autopilot adjust sprint/rest duration based on forecasted slump."""
+        import datetime as dt
+        t_now = dt.datetime(2026, 6, 1, 9, 0, 0)
+        mock_datetime.now.return_value = t_now
+        mock_datetime.fromisoformat.side_effect = lambda x: dt.datetime.fromisoformat(x)
+        mock_datetime.today.return_value = t_now
         original_settings = self.db.get_settings().copy()
-        original_reflections = self.db.data["reflections"].copy()
         try:
-            self.db.data["reflections"] = []
             self.db.update_settings({
                 "work_duration_minutes": 45,
                 "rest_duration_seconds": 20,
@@ -413,35 +442,28 @@ class TestMindFlowComponents(unittest.TestCase):
                 "circadian_forecast_sensitivity": "medium"
             })
             
-            # Inject peak reflections now and in 1 hour, and a crash reflection in 2 hours
+            # Inject peak reflections now and in 30 mins, and a crash reflection in 60 mins
             # to trigger a clear, robust impending drop forecast at any time of day
             from datetime import timedelta
-            now_dt = datetime.now()
+            now_dt = t_now
             time_0 = now_dt - timedelta(days=1)
-            time_1 = now_dt + timedelta(hours=1) - timedelta(days=1)
-            time_2 = now_dt + timedelta(hours=2) - timedelta(days=1)
-            self.db.data["reflections"].append({
-                "timestamp": time_0.isoformat(),
-                "energy_level": 5,
-                "friction_level": 1,
-                "summary": "Current peak reflection",
-                "mood": "Focused"
-            })
-            self.db.data["reflections"].append({
-                "timestamp": time_1.isoformat(),
-                "energy_level": 5,
-                "friction_level": 1,
-                "summary": "Current peak reflection 2",
-                "mood": "Focused"
-            })
-            self.db.data["reflections"].append({
-                "timestamp": time_2.isoformat(),
-                "energy_level": 1,
-                "friction_level": 5,
-                "summary": "Imminent crash reflection",
-                "mood": "Exhausted"
-            })
-            self.db.save()
+            time_1 = now_dt + timedelta(minutes=30) - timedelta(days=1)
+            time_2 = now_dt + timedelta(minutes=60) - timedelta(days=1)
+            
+            with self.db.connection() as conn:
+                conn.execute("DELETE FROM reflections")
+                conn.execute("""
+                    INSERT INTO reflections (timestamp, energy_level, friction_level, summary, mood)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (time_0.isoformat(), 5, 1, "Current peak reflection", "Focused"))
+                conn.execute("""
+                    INSERT INTO reflections (timestamp, energy_level, friction_level, summary, mood)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (time_1.isoformat(), 5, 1, "Current peak reflection 2", "Focused"))
+                conn.execute("""
+                    INSERT INTO reflections (timestamp, energy_level, friction_level, summary, mood)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (time_2.isoformat(), 1, 5, "Imminent crash reflection", "Exhausted"))
             
             forecast = self.db.get_circadian_forecast()
             self.assertTrue(forecast["impending_drop"])
@@ -463,8 +485,6 @@ class TestMindFlowComponents(unittest.TestCase):
             
         finally:
             self.db.update_settings(original_settings)
-            self.db.data["reflections"] = original_reflections
-            self.db.save()
 
     def test_database_goal_handling(self):
         """Verify micro-goal set/get and clean serialization."""
@@ -479,40 +499,74 @@ class TestMindFlowComponents(unittest.TestCase):
 
     def test_database_hydration_handling(self):
         """Verify daily hydration resetting and increment safety."""
-        orig_hyd = self.db.data.get("hydration", {"date": "", "cups": 0}).copy()
-        try:
-            # Clean up initial state for a reliable test run
-            self.db.data["hydration"]["cups"] = 0
-            # 1. Fresh state today
-            hyd = self.db.get_hydration()
-            self.assertEqual(hyd["cups"], 0)
-            self.assertEqual(hyd["date"], datetime.today().date().isoformat())
-            
-            # 2. Increment
-            self.db.increment_hydration()
-            self.assertEqual(self.db.get_hydration()["cups"], 1)
-            
-            # 3. Reset on new day
-            self.db.data["hydration"]["date"] = "2020-01-01"
-            self.db.data["hydration"]["cups"] = 5
-            hyd_new = self.db.get_hydration()
-            self.assertEqual(hyd_new["cups"], 0)
-            self.assertEqual(hyd_new["date"], datetime.today().date().isoformat())
-        finally:
-            self.db.data["hydration"] = orig_hyd
-            self.db.save()
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM hydration")
+        
+        # 1. Fresh state today
+        hyd = self.db.get_hydration()
+        self.assertEqual(hyd["cups"], 0.0)
+        self.assertEqual(hyd["date"], datetime.today().date().isoformat())
+        
+        # 2. Increment
+        self.db.increment_hydration()
+        self.assertEqual(self.db.get_hydration()["cups"], 1.0)
+        
+        # 3. Reset on new day
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM hydration")
+            conn.execute("INSERT OR REPLACE INTO hydration (date, cups) VALUES (?, ?)", ("2020-01-01", 5.0))
+        hyd_new = self.db.get_hydration()
+        self.assertEqual(hyd_new["cups"], 0.0)
+        self.assertEqual(hyd_new["date"], datetime.today().date().isoformat())
+
 
 class TestMindFlowAPI(unittest.TestCase):
     def setUp(self):
-        self.client = flask_app.test_client()
+        from backend.server import SHARED_API_TOKEN
+        self.raw_client = flask_app.test_client()
+        
+        class TokenClient:
+            def __init__(self, client, token):
+                self.client = client
+                self.token = token
+            def get(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.get(*args, **kwargs)
+            def post(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.post(*args, **kwargs)
+            def put(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.put(*args, **kwargs)
+            def delete(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.delete(*args, **kwargs)
+        
+        self.client = TokenClient(self.raw_client, SHARED_API_TOKEN)
         self.db = server_db
         # Backup shared state
         self.original_state = shared_state.copy()
+        clear_db(self.db)
         
     def tearDown(self):
         # Restore shared state
         for k, v in self.original_state.items():
             shared_state[k] = v
+        clear_db(self.db)
+
+    def test_require_api_token(self):
+        # 1. Accessing without token should return 401
+        res = self.raw_client.get('/api/status')
+        self.assertEqual(res.status_code, 401)
+        self.assertIn("API token", res.get_json()["error"])
+        
+        # 2. Accessing with wrong token should return 401
+        res = self.raw_client.get('/api/status', headers={"X-MIND-FLOW-TOKEN": "wrong_token"})
+        self.assertEqual(res.status_code, 401)
 
     def test_get_status(self):
         response = self.client.get('/api/status')
@@ -536,10 +590,8 @@ class TestMindFlowAPI(unittest.TestCase):
         self.assertIn("companion_message", data)
 
     def test_get_status_rest_duration(self):
-        # 1. Back up database sessions
-        original_sessions = self.db.data["sessions"].copy()
-        self.db.data["sessions"] = []
-        self.db.save()
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM sessions")
 
         try:
             # 2. Configure state to represent an ongoing rest session
@@ -568,9 +620,7 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(sessions[0]["duration"], 45)
 
         finally:
-            # Restore original database sessions
-            self.db.data["sessions"] = original_sessions
-            self.db.save()
+            pass
 
     def test_require_local_origin(self):
         # 1. No Origin/Referer headers should be allowed
@@ -634,6 +684,9 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.update_settings(orig)
 
     def test_manage_reflections(self):
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM reflections")
+
         # Get reflections
         response = self.client.get('/api/reflections')
         self.assertEqual(response.status_code, 200)
@@ -641,69 +694,66 @@ class TestMindFlowAPI(unittest.TestCase):
         self.assertIsInstance(reflections, list)
 
         # Post reflection
-        original_reflections = self.db.data["reflections"].copy()
-        try:
-            response = self.client.post('/api/reflections', json={
-                "energy_level": 4,
-                "friction_level": 2,
-                "summary": "Testing API Reflection"
-            })
-            self.assertEqual(response.status_code, 200)
-            data = response.get_json()
-            self.assertEqual(data["status"], "success")
-            self.assertEqual(data["reflection"]["energy_level"], 4)
-            self.assertEqual(data["reflection"]["friction_level"], 2)
-            self.assertEqual(data["reflection"]["summary"], "Testing API Reflection")
-            self.assertIsNone(data["reflection"].get("mood"))
+        response = self.client.post('/api/reflections', json={
+            "energy_level": 4,
+            "friction_level": 2,
+            "summary": "Testing API Reflection"
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["reflection"]["energy_level"], 4)
+        self.assertEqual(data["reflection"]["friction_level"], 2)
+        self.assertEqual(data["reflection"]["summary"], "Testing API Reflection")
+        self.assertIsNone(data["reflection"].get("mood"))
 
-            # Post reflection with mood
-            response_mood = self.client.post('/api/reflections', json={
-                "energy_level": 3,
-                "friction_level": 4,
-                "summary": "Testing API Reflection with Mood",
-                "mood": "Anxious"
-            })
-            self.assertEqual(response_mood.status_code, 200)
-            data_mood = response_mood.get_json()
-            self.assertEqual(data_mood["reflection"]["mood"], "Anxious")
+        # Post reflection with mood
+        response_mood = self.client.post('/api/reflections', json={
+            "energy_level": 3,
+            "friction_level": 4,
+            "summary": "Testing API Reflection with Mood",
+            "mood": "Anxious"
+        })
+        self.assertEqual(response_mood.status_code, 200)
+        data_mood = response_mood.get_json()
+        self.assertEqual(data_mood["reflection"]["mood"], "Anxious")
 
-            # Post reflection with invalid mood
-            response_inv = self.client.post('/api/reflections', json={
-                "energy_level": 3,
-                "friction_level": 4,
-                "summary": "Testing API Reflection with Invalid Mood",
-                "mood": "InvalidMoodVal"
-            })
-            self.assertEqual(response_inv.status_code, 200)
-            data_inv = response_inv.get_json()
-            self.assertIsNone(data_inv["reflection"]["mood"])
-            
-            # Missing param
-            response2 = self.client.post('/api/reflections', json={
-                "energy_level": 4
-            })
-            self.assertEqual(response2.status_code, 400)
-        finally:
-            self.db.data["reflections"] = original_reflections
-            self.db.save()
+        # Post reflection with invalid mood
+        response_inv = self.client.post('/api/reflections', json={
+            "energy_level": 3,
+            "friction_level": 4,
+            "summary": "Testing API Reflection with Invalid Mood",
+            "mood": "InvalidMoodVal"
+        })
+        self.assertEqual(response_inv.status_code, 200)
+        data_inv = response_inv.get_json()
+        self.assertIsNone(data_inv["reflection"]["mood"])
+        
+        # Missing param
+        response2 = self.client.post('/api/reflections', json={
+            "energy_level": 4
+        })
+        self.assertEqual(response2.status_code, 400)
 
     def test_get_analytics(self):
         # Insert a mock app usage entry with mixed categories
-        original_app_usage = self.db.data.get("app_usage", []).copy()
-        self.db.data["app_usage"] = [
-            {
-                "date": datetime.today().date().isoformat(),
-                "process": "chrome.exe",
-                "title": "YouTube Video - YouTube - Google Chrome",
-                "titles": {
+        today_str = datetime.today().date().isoformat()
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM app_usage")
+            conn.execute("""
+                INSERT INTO app_usage (date, process, title, titles, duration)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                today_str,
+                "chrome.exe",
+                "YouTube Video - YouTube - Google Chrome",
+                json.dumps({
                     "GitHub - code repo": 300,        # work keyword -> 300s work
                     "YouTube Video - YouTube": 60,    # recharge keyword -> 60s recharge
                     "Random page": 10                 # neutral -> 10s neutral
-                },
-                "duration": 370
-            }
-        ]
-        self.db.save()
+                }),
+                370.0
+            ))
         
         try:
             response = self.client.get('/api/analytics')
@@ -744,8 +794,7 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(chrome["category"], "work")
             
         finally:
-            self.db.data["app_usage"] = original_app_usage
-            self.db.save()
+            pass
 
     def test_get_analytics_with_offset(self):
         # Insert reflections with specific dates (one in current week, one in previous week)
@@ -756,25 +805,21 @@ class TestMindFlowAPI(unittest.TestCase):
         current_monday = today - timedelta(days=today.weekday())
         
         # Current week reflection
-        ref_current = {
-            "timestamp": datetime.combine(current_monday, datetime.min.time()).isoformat(),
-            "energy_level": 4,
-            "friction_level": 2,
-            "summary": "Current week entry"
-        }
+        ts_current = datetime.combine(current_monday, datetime.min.time()).isoformat()
         
         # Previous week reflection
-        prev_monday = current_monday - timedelta(weeks=1)
-        ref_prev = {
-            "timestamp": datetime.combine(prev_monday, datetime.min.time()).isoformat(),
-            "energy_level": 3,
-            "friction_level": 4,
-            "summary": "[Autopilot] Previous week entry"
-        }
+        ts_prev = datetime.combine(current_monday - timedelta(weeks=1), datetime.min.time()).isoformat()
         
-        original_reflections = self.db.data.get("reflections", []).copy()
-        self.db.data["reflections"] = [ref_prev, ref_current]
-        self.db.save()
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM reflections")
+            conn.execute("""
+                INSERT INTO reflections (timestamp, energy_level, friction_level, summary)
+                VALUES (?, ?, ?, ?)
+            """, (ts_prev, 3, 4, "[Autopilot] Previous week entry"))
+            conn.execute("""
+                INSERT INTO reflections (timestamp, energy_level, friction_level, summary)
+                VALUES (?, ?, ?, ?)
+            """, (ts_current, 4, 2, "Current week entry"))
         
         try:
             # Query current week (week_offset=0)
@@ -798,13 +843,11 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(data_prev["reflections"][0]["summary"], "[Autopilot] Previous week entry")
             
         finally:
-            self.db.data["reflections"] = original_reflections
-            self.db.save()
+            pass
 
     def test_analytics_app_classification(self):
         """Verify that app classification in analytics handles work, recharge, and neutral correctly."""
         original_settings = self.db.get_settings().copy()
-        original_app_usage = self.db.data.get("app_usage", []).copy()
         
         self.db.update_settings({
             "work_keywords": ["code.exe", "github"],
@@ -813,30 +856,20 @@ class TestMindFlowAPI(unittest.TestCase):
         
         # Inject custom app usage logs
         today_str = datetime.today().date().isoformat()
-        self.db.data["app_usage"] = [
-            {
-                "date": today_str,
-                "process": "code.exe",
-                "title": "MIND-FLOW - index.html",
-                "titles": {"MIND-FLOW - index.html": 1000},
-                "duration": 1000
-            },
-            {
-                "date": today_str,
-                "process": "steam.exe",
-                "title": "Steam Store",
-                "titles": {"Steam Store": 500},
-                "duration": 500
-            },
-            {
-                "date": today_str,
-                "process": "explorer.exe",
-                "title": "File Explorer",
-                "titles": {"File Explorer": 200},
-                "duration": 200
-            }
-        ]
-        self.db.save()
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM app_usage")
+            conn.execute("""
+                INSERT INTO app_usage (date, process, title, titles, duration)
+                VALUES (?, ?, ?, ?, ?)
+            """, (today_str, "code.exe", "MIND-FLOW - index.html", json.dumps({"MIND-FLOW - index.html": 1000}), 1000.0))
+            conn.execute("""
+                INSERT INTO app_usage (date, process, title, titles, duration)
+                VALUES (?, ?, ?, ?, ?)
+            """, (today_str, "steam.exe", "Steam Store", json.dumps({"Steam Store": 500}), 500.0))
+            conn.execute("""
+                INSERT INTO app_usage (date, process, title, titles, duration)
+                VALUES (?, ?, ?, ?, ?)
+            """, (today_str, "explorer.exe", "File Explorer", json.dumps({"File Explorer": 200}), 200.0))
         
         try:
             response = self.client.get('/api/analytics')
@@ -864,15 +897,18 @@ class TestMindFlowAPI(unittest.TestCase):
             
         finally:
             self.db.update_settings(original_settings)
-            self.db.data["app_usage"] = original_app_usage
-            self.db.save()
 
-    def test_sleep_recovery_circadian_adaptation(self):
+    @patch('backend.database.datetime')
+    def test_sleep_recovery_circadian_adaptation(self, mock_datetime):
         """Verify that logging sleep hours and quality adapts the circadian forecast curve correctly."""
-        original_reflections = self.db.data.get("reflections", []).copy()
+        import datetime as dt
+        t_now = dt.datetime(2026, 6, 1, 9, 0, 0)
+        mock_datetime.now.return_value = t_now
+        mock_datetime.fromisoformat.side_effect = lambda x: dt.datetime.fromisoformat(x)
+        mock_datetime.today.return_value = t_now
         try:
-            self.db.data["reflections"] = []
-            self.db.save()
+            with self.db.connection() as conn:
+                conn.execute("DELETE FROM reflections")
             
             # 1. Test case: No sleep logged yet (should return None and 0.0 modifier)
             forecast = self.db.get_circadian_forecast()
@@ -906,8 +942,8 @@ class TestMindFlowAPI(unittest.TestCase):
                 "sleep_quality": 5
             }
             # Clean reflections list for clean test
-            self.db.data["reflections"] = []
-            self.db.save()
+            with self.db.connection() as conn:
+                conn.execute("DELETE FROM reflections")
             
             response = self.client.post('/api/reflections', json=payload)
             self.assertEqual(response.status_code, 200)
@@ -929,8 +965,7 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(cf["sleep_modifier"], 0.35)
             
         finally:
-            self.db.data["reflections"] = original_reflections
-            self.db.save()
+            pass
 
     @patch('backend.database.datetime')
     def test_hydration_energy_synergy_and_timer_adaptation(self, mock_datetime):
@@ -942,13 +977,13 @@ class TestMindFlowAPI(unittest.TestCase):
         mock_datetime.fromisoformat.side_effect = lambda x: datetime.fromisoformat(x)
         mock_datetime.today.return_value = t_now
         
-        original_hydration = self.db.data.get("hydration", {}).copy()
         original_settings = self.db.get_settings().copy()
         
         try:
             # 1. Reset hydration
-            self.db.data["hydration"] = {"date": "2026-06-01", "cups": 0}
-            self.db.save()
+            with self.db.connection() as conn:
+                conn.execute("DELETE FROM hydration")
+                conn.execute("INSERT OR REPLACE INTO hydration (date, cups) VALUES (?, ?)", ("2026-06-01", 0.0))
             
             # Target is 8 cups. Hour is 12. Active day: 8:00 AM to 10:00 PM (14 hours elapsed).
             # Expected fraction: (12 - 8) / 14 = 4 / 14 = 0.2857.
@@ -969,6 +1004,7 @@ class TestMindFlowAPI(unittest.TestCase):
                 "rest_duration_seconds": 20,
                 "circadian_forecast_enabled": False
             })
+            self.db._adaptive_cache["result"] = None
             times = self.db.get_adaptive_times()
             self.assertEqual(times["work_modifier"], -5)
             self.assertEqual(times["rest_modifier"], 15)
@@ -977,9 +1013,10 @@ class TestMindFlowAPI(unittest.TestCase):
             # 3. Log water to trigger optimal hydration bonus
             # If we log 3 cups, ratio = 3 / 2.29 = 1.31 >= 0.9.
             # Modifier should be +0.15.
-            self.db.data["hydration"] = {"date": "2026-06-01", "cups": 3}
-            self.db.save()
+            with self.db.connection() as conn:
+                conn.execute("INSERT OR REPLACE INTO hydration (date, cups) VALUES (?, ?)", ("2026-06-01", 3.0))
             
+            self.db._adaptive_cache["result"] = None
             forecast_hydrated = self.db.get_circadian_forecast()
             self.assertEqual(forecast_hydrated["hydration_cups"], 3.0)
             self.assertEqual(forecast_hydrated["hydration_modifier"], 0.15)
@@ -999,11 +1036,10 @@ class TestMindFlowAPI(unittest.TestCase):
             mock_datetime.now.return_value = t_morning
             mock_datetime.today.return_value = t_morning
             
-            self.db.data["hydration"] = {"date": "2026-06-01", "cups": 0}
-            self.db.save()
+            with self.db.connection() as conn:
+                conn.execute("INSERT OR REPLACE INTO hydration (date, cups) VALUES (?, ?)", ("2026-06-01", 0.0))
             
-            # Expected amount: 8 * (9 - 8)/14 = 0.57. Logged: 0. Ratio: 0.
-            # But since h = 9 (< 10), modifier should be 0.0.
+            self.db._adaptive_cache["result"] = None
             forecast_morning = self.db.get_circadian_forecast()
             self.assertEqual(forecast_morning["hydration_modifier"], 0.0)
             
@@ -1013,9 +1049,7 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(times_morning["rest_modifier"], 0)
             
         finally:
-            self.db.data["hydration"] = original_hydration
             self.db.update_settings(original_settings)
-            self.db.save()
 
     @patch('backend.server.os._exit')
     def test_shutdown_app(self, mock_exit):
@@ -1079,7 +1113,8 @@ class TestMindFlowAPI(unittest.TestCase):
             self.db.set_current_goal(orig_goal)
 
     def test_hydration_api(self):
-        orig_hyd = self.db.data.get("hydration", {"date": "", "cups": 0}).copy()
+        with self.db.connection() as conn:
+            conn.execute("DELETE FROM hydration")
         try:
             # 1. GET returns hydration JSON
             response = self.client.get('/api/hydration')
@@ -1091,18 +1126,18 @@ class TestMindFlowAPI(unittest.TestCase):
             response = self.client.post('/api/hydration')
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.get_json()["status"], "success")
-            self.assertEqual(response.get_json()["hydration"]["cups"], cups_before + 1)
+            self.assertEqual(response.get_json()["hydration"]["cups"], cups_before + 1.0)
             
             # 3. status contains hydration
             response = self.client.get('/api/status')
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.get_json()["hydration"]["cups"], cups_before + 1)
+            self.assertEqual(response.get_json()["hydration"]["cups"], cups_before + 1.0)
 
             # 4. POST with custom cups
             response = self.client.post('/api/hydration', json={"cups": 5})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.get_json()["status"], "success")
-            self.assertEqual(response.get_json()["hydration"]["cups"], 5)
+            self.assertEqual(response.get_json()["hydration"]["cups"], 5.0)
 
             # 5. POST with delta increment
             response = self.client.post('/api/hydration', json={"delta": 2.5})
@@ -1116,8 +1151,7 @@ class TestMindFlowAPI(unittest.TestCase):
             self.assertEqual(response.get_json()["status"], "success")
             self.assertEqual(response.get_json()["hydration"]["cups"], 4.5) # 7.5 - 3.0
         finally:
-            self.db.data["hydration"] = orig_hyd
-            self.db.save()
+            pass
 
 class TestAppWindowLaunch(unittest.TestCase):
     @patch('subprocess.Popen')
@@ -1131,8 +1165,8 @@ class TestAppWindowLaunch(unittest.TestCase):
             self.assertIsNotNone(result)
             mock_popen.assert_called_once()
             args = mock_popen.call_args[0][0]
-            self.assertEqual(args[-1], "--gui")
-            self.assertEqual(len(args), 2)
+            self.assertEqual(args[-2], "--gui")
+            self.assertEqual(len(args), 3)
             self.assertEqual(args[0], sys.executable)
         finally:
             if hasattr(sys, 'frozen'):
@@ -1149,114 +1183,9 @@ class TestAppWindowLaunch(unittest.TestCase):
         self.assertIsNotNone(result)
         mock_popen.assert_called_once()
         args = mock_popen.call_args[0][0]
-        self.assertEqual(args[-1], "--gui")
+        self.assertEqual(args[-2], "--gui")
         self.assertEqual(args[0], sys.executable)
         self.assertEqual(args[1], sys.argv[0])
-
-class TestLockoutOverlay(unittest.TestCase):
-    @patch('app.tk.Tk')
-    @patch('app.tk.Frame')
-    @patch('app.tk.Label')
-    @patch('app.tk.Text')
-    @patch('app.tk.Button')
-    @patch('app.tk.Canvas')
-    @patch('app.winsound.Beep')
-    def test_trigger_lockout_overlay_submit(self, mock_beep, mock_canvas, mock_button, mock_text, mock_label, mock_frame, mock_tk):
-        mock_root = MagicMock()
-        mock_root.winfo_screenwidth.return_value = 1920
-        mock_root.winfo_screenheight.return_value = 1080
-        mock_tk.return_value = mock_root
-
-        mock_text_inst = MagicMock()
-        mock_text_inst.get.return_value = "Test Brain Dump Content"
-        mock_text.return_value = mock_text_inst
-
-        bindings = {}
-        def mock_bind(event, callback):
-            bindings[event] = callback
-        mock_root.bind.side_effect = mock_bind
-
-        button_cmd = None
-        def mock_btn_init(*args, **kwargs):
-            nonlocal button_cmd
-            if "Save & Rest" in kwargs.get("text", ""):
-                button_cmd = kwargs.get("command")
-            return MagicMock()
-        mock_button.side_effect = mock_btn_init
-
-        after_callbacks = []
-        def mock_after(ms, func, *args):
-            after_callbacks.append(func)
-        mock_root.after.side_effect = mock_after
-
-        # Simulate normal mainloop that triggers the button command
-        def simulate_mainloop():
-            if button_cmd:
-                button_cmd()
-            # Run collected after callbacks
-            while after_callbacks:
-                cb = after_callbacks.pop(0)
-                cb()
-        mock_root.mainloop.side_effect = simulate_mainloop
-
-        dump, completed, snoozed = trigger_lockout_overlay(1)
-        self.assertEqual(dump, "Test Brain Dump Content")
-        self.assertTrue(completed)
-        self.assertFalse(snoozed)
-
-    @patch('app.tk.Tk')
-    @patch('app.tk.Frame')
-    @patch('app.tk.Label')
-    @patch('app.tk.Text')
-    @patch('app.tk.Button')
-    @patch('app.tk.Canvas')
-    @patch('app.winsound.Beep')
-    def test_trigger_lockout_overlay_escape(self, mock_beep, mock_canvas, mock_button, mock_text, mock_label, mock_frame, mock_tk):
-        mock_root = MagicMock()
-        mock_tk.return_value = mock_root
-
-        bindings = {}
-        def mock_bind(event, callback):
-            bindings[event] = callback
-        mock_root.bind.side_effect = mock_bind
-
-        def simulate_mainloop():
-            # Trigger Escape key press
-            if "<Escape>" in bindings:
-                bindings["<Escape>"](None)
-        mock_root.mainloop.side_effect = simulate_mainloop
-
-        dump, completed, snoozed = trigger_lockout_overlay(10)
-        self.assertEqual(dump, "")
-        self.assertFalse(completed)
-        self.assertFalse(snoozed)
-
-    @patch('app.tk.Tk')
-    @patch('app.tk.Frame')
-    @patch('app.tk.Label')
-    @patch('app.tk.Text')
-    @patch('app.tk.Button')
-    @patch('app.tk.Canvas')
-    @patch('app.winsound.Beep')
-    def test_trigger_lockout_overlay_snooze_hotkey(self, mock_beep, mock_canvas, mock_button, mock_text, mock_label, mock_frame, mock_tk):
-        mock_root = MagicMock()
-        mock_tk.return_value = mock_root
-
-        bindings = {}
-        def mock_bind(event, callback):
-            bindings[event] = callback
-        mock_root.bind.side_effect = mock_bind
-
-        def simulate_mainloop():
-            # Trigger Ctrl+S key press
-            if "<Control-s>" in bindings:
-                bindings["<Control-s>"](None)
-        mock_root.mainloop.side_effect = simulate_mainloop
-
-        dump, completed, snoozed = trigger_lockout_overlay(10)
-        self.assertEqual(dump, "")
-        self.assertFalse(completed)
-        self.assertTrue(snoozed)
 
 class TestMainStateMachine(unittest.TestCase):
     def setUp(self):
@@ -1437,30 +1366,474 @@ class TestConcurrencyAndPathPortability(unittest.TestCase):
     def test_database_list_accessors_thread_safety(self):
         """Verify that get_reflections(), get_sessions(), and get_app_usage() return copies to prevent thread race conditions."""
         db = MindFlowDB()
-        
-        # 1. Reflections copy test
-        refs = db.get_reflections()
-        self.assertIsInstance(refs, list)
-        refs.append({"test": "value"})
-        self.assertNotEqual(len(db.get_reflections()), len(refs))
-        
-        # 2. Sessions copy test
-        sess = db.get_sessions()
-        self.assertIsInstance(sess, list)
-        sess.append({"test": "value"})
-        self.assertNotEqual(len(db.get_sessions()), len(sess))
-        
-        # 3. App usage copy test
-        usage = db.get_app_usage()
-        self.assertIsInstance(usage, list)
-        usage.append({"test": "value"})
-        self.assertNotEqual(len(db.get_app_usage()), len(usage))
+        try:
+            # 1. Reflections copy test
+            refs = db.get_reflections()
+            self.assertIsInstance(refs, list)
+            refs.append({"test": "value"})
+            self.assertNotEqual(len(db.get_reflections()), len(refs))
+            
+            # 2. Sessions copy test
+            sess = db.get_sessions()
+            self.assertIsInstance(sess, list)
+            sess.append({"test": "value"})
+            self.assertNotEqual(len(db.get_sessions()), len(sess))
+            
+            # 3. App usage copy test
+            usage = db.get_app_usage()
+            self.assertIsInstance(usage, list)
+            usage.append({"test": "value"})
+            self.assertNotEqual(len(db.get_app_usage()), len(usage))
+        finally:
+            db.close()
 
     def test_default_data_dir_portability(self):
         """Verify get_default_data_dir resolves to legacy path or portable paths."""
         from backend.database import get_default_data_dir
         path = get_default_data_dir()
         self.assertTrue(os.path.exists(path) or os.path.basename(path) in ["MIND", ".mindflow"])
+
+    @patch('backend.database.datetime')
+    def test_chronological_deficit_bypass_logic(self, mock_datetime):
+        """Verify that bypassed breaks are evaluated as a chronological deficit walk."""
+        import datetime as dt
+        import sqlite3
+        t_now = dt.datetime(2026, 6, 1, 9, 0, 0)
+        mock_datetime.now.return_value = t_now
+        mock_datetime.fromisoformat.side_effect = lambda x: dt.datetime.fromisoformat(x)
+        mock_datetime.today.return_value = t_now
+        
+        master_conn = sqlite3.connect("file::memory:?cache=shared", uri=True)
+        db = MindFlowDB()
+        try:
+            today_date = t_now.date()
+            t0 = dt.datetime.combine(today_date, dt.time(9, 0, 0))
+            
+            # Scenario: completed rest, then bypassed rest. Net bypasses should be 1.
+            with db.connection() as conn:
+                conn.execute("DELETE FROM sessions")
+                conn.execute("""
+                    INSERT INTO sessions (mode, start, end, duration, bypassed)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("rest", t0.isoformat(), (t0 + dt.timedelta(seconds=20)).isoformat(), 20.0, 0))
+                conn.execute("""
+                    INSERT INTO sessions (mode, start, end, duration, bypassed)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("rest", (t0 + dt.timedelta(minutes=30)).isoformat(), (t0 + dt.timedelta(minutes=30, seconds=20)).isoformat(), 20.0, 1))
+            
+            db._adaptive_cache["result"] = None
+            res = db.get_adaptive_times()
+            # Default work: 45.
+            # Bypass penalty: -5 (1 bypass).
+            # Total work: 45 - 5 = 40.
+            self.assertEqual(res["work_minutes"], 40)
+            
+            # Scenario: bypassed rest, then completed rest. Net bypasses should be 0.
+            with db.connection() as conn:
+                conn.execute("DELETE FROM sessions")
+                conn.execute("""
+                    INSERT INTO sessions (mode, start, end, duration, bypassed)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("rest", t0.isoformat(), (t0 + dt.timedelta(seconds=20)).isoformat(), 20.0, 1))
+                conn.execute("""
+                    INSERT INTO sessions (mode, start, end, duration, bypassed)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("rest", (t0 + dt.timedelta(minutes=30)).isoformat(), (t0 + dt.timedelta(minutes=30, seconds=20)).isoformat(), 20.0, 0))
+            
+            # Reset cache because we edited db
+            db._adaptive_cache["result"] = None
+            res2 = db.get_adaptive_times()
+            self.assertEqual(res2["work_minutes"], 45)
+            
+        finally:
+            db.close()
+            master_conn.close()
+
+    def test_database_load_corruption_safety(self):
+        """Verify that load() creates a backup on JSON corruption instead of wiping database silently."""
+        import tempfile
+        # Create a temporary file with corrupted JSON content
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            f.write(b"{invalid_json:")
+            temp_path = f.name
+            
+        db = MindFlowDB()
+        db.filepath = temp_path
+        try:
+            with self.assertRaises(Exception):
+                db.load()
+            
+            # Verify that corrupt.bak file was created
+            backup_path = temp_path + ".corrupt.bak"
+            self.assertTrue(os.path.exists(backup_path))
+            
+            # Verify that original file was NOT overwritten with default JSON
+            with open(temp_path, "r", encoding="utf-8") as f_orig:
+                content = f_orig.read()
+                self.assertEqual(content, "{invalid_json:")
+                
+            # Clean up backup
+            if os.path.exists(backup_path):
+                os.unlink(backup_path)
+        finally:
+            db.close()
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+
+class TestZenithIntegration(unittest.TestCase):
+    def setUp(self):
+        from backend.server import app, db, SHARED_API_TOKEN
+        app.config['TESTING'] = True
+        raw_client = app.test_client()
+        
+        class TokenClient:
+            def __init__(self, client, token):
+                self.client = client
+                self.token = token
+            def get(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.get(*args, **kwargs)
+            def post(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.post(*args, **kwargs)
+            def put(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.put(*args, **kwargs)
+            def delete(self, *args, **kwargs):
+                headers = kwargs.setdefault("headers", {})
+                headers["X-MIND-FLOW-TOKEN"] = self.token
+                return self.client.delete(*args, **kwargs)
+                
+        self.client = TokenClient(raw_client, SHARED_API_TOKEN)
+        self.db = db
+        clear_db(self.db)
+
+    def tearDown(self):
+        clear_db(self.db)
+
+    def test_database_vitality_methods(self):
+        # Test steps logging
+        self.db.log_steps(5000, "2026-06-01")
+        self.assertEqual(self.db.get_steps("2026-06-01"), 5000)
+        
+        # Test sleep logging
+        self.db.log_sleep(7.5, 4, "2026-06-01")
+        sleep_info = self.db.get_sleep("2026-06-01")
+        self.assertEqual(sleep_info["hours"], 7.5)
+        self.assertEqual(sleep_info["quality"], 4)
+
+    def test_zen_level_adaptive_timers(self):
+        # 1. Test "tranquil" zen_level: work limit should be 35m, rest limit 30s
+        self.db.update_settings({
+            "zen_level": "tranquil",
+            "adaptive_timers_enabled": True
+        })
+        self.db._adaptive_cache["result"] = None
+        times = self.db.get_adaptive_times()
+        
+        # Disable autopilot to check static overrides
+        self.db.update_settings({
+            "adaptive_timers_enabled": False
+        })
+        self.db._adaptive_cache["result"] = None
+        times_static = self.db.get_adaptive_times()
+        self.assertEqual(times_static["work_minutes"], 35)
+        self.assertEqual(times_static["rest_seconds"], 30)
+
+        # 2. Test "sprint" zen_level
+        self.db.update_settings({
+            "zen_level": "sprint",
+            "adaptive_timers_enabled": False
+        })
+        self.db._adaptive_cache["result"] = None
+        times_sprint = self.db.get_adaptive_times()
+        self.assertEqual(times_sprint["work_minutes"], 55)
+        self.assertEqual(times_sprint["rest_seconds"], 15)
+
+    def test_vitality_endpoints(self):
+        # Test GET /api/vitality
+        res_get = self.client.get('/api/vitality')
+        self.assertEqual(res_get.status_code, 200)
+        
+        # Test POST /api/vitality
+        payload = {
+            "steps": 12000,
+            "sleep_hours": 8.5,
+            "sleep_quality": 5
+        }
+        res_post = self.client.post('/api/vitality', json=payload)
+        self.assertEqual(res_post.status_code, 200)
+        data = res_post.get_json()
+        self.assertEqual(data["steps"], 12000)
+        self.assertEqual(data["sleep_hours"], 8.5)
+        self.assertEqual(data["sleep_quality"], 5)
+
+        # Verify database is updated
+        from datetime import date
+        today_str = date.today().isoformat()
+        self.assertEqual(self.db.get_steps(today_str), 12000)
+        sleep_info = self.db.get_sleep(today_str)
+        self.assertEqual(sleep_info["hours"], 8.5)
+        self.assertEqual(sleep_info["quality"], 5)
+
+
+class TestWorkspaceManager(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.test_dir = tempfile.mkdtemp()
+        self.profiles_dir = os.path.join(self.test_dir, "Workspace_Profiles")
+        
+        # Create profile dirs
+        os.makedirs(os.path.join(self.profiles_dir, "Work"))
+        os.makedirs(os.path.join(self.profiles_dir, "Recharge"))
+        
+        # Create some mock profile files
+        with open(os.path.join(self.profiles_dir, "Work", "Work_Readme.txt"), "w") as f:
+            f.write("readme")
+        with open(os.path.join(self.profiles_dir, "Work", "project.lnk"), "w") as f:
+            f.write("shortcut")
+        with open(os.path.join(self.profiles_dir, "Recharge", "Recharge_Readme.txt"), "w") as f:
+            f.write("readme")
+        with open(os.path.join(self.profiles_dir, "Recharge", "game.lnk"), "w") as f:
+            f.write("shortcut")
+
+        from backend.workspace_manager import WorkspaceManager
+        self.mgr = WorkspaceManager(self.test_dir)
+        # Mock desktop path to our temp directory to avoid touching the actual desktop
+        self.mgr.desktop_dir = os.path.join(self.test_dir, "MockDesktop")
+        os.makedirs(self.mgr.desktop_dir, exist_ok=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    def test_workspace_swapping_and_sweeping(self):
+        # 1. Transition neutral -> work
+        self.mgr.transition_workspace("neutral", "work")
+        
+        # Verify project.lnk is moved to Desktop
+        self.assertTrue(os.path.exists(os.path.join(self.mgr.desktop_dir, "project.lnk")))
+        # Verify Work_Readme.txt is NOT moved to Desktop
+        self.assertFalse(os.path.exists(os.path.join(self.mgr.desktop_dir, "Work_Readme.txt")))
+        # Verify project.lnk is no longer in Work profile folder
+        self.assertFalse(os.path.exists(os.path.join(self.profiles_dir, "Work", "project.lnk")))
+        
+        # Verify registry entry
+        reg = self.mgr._load_registry()
+        self.assertEqual(reg["work"], ["project.lnk"])
+
+        # 2. Transition work -> recharge
+        self.mgr.transition_workspace("work", "recharge")
+        
+        # Verify project.lnk is swept back to Work profile folder
+        self.assertTrue(os.path.exists(os.path.join(self.profiles_dir, "Work", "project.lnk")))
+        self.assertFalse(os.path.exists(os.path.join(self.mgr.desktop_dir, "project.lnk")))
+        
+        # Verify game.lnk is moved to Desktop
+        self.assertTrue(os.path.exists(os.path.join(self.mgr.desktop_dir, "game.lnk")))
+        self.assertFalse(os.path.exists(os.path.join(self.mgr.desktop_dir, "Recharge_Readme.txt")))
+        
+        # Verify registry entries
+        reg = self.mgr._load_registry()
+        self.assertEqual(reg["work"], [])
+        self.assertEqual(reg["recharge"], ["game.lnk"])
+
+        # 3. Transition recharge -> neutral
+        self.mgr.transition_workspace("recharge", "neutral")
+        
+        # Verify game.lnk is swept back to Recharge profile folder
+        self.assertTrue(os.path.exists(os.path.join(self.profiles_dir, "Recharge", "game.lnk")))
+        self.assertFalse(os.path.exists(os.path.join(self.mgr.desktop_dir, "game.lnk")))
+        
+        # Verify registry is empty
+        reg = self.mgr._load_registry()
+        self.assertEqual(reg["work"], [])
+        self.assertEqual(reg["recharge"], [])
+
+    def test_workspace_startup_cleanup(self):
+        # Manually simulate a crash: register game.lnk as swapped and place it on desktop
+        reg = self.mgr._load_registry()
+        reg["recharge"] = ["game.lnk"]
+        self.mgr._save_registry(reg)
+        
+        # Move game.lnk to Desktop manually
+        import shutil
+        shutil.move(os.path.join(self.profiles_dir, "Recharge", "game.lnk"), os.path.join(self.mgr.desktop_dir, "game.lnk"))
+        
+        self.assertTrue(os.path.exists(os.path.join(self.mgr.desktop_dir, "game.lnk")))
+        self.assertFalse(os.path.exists(os.path.join(self.profiles_dir, "Recharge", "game.lnk")))
+        
+        # Run startup sweep
+        self.mgr.sweep_back_all()
+        
+        # Verify file is back in Recharge folder and registry is cleared
+        self.assertTrue(os.path.exists(os.path.join(self.profiles_dir, "Recharge", "game.lnk")))
+        self.assertFalse(os.path.exists(os.path.join(self.mgr.desktop_dir, "game.lnk")))
+        reg_cleared = self.mgr._load_registry()
+        self.assertEqual(reg_cleared["recharge"], [])
+class TestCognitiveBattery(unittest.TestCase):
+    def test_battery_math_work(self):
+        from app import CognitiveBattery
+        battery = CognitiveBattery(capacity=100.0, consecutive_work=0.0)
+        cap, streak = battery.process_tick(is_working=True, elapsed_minutes=10.0)
+        self.assertEqual(streak, 10.0)
+        self.assertEqual(cap, 93.25)
+
+    def test_battery_math_rest(self):
+        from app import CognitiveBattery
+        battery = CognitiveBattery(capacity=90.0, consecutive_work=10.0)
+        cap, streak = battery.process_tick(is_working=False, elapsed_minutes=2.0)
+        self.assertEqual(streak, 0.0)
+        self.assertEqual(cap, 95.0)
+
+    def test_db_battery_state(self):
+        from backend.database import MindFlowDB
+        db = MindFlowDB()
+        # Clear/initialize battery state database row for this test
+        with db.connection() as conn:
+            conn.execute("UPDATE battery_state SET current_capacity = 100.0, consecutive_work_minutes = 0.0 WHERE id = 1")
+        
+        state = db.get_battery_state()
+        self.assertEqual(state["capacity"], 100.0)
+        self.assertEqual(state["consecutive_work"], 0.0)
+        
+        db.flush_battery_state(85.5, 12.3)
+        state = db.get_battery_state()
+        self.assertEqual(state["capacity"], 85.5)
+        self.assertEqual(state["consecutive_work"], 12.3)
+
+    def test_api_battery_status(self):
+        from backend.server import app, shared_state, SHARED_API_TOKEN
+        shared_state["battery_capacity"] = 75.0
+        shared_state["battery_consecutive_work"] = 15.0
+        with app.test_client() as client:
+            resp = client.get("/api/status", headers={"X-MIND-FLOW-TOKEN": SHARED_API_TOKEN})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertEqual(data["battery_capacity"], 75.0)
+            self.assertEqual(data["consecutive_work_minutes"], 15.0)
+            self.assertEqual(data["current_energy"], 3.75)
+
+    def test_context_aware_activity_classification(self):
+        from backend.database import MindFlowDB
+        db = MindFlowDB()
+        from app import classify_activity_mode
+        work_keywords = ["vs code", "pycharm", "github", "stack overflow"]
+        recharge_keywords = ["youtube", "netflix", "steam"]
+        
+        # Youtube but contains godot tutorial -> Work
+        mode = classify_activity_mode("chrome.exe", "Godot Game Engine Tutorial - YouTube", work_keywords, recharge_keywords)
+        self.assertEqual(mode, "work")
+        
+        # Non-browser dev process (vscode) -> Work
+        mode = classify_activity_mode("code.exe", "index.js - Project", work_keywords, recharge_keywords)
+        self.assertEqual(mode, "work")
+        
+        # Youtube without work context -> Recharge
+        mode = classify_activity_mode("chrome.exe", "Funny Cat Videos - YouTube", work_keywords, recharge_keywords)
+        self.assertEqual(mode, "recharge")
+        
+        # Stackoverflow page -> Work (falls out of Neutral Blackhole)
+        mode = classify_activity_mode("firefox", "How to sort dict in Python - Stack Overflow", work_keywords, recharge_keywords)
+        self.assertEqual(mode, "work")
+        
+        # Custom user regex rule
+        original_settings = db.get_settings().copy()
+        try:
+            db.update_settings({
+                "custom_rules": [{"pattern": "reddit\\.com/r/programming", "category": "work"}]
+            })
+            mode = classify_activity_mode("chrome.exe", "programming news on reddit.com/r/programming", work_keywords, recharge_keywords)
+            self.assertEqual(mode, "work")
+        finally:
+            db.update_settings(original_settings)
+
+    def test_workspace_cloud_sync_and_manifest_recovery(self):
+        import tempfile
+        import json
+        from backend.workspace_manager import WorkspaceManager
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 1. Test cloud sync path detection
+            wm = WorkspaceManager(tmpdir)
+            wm.desktop_dir = os.path.join(tmpdir, "OneDrive", "Desktop")
+            self.assertTrue(wm.detect_cloud_sync())
+            
+            # Non cloud sync
+            wm.desktop_dir = os.path.join(tmpdir, "Desktop")
+            self.assertFalse(wm.detect_cloud_sync())
+            
+            # 2. Test manifest recovery
+            wm.desktop_dir = os.path.join(tmpdir, "Desktop")
+            os.makedirs(wm.desktop_dir, exist_ok=True)
+            
+            # Create a file in profile
+            profile_work = os.path.join(wm.profiles_dir, "Work")
+            os.makedirs(profile_work, exist_ok=True)
+            test_file = os.path.join(profile_work, "stranded.txt")
+            with open(test_file, "w") as f:
+                f.write("stranded content")
+                
+            # Create a fake manifest representing a crash during transition to Desktop
+            target_dest = os.path.join(wm.desktop_dir, "stranded.txt")
+            manifest = [{"src": test_file, "dst": target_dest}]
+            with open(wm.manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f)
+                
+            # Trigger recovery
+            wm.recover_stranded_files()
+            
+            # Verify file was moved to destination and manifest cleared
+            self.assertTrue(os.path.exists(target_dest))
+            self.assertFalse(os.path.exists(test_file))
+            self.assertFalse(os.path.exists(wm.manifest_path))
+
+    def test_hydration_sleep_averages_fallbacks(self):
+        from backend.database import MindFlowDB
+        db = MindFlowDB()
+        import datetime
+        from datetime import date
+        
+        # Clear database records
+        with db.connection() as conn:
+            conn.execute("DELETE FROM hydration")
+            conn.execute("DELETE FROM reflections")
+            
+        today_str = date.today().isoformat()
+        
+        # 1. Test hydration fallback: no record today, but has historical logs
+        # Log 8 cups yesterday
+        yesterday_str = (date.today() - datetime.timedelta(days=1)).isoformat()
+        with db.connection() as conn:
+            conn.execute("INSERT INTO hydration (date, cups) VALUES (?, ?)", (yesterday_str, 8.0))
+            
+        # Context ratio uses 8.0 cups average, meaning no penalty (ratio >= 0.9)
+        hyd_ctx = db._get_hydration_context(datetime.datetime.now())
+        self.assertEqual(hyd_ctx["modifier"], 0.15)
+        
+        # 2. Test hydration fallback: no logs at all -> modifier is 0.0 (no penalty)
+        with db.connection() as conn:
+            conn.execute("DELETE FROM hydration")
+        hyd_ctx = db._get_hydration_context(datetime.datetime.now())
+        self.assertEqual(hyd_ctx["modifier"], 0.0)
+        
+        # 3. Test sleep fallback: no logs today, but has historical sleep log
+        # Log 8 hours sleep yesterday
+        yesterday_dt = datetime.datetime.now() - datetime.timedelta(days=1)
+        db.add_reflection(5, 1, "test sleep history", sleep_hours=8.0, sleep_quality=4)
+        # Force timestamp to yesterday
+        with db.connection() as conn:
+            conn.execute("UPDATE reflections SET timestamp = ? WHERE id = (SELECT max(id) FROM reflections)", (yesterday_dt.isoformat(),))
+            
+        forecast = db.get_circadian_forecast()
+        # Fallback should read yesterday's sleep
+        self.assertEqual(forecast["sleep_hours"], 8.0)
+        self.assertEqual(forecast["sleep_quality"], 4)
+        self.assertGreater(forecast["sleep_modifier"], 0.0)
 
 
 if __name__ == "__main__":

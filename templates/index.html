@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,453 +7,572 @@
     <meta name="description" content="A self-hosted, silent cognitive assistant protecting your focus and mental energy battery.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=20">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Manrope:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=21">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        background: 'var(--bg-color)',
+                        surface: 'var(--bg-surface)',
+                        'card-bg': 'var(--card-bg)',
+                        border: 'var(--border-color)',
+                        'border-hover': 'var(--border-hover)',
+                        'text-primary': 'var(--text-primary)',
+                        'text-secondary': 'var(--text-secondary)',
+                        'text-muted': 'var(--text-muted)',
+                        work: 'var(--work-color)',
+                        'work-glow': 'var(--work-glow-color)',
+                        recharge: 'var(--recharge-color)',
+                        'recharge-glow': 'var(--recharge-glow-color)',
+                        rest: 'var(--rest-color)',
+                        neutral: 'var(--neutral-color)',
+                        'input-bg': 'var(--input-bg)',
+                    },
+                    borderRadius: {
+                        sm: 'var(--radius-sm)',
+                        md: 'var(--radius-md)',
+                        lg: 'var(--radius-lg)',
+                        xl: 'var(--radius-xl)',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body class="theme-cosmic">
+<body class="theme-zenith bg-background text-text-primary min-h-screen relative overflow-hidden font-sans text-sm antialiased transition-colors duration-300">
     <script>
         try {
-            const savedTheme = localStorage.getItem('mindflow-theme') || 'cosmic';
+            const savedTheme = localStorage.getItem('mindflow-theme') || 'zenith';
             document.body.className = 'theme-' + savedTheme;
+            if (savedTheme === 'light' || savedTheme === 'zenith') {
+                document.documentElement.classList.remove('dark');
+            } else {
+                document.documentElement.classList.add('dark');
+            }
         } catch (e) {
             console.error('Error applying theme early:', e);
         }
     </script>
 
+    <!-- Global SVG gradients definitions for themes -->
+    <svg style="position: absolute; width: 0; height: 0;" width="0" height="0" version="1.1" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="zenith-primary-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#55624d" />
+                <stop offset="100%" stop-color="#98a68e" />
+            </linearGradient>
+        </defs>
+    </svg>
+
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
-            <div class="brand">
-                <div class="brand-icon">🧠</div>
+        <aside class="sidebar bg-surface/80 border border-border rounded-xl p-6 flex flex-col justify-between backdrop-blur-3xl shadow-2xl transition-all duration-300 relative">
+            <div class="brand flex items-center gap-3 mb-10">
+                <div class="brand-icon text-3xl filter drop-shadow-[0_0_10px_rgba(139,92,246,0.4)]">🧠</div>
                 <div class="brand-text">
-                    <h1>MIND-FLOW</h1>
-                    <span>COGNITIVE SHIELD</span>
+                    <h1 class="font-display font-semibold text-lg tracking-wide">MIND-FLOW</h1>
+                    <span class="text-[10px] font-bold text-text-muted tracking-widest block uppercase">COGNITIVE SHIELD</span>
                 </div>
             </div>
-            <nav class="nav-menu" role="navigation" aria-label="Main navigation">
-                <div class="nav-indicator" id="nav-indicator"></div>
-                <button class="nav-btn active" id="nav-btn-dashboard" onclick="switchTab('dashboard')">
+            
+            <nav class="nav-menu flex flex-col gap-2 flex-grow relative" role="navigation" aria-label="Main navigation">
+                <div class="nav-indicator absolute left-0 rounded-md pointer-events-none transition-all duration-300 ease-out opacity-0 z-0" id="nav-indicator"></div>
+                <button class="nav-btn active flex items-center gap-3 px-4 py-3 rounded-lg text-text-secondary hover:text-text-primary text-sm font-semibold transition-all duration-300 z-10" id="nav-btn-dashboard" onclick="switchTab('dashboard')">
                     <span class="btn-icon">⚡</span> Dashboard
                 </button>
-                <button class="nav-btn" id="nav-btn-analytics" onclick="switchTab('analytics')">
+                <button class="nav-btn flex items-center gap-3 px-4 py-3 rounded-lg text-text-secondary hover:text-text-primary text-sm font-semibold transition-all duration-300 z-10" id="nav-btn-analytics" onclick="switchTab('analytics')">
                     <span class="btn-icon">📊</span> Energy Map
                 </button>
-                <button class="nav-btn" id="nav-btn-zen" onclick="switchTab('zen')">
+                <button class="nav-btn flex items-center gap-3 px-4 py-3 rounded-lg text-text-secondary hover:text-text-primary text-sm font-semibold transition-all duration-300 z-10" id="nav-btn-zen" onclick="switchTab('zen')">
                     <span class="btn-icon">🧘</span> Zen Space
                 </button>
-                <button class="nav-btn" id="nav-btn-settings" onclick="switchTab('settings')">
+                <button class="nav-btn flex items-center gap-3 px-4 py-3 rounded-lg text-text-secondary hover:text-text-primary text-sm font-semibold transition-all duration-300 z-10" id="nav-btn-settings" onclick="switchTab('settings')">
                     <span class="btn-icon">⚙️</span> Preferences
                 </button>
             </nav>
             
             <!-- Theme Selector -->
-            <div class="sidebar-theme-panel">
-                <span class="theme-panel-label">🎨 App Theme</span>
-                <div class="theme-buttons">
-                    <button class="theme-select-btn" id="theme-btn-cosmic" onclick="setAppTheme('cosmic')" title="Cosmic Flow (Violet)">
-                        <span class="theme-color-preview cosmic"></span>
+            <div class="sidebar-theme-panel border-t border-border/40 pt-4 mt-4">
+                <span class="theme-panel-label text-[11px] font-bold text-text-muted tracking-wide block mb-3 uppercase">🎨 App Theme</span>
+                <div class="theme-buttons flex gap-2 flex-wrap">
+                    <button class="theme-select-btn w-6 h-6 rounded-full border border-border/80 flex items-center justify-center transition-transform duration-200 hover:scale-110" id="theme-btn-cosmic" onclick="setAppTheme('cosmic')" title="Cosmic Flow (Violet)">
+                        <span class="theme-color-preview cosmic w-4 h-4 rounded-full bg-violet-500"></span>
                     </button>
-                    <button class="theme-select-btn" id="theme-btn-ocean" onclick="setAppTheme('ocean')" title="Ocean Waves (Teal)">
-                        <span class="theme-color-preview ocean"></span>
+                    <button class="theme-select-btn w-6 h-6 rounded-full border border-border/80 flex items-center justify-center transition-transform duration-200 hover:scale-110" id="theme-btn-ocean" onclick="setAppTheme('ocean')" title="Ocean Waves (Teal)">
+                        <span class="theme-color-preview ocean w-4 h-4 rounded-full bg-teal-500"></span>
                     </button>
-                    <button class="theme-select-btn" id="theme-btn-forest" onclick="setAppTheme('forest')" title="Forest Light (Green)">
-                        <span class="theme-color-preview forest"></span>
+                    <button class="theme-select-btn w-6 h-6 rounded-full border border-border/80 flex items-center justify-center transition-transform duration-200 hover:scale-110" id="theme-btn-forest" onclick="setAppTheme('forest')" title="Forest Light (Green)">
+                        <span class="theme-color-preview forest w-4 h-4 rounded-full bg-emerald-500"></span>
                     </button>
-                    <button class="theme-select-btn" id="theme-btn-light" onclick="setAppTheme('light')" title="Solar Breeze (Light)">
-                        <span class="theme-color-preview light"></span>
+                    <button class="theme-select-btn w-6 h-6 rounded-full border border-border/80 flex items-center justify-center transition-transform duration-200 hover:scale-110" id="theme-btn-light" onclick="setAppTheme('light')" title="Solar Breeze (Light)">
+                        <span class="theme-color-preview light w-4 h-4 rounded-full bg-orange-100"></span>
+                    </button>
+                    <button class="theme-select-btn w-6 h-6 rounded-full border border-border/80 flex items-center justify-center transition-transform duration-200 hover:scale-110" id="theme-btn-zenith" onclick="setAppTheme('zenith')" title="Zenith Ethereal (Sage/Blush)">
+                        <span class="theme-color-preview zenith w-4 h-4 rounded-full bg-neutral-300"></span>
                     </button>
                 </div>
             </div>
             
-            <div class="system-status">
-                <div class="status-indicator-container">
-                    <span class="status-pulse" id="tracking-pulse"></span>
+            <div class="system-status border-t border-border/40 pt-4 mt-4">
+                <div class="status-indicator-container flex items-center gap-2 mb-3 text-xs text-text-secondary">
+                    <span class="status-pulse w-2.5 h-2.5 rounded-full bg-recharge relative inline-block" id="tracking-pulse"></span>
                     <span id="tracking-status-text">Shield Active</span>
                 </div>
-                <button class="toggle-btn" id="toggle-shield-btn">Pause Companion</button>
-                <button class="toggle-btn quit-btn" id="quit-app-btn" onclick="quitApplication()">Close App</button>
+                <button class="toggle-btn w-full bg-input-bg hover:bg-card-bg/60 border border-border text-text-primary px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200" id="toggle-shield-btn">Pause Companion</button>
+                <button class="toggle-btn quit-btn w-full mt-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 text-red-400 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200" id="quit-app-btn" onclick="quitApplication()">Close App</button>
             </div>
-            <div class="sidebar-resizer" id="sidebar-resizer"></div>
+            <div class="sidebar-resizer absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-50 bg-transparent hover:bg-white/10" id="sidebar-resizer"></div>
         </aside>
 
         <!-- Main Content Area -->
-        <main class="main-content" role="main" aria-label="Dashboard content">
+        <main class="main-content flex-grow overflow-y-auto px-8 py-6 h-full min-h-0 w-full max-w-7xl mx-auto" role="main" aria-label="Dashboard content">
+            
             <!-- TAB 1: DASHBOARD -->
             <section class="tab-content active" id="tab-dashboard">
-                <header class="section-header">
+                <header class="section-header flex justify-between items-start mb-6">
                     <div>
-                        <h2>Your Focus Dashboard</h2>
-                        <p class="subtitle">Real-time energy tracking and mindful focus insights.</p>
+                        <h2 class="font-display font-semibold text-2xl tracking-tight bg-gradient-to-r from-text-primary to-work bg-clip-text text-transparent">Your Focus Dashboard</h2>
+                        <p class="subtitle text-text-secondary text-sm mt-1" id="dashboard-subtitle">Real-time energy tracking and mindful focus insights.</p>
                     </div>
-                    <div class="live-clock" id="live-time">10:15 AM</div>
+                    <div class="live-clock font-display font-medium text-sm bg-input-bg border border-border px-4 py-2 rounded-full text-text-secondary tracking-widest" id="live-time">10:15 AM</div>
                 </header>
 
-                <!-- Energy Battery Widget (Top Full-Width Hero Position) -->
-                <div class="card glass-card battery-card">
-                    <div class="battery-card-header">
-                        <h3>Daily Mental Battery</h3>
-                        <span class="battery-charging-indicator" id="battery-charge-status">⚡ discharging</span>
-                    </div>
-                    <div class="battery-grid-content">
-                        <div class="battery-wrapper">
-                            <div class="battery-outer">
-                                <div class="battery-segments">
-                                    <div class="battery-segment" data-index="1"></div>
-                                    <div class="battery-segment" data-index="2"></div>
-                                    <div class="battery-segment" data-index="3"></div>
-                                    <div class="battery-segment" data-index="4"></div>
-                                    <div class="battery-segment" data-index="5"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    
+                    <!-- Left Column: Session & Intention -->
+                    <div class="lg:col-span-3 flex flex-col gap-6">
+                        <!-- Shield Status Card -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300" id="state-card">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-3">Shield Status</h3>
+                            <div class="state-indicator flex items-center gap-4 mb-4">
+                                <div class="status-ring-outer relative w-16 h-16 flex items-center justify-center flex-shrink-0">
+                                    <svg class="status-ring-svg absolute inset-0 w-full h-full -rotate-90" width="64" height="64" viewBox="0 0 64 64">
+                                        <circle class="status-ring-bg" cx="32" cy="32" r="28" stroke="rgba(255, 255, 255, 0.05)" stroke-width="4" fill="none" />
+                                        <circle class="status-ring-progress transition-all duration-500 ease-out" id="status-ring-circle" cx="32" cy="32" r="28" stroke="var(--neutral-color)" stroke-width="4" fill="none" stroke-linecap="round" stroke-dasharray="175.9" stroke-dashoffset="175.9" />
+                                    </svg>
+                                    <div class="status-icon text-2xl z-10" id="status-icon">💤</div>
                                 </div>
-                                <div id="battery-fill" style="display: none; width: 0%;"></div>
-                                <div id="battery-bubbles" style="display: none;"></div>
-                                <div class="battery-cap"></div>
-                            </div>
-                            <div class="battery-stats">
-                                <span class="battery-pct" id="battery-pct">0%</span>
-                                <span class="battery-status-msg" id="battery-status-msg">Fully Charged. Safe to perform deep work.</span>
-                                <div class="battery-forecast-msg" id="battery-forecast-msg" style="margin-top: 0.45rem; font-size: 0.72rem; color: var(--text-muted); font-style: italic; border-top: 1px dashed rgba(255, 255, 255, 0.08); padding-top: 0.45rem; display: none; line-height: 1.4;"></div>
-                            </div>
-                        </div>
-                        <div class="quick-stats-divider"></div>
-                        <div class="quick-stats-container">
-                            <div class="quick-stat-item">
-                                <span class="stat-icon">💻</span>
-                                <div class="stat-info">
-                                    <span class="stat-label">Work Time</span>
-                                    <strong id="stat-work-time">0h 0m</strong>
+                                <div class="status-details flex flex-col min-w-0">
+                                    <h4 class="font-display font-semibold text-lg text-text-primary truncate" id="current-mode-title">Rest Mode</h4>
+                                    <span class="text-[10px] text-text-muted font-bold tracking-wider uppercase" id="time-left-title">Block Timer</span>
+                                    <div class="timer font-display font-bold text-xl text-text-primary mt-0.5" id="block-timer">00:00</div>
+                                    <div class="adaptive-status-badge text-[10px] font-bold px-2 py-0.5 rounded border bg-input-bg border-border text-text-muted mt-1 self-start" id="adaptive-badge">Default</div>
                                 </div>
                             </div>
-                            <div class="quick-stat-item">
-                                <span class="stat-icon">🎮</span>
-                                <div class="stat-info">
-                                    <span class="stat-label">Recharge Time</span>
-                                    <strong id="stat-recharge-time">0h 0m</strong>
-                                </div>
-                            </div>
-                            <div class="quick-stat-item">
-                                <span class="stat-icon">💤</span>
-                                <div class="stat-info">
-                                    <span class="stat-label">Rest Time</span>
-                                    <strong id="stat-rest-time">0h 0m</strong>
+                            
+                            <div class="active-app-display border-t border-border/40 pt-3 text-xs text-text-secondary min-w-0">
+                                <span class="text-text-muted">Foreground Application:</span>
+                                <strong class="font-display font-medium text-text-primary block truncate mt-1" id="active-app-name">None Detected</strong>
+                                <span class="text-[10px] text-text-muted block mt-1 truncate" id="active-process-display">Process: None</span>
+                                <div class="active-app-actions flex gap-2 mt-3" id="active-app-actions-container">
+                                    <button type="button" class="app-action-btn flex-1 bg-input-bg hover:bg-card-bg border border-border hover:border-work/30 text-text-primary py-1.5 rounded text-[11px] font-bold transition-all duration-200" onclick="addCurrentAppToKeywords('work')">+ Work</button>
+                                    <button type="button" class="app-action-btn flex-1 bg-input-bg hover:bg-card-bg border border-border hover:border-recharge/30 text-text-primary py-1.5 rounded text-[11px] font-bold transition-all duration-200" onclick="addCurrentAppToKeywords('recharge')">+ Recharge</button>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="companion-advice-card" id="companion-message-banner">
-                    <span class="advice-icon">🛡️</span>
-                    <p id="companion-advice-text">Your companion is watching over you. Looking good!</p>
-                </div>
-
-                <!-- Focus Wisdom Banner -->
-                <div class="wisdom-card" id="wisdom-banner">
-                    <div class="wisdom-content">
-                        <span class="wisdom-emoji">✨</span>
-                        <div>
-                            <span class="wisdom-label">Focus Wisdom</span>
-                            <p id="wisdom-quote-text">"Breathe in energy, breathe out friction. Focus on one micro-step at a time."</p>
+                        
+                        <!-- Wisdom quote banner -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300" id="wisdom-banner">
+                            <span class="text-2xl block mb-2">✨</span>
+                            <span class="text-[10px] font-bold text-text-muted tracking-wider uppercase">Focus Wisdom</span>
+                            <p class="text-text-primary text-xs leading-relaxed italic mt-2" id="wisdom-quote-text">"Breathe in energy, breathe out friction. Focus on one micro-step at a time."</p>
+                            <button type="button" class="w-full mt-4 bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary py-1.5 rounded text-xs font-semibold transition-all duration-200" onclick="cycleWisdom()">New Quote</button>
                         </div>
                     </div>
-                    <button type="button" class="goal-clear-btn" onclick="cycleWisdom()">New Quote</button>
-                </div>
 
-                <div class="grid-layout">
-                    <!-- Current State Shield Widget -->
-                    <div class="card glass-card state-card" id="state-card">
-                        <h3>Shield Status</h3>
-                        <div class="state-indicator">
-                            <div class="status-ring-outer">
-                                <svg class="status-ring-svg" width="75" height="75" viewBox="0 0 75 75">
-                                    <circle class="status-ring-bg" cx="37.5" cy="37.5" r="33.5" stroke="rgba(255, 255, 255, 0.05)" stroke-width="4.5" fill="none" />
-                                    <circle class="status-ring-progress" id="status-ring-circle" cx="37.5" cy="37.5" r="33.5" stroke="var(--neutral-color)" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-dasharray="210.5" stroke-dashoffset="210.5" />
+                    <!-- Center Column: Core Battery, Circadian, Vitality -->
+                    <div class="lg:col-span-6 flex flex-col gap-6">
+                        <!-- Mental Battery Widget -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 battery-card">
+                            <div class="battery-card-header flex justify-between items-center mb-4">
+                                <h3 class="font-display font-medium text-base text-text-primary">Daily Mental Battery</h3>
+                                <span class="battery-charging-indicator text-xs text-recharge font-semibold" id="battery-charge-status">⚡ discharging</span>
+                            </div>
+                            <div class="battery-grid-content flex flex-col md:flex-row gap-6 items-stretch">
+                                <div class="battery-wrapper flex items-center gap-5 flex-1 min-w-0">
+                                    <div class="battery-outer w-48 h-16 border border-border rounded-xl p-1.5 relative flex items-center bg-black/20 shadow-inner flex-shrink-0">
+                                        <div class="battery-segments flex gap-1 w-full h-full">
+                                            <div class="battery-segment flex-1 h-full rounded bg-white/5 border border-white/5 transition-all duration-500" data-index="1"></div>
+                                            <div class="battery-segment flex-1 h-full rounded bg-white/5 border border-white/5 transition-all duration-500" data-index="2"></div>
+                                            <div class="battery-segment flex-1 h-full rounded bg-white/5 border border-white/5 transition-all duration-500" data-index="3"></div>
+                                            <div class="battery-segment flex-1 h-full rounded bg-white/5 border border-white/5 transition-all duration-500" data-index="4"></div>
+                                            <div class="battery-segment flex-1 h-full rounded bg-white/5 border border-white/5 transition-all duration-500" data-index="5"></div>
+                                        </div>
+                                        <div id="battery-fill" style="display: none; width: 0%;"></div>
+                                        <div id="battery-bubbles" style="display: none;"></div>
+                                        <div class="battery-cap w-1.5 h-6 bg-border/40 border border-border border-l-0 rounded-r absolute -right-2 top-[calc(50%-12px)]"></div>
+                                    </div>
+                                    <div class="battery-stats flex flex-col min-w-0">
+                                        <span class="battery-pct font-display font-extrabold text-3xl text-text-primary leading-none" id="battery-pct">0%</span>
+                                        <span class="battery-status-msg text-text-secondary text-xs mt-1" id="battery-status-msg">Fully Charged. Safe to perform deep work.</span>
+                                    </div>
+                                </div>
+                                <div class="quick-stats-divider w-px bg-border/30 hidden md:block"></div>
+                                <div class="quick-stats-container flex flex-row md:flex-col justify-around gap-2 min-w-[120px]">
+                                    <div class="quick-stat-item flex items-center gap-2">
+                                        <span class="text-lg">💻</span>
+                                        <div class="stat-info text-xs">
+                                            <span class="text-text-muted block text-[10px] uppercase font-bold">Work</span>
+                                            <strong class="font-display text-text-primary text-sm font-bold" id="stat-work-time">0h 0m</strong>
+                                        </div>
+                                    </div>
+                                    <div class="quick-stat-item flex items-center gap-2">
+                                        <span class="text-lg">🎮</span>
+                                        <div class="stat-info text-xs">
+                                            <span class="text-text-muted block text-[10px] uppercase font-bold">Recharge</span>
+                                            <strong class="font-display text-text-primary text-sm font-bold" id="stat-recharge-time">0h 0m</strong>
+                                        </div>
+                                    </div>
+                                    <div class="quick-stat-item flex items-center gap-2">
+                                        <span class="text-lg">💤</span>
+                                        <div class="stat-info text-xs">
+                                            <span class="text-text-muted block text-[10px] uppercase font-bold">Rest</span>
+                                            <strong class="font-display text-text-primary text-sm font-bold" id="stat-rest-time">0h 0m</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="battery-forecast-msg text-text-muted text-xs leading-relaxed italic border-t border-dashed border-border/40 mt-4 pt-3" id="battery-forecast-msg" style="display: none;"></div>
+                        </div>
+
+                        <!-- Circadian Forecast Card -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 forecast-card" id="forecast-card">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-1">Circadian Energy Forecast</h3>
+                            <p class="card-desc text-text-muted text-xs mb-4">Impending slumps and peak windows based on your daily rhythms.</p>
+                            
+                            <div class="forecast-visual bg-black/20 border border-border/40 rounded-lg p-4 mb-4 shadow-inner relative">
+                                <svg class="forecast-chart-svg w-full overflow-visible" id="forecast-chart-svg" viewBox="0 0 260 90" width="100%" height="90">
+                                    <defs>
+                                        <linearGradient id="forecast-line-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                            <stop offset="0%" stop-color="var(--work-color)" stop-opacity="0.85" />
+                                            <stop offset="50%" stop-color="var(--recharge-color)" stop-opacity="0.85" />
+                                            <stop offset="100%" stop-color="var(--rest-color)" stop-opacity="0.85" />
+                                        </linearGradient>
+                                        <linearGradient id="forecast-area-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                            <stop offset="0%" stop-color="var(--active-mode-color, var(--work-color))" stop-opacity="0.12" />
+                                            <stop offset="100%" stop-color="var(--active-mode-color, var(--work-color))" stop-opacity="0.00" />
+                                        </linearGradient>
+                                    </defs>
+                                    <line x1="0" y1="45" x2="260" y2="45" stroke="rgba(255,255,255,0.03)" stroke-dasharray="2,3" />
+                                    <path id="forecast-area-path" d="" fill="url(#forecast-area-grad)" />
+                                    <path id="forecast-line-path" d="" fill="none" stroke="url(#forecast-line-grad)" stroke-width="2.5" stroke-linecap="round" />
+                                    <line id="forecast-current-line" x1="0" y1="0" x2="0" y2="90" stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-dasharray="2,2" />
+                                    <circle id="forecast-current-dot" cx="0" cy="0" r="4.5" fill="var(--active-mode-color, var(--recharge-color))" stroke="#ffffff" stroke-width="1.5" />
                                 </svg>
-                                <div class="status-icon" id="status-icon">💤</div>
-                            </div>
-                            <div class="status-details">
-                                <h4 id="current-mode-title">Rest Mode</h4>
-                                <span id="time-left-title">Block Timer</span>
-                                <div class="timer" id="block-timer">00:00</div>
-                                <div class="adaptive-status-badge" id="adaptive-badge">Default</div>
-                            </div>
-                        </div>
-                        <div class="active-app-display">
-                            <span>Foreground Application:</span>
-                            <strong id="active-app-name">None Detected</strong>
-                            <span style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-top: 0.15rem;" id="active-process-display">Process: None</span>
-                            <div class="active-app-actions" id="active-app-actions-container">
-                                <button type="button" class="app-action-btn work-add-btn" onclick="addCurrentAppToKeywords('work')">+ Work</button>
-                                <button type="button" class="app-action-btn recharge-add-btn" onclick="addCurrentAppToKeywords('recharge')">+ Recharge</button>
-                            </div>
-                        </div>
-                    </div>
-
-
-                    <!-- Focus Intention Card -->
-                    <div class="card glass-card goal-card" id="goal-card">
-                        <h3>Current Micro-Goal</h3>
-                        <p class="card-desc">Set a single intentional micro-goal for your current focus session.</p>
-                        
-                        <div class="goal-input-area" id="goal-input-area">
-                            <input type="text" id="goal-input" placeholder="e.g., Fix the DB connection pool memory leak" maxlength="100">
-                            <button type="button" class="goal-set-btn" id="goal-set-btn" onclick="saveGoal()">Set Focus</button>
-                        </div>
-                        
-                        <div class="goal-display-area" id="goal-display-area" style="display: none;">
-                            <div class="goal-display-text" id="goal-display-text"></div>
-                            <div class="goal-actions">
-                                <button type="button" class="goal-complete-btn" onclick="completeGoal()">✓ Complete Win!</button>
-                                <button type="button" class="goal-clear-btn" onclick="clearGoal()">Edit</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Circadian Forecast Card -->
-                    <div class="card glass-card forecast-card" id="forecast-card">
-                        <h3>Circadian Energy Forecast</h3>
-                        <p class="card-desc">Impending slumps and peak windows based on your daily rhythms.</p>
-                        
-                        <div class="forecast-visual">
-                            <svg class="forecast-chart-svg" id="forecast-chart-svg" viewBox="0 0 260 90" width="100%" height="90">
-                                <defs>
-                                    <linearGradient id="forecast-line-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                        <stop offset="0%" stop-color="var(--work-color)" stop-opacity="0.85" />
-                                        <stop offset="50%" stop-color="var(--recharge-color)" stop-opacity="0.85" />
-                                        <stop offset="100%" stop-color="var(--rest-color)" stop-opacity="0.85" />
-                                    </linearGradient>
-                                    <linearGradient id="forecast-area-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                        <stop offset="0%" stop-color="var(--active-mode-color, var(--work-color))" stop-opacity="0.12" />
-                                        <stop offset="100%" stop-color="var(--active-mode-color, var(--work-color))" stop-opacity="0.00" />
-                                    </linearGradient>
-                                </defs>
-                                <!-- Chart background grid lines -->
-                                <line x1="0" y1="45" x2="260" y2="45" stroke="rgba(255,255,255,0.03)" stroke-dasharray="2,3" />
-                                <!-- Chart paths will be injected dynamically -->
-                                <path id="forecast-area-path" d="" fill="url(#forecast-area-grad)" />
-                                <path id="forecast-line-path" d="" fill="none" stroke="url(#forecast-line-grad)" stroke-width="2.5" stroke-linecap="round" />
-                                <!-- Current time indicator line & circle -->
-                                <line id="forecast-current-line" x1="0" y1="0" x2="0" y2="90" stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-dasharray="2,2" />
-                                <circle id="forecast-current-dot" cx="0" cy="0" r="4.5" fill="var(--active-mode-color, var(--recharge-color))" stroke="#ffffff" stroke-width="1.5" />
-                            </svg>
-                            <div class="forecast-timeline-labels" id="forecast-timeline-labels">
-                                <span>Now</span>
-                                <span>+1h</span>
-                                <span>+2h</span>
-                                <span>+3h</span>
-                            </div>
-                        </div>
-                        
-                        <div class="forecast-status-info">
-                            <div class="forecast-status-alert" id="forecast-status-alert">
-                                <span class="alert-icon">🌿</span>
-                                <span id="forecast-alert-text">Stamina optimal. Pacing window active.</span>
-                            </div>
-                            <div class="forecast-status-alert sleep-status" id="forecast-sleep-alert" style="display: none; margin-top: 0.5rem; transition: all 0.3s ease;">
-                                <span class="alert-icon">😴</span>
-                                <span id="forecast-sleep-text">No sleep logged yet today.</span>
-                            </div>
-                            <div class="forecast-status-alert hydration-status" id="forecast-hydration-alert" style="display: none; margin-top: 0.5rem; transition: all 0.3s ease;">
-                                <span class="alert-icon">💧</span>
-                                <span id="forecast-hydration-text">No hydration logged yet today.</span>
-                            </div>
-                        </div>
-                    </div>
-
-
-
-                    <!-- Quick Check-in / Reflection Widget -->
-                    <div class="card glass-card span-2 reflection-quick-card">
-                        <h3>Quick Check-in</h3>
-                        <p class="card-desc">How are you feeling? A quick 5-second reflection helps build your personal energy map.</p>
-                        
-                        <form id="quick-reflection-form" class="reflection-form">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Mental Energy right now?</label>
-                                    <div class="rating-group" id="energy-rating">
-                                        <button type="button" class="rate-btn" data-val="1"><span class="rate-emoji">😰</span><span class="rate-label">Drained (1)</span></button>
-                                        <button type="button" class="rate-btn" data-val="2"><span class="rate-emoji">😮‍💨</span><span class="rate-label">Low (2)</span></button>
-                                        <button type="button" class="rate-btn" data-val="3"><span class="rate-emoji">😐</span><span class="rate-label">Neutral (3)</span></button>
-                                        <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">😊</span><span class="rate-label">Good (4)</span></button>
-                                        <button type="button" class="rate-btn active" data-val="5"><span class="rate-emoji">🔥</span><span class="rate-label">Peak (5)</span></button>
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Friction/Difficulty today?</label>
-                                    <div class="rating-group" id="friction-rating">
-                                        <button type="button" class="rate-btn" data-val="1"><span class="rate-emoji">🌊</span><span class="rate-label">Smooth (1)</span></button>
-                                        <button type="button" class="rate-btn active" data-val="2"><span class="rate-emoji">🌤️</span><span class="rate-label">Easy (2)</span></button>
-                                        <button type="button" class="rate-btn" data-val="3"><span class="rate-emoji">⛅</span><span class="rate-label">Mixed (3)</span></button>
-                                        <button type="button" class="rate-btn" data-val="4"><span class="rate-emoji">🌩️</span><span class="rate-label">Tough (4)</span></button>
-                                        <button type="button" class="rate-btn" data-val="5"><span class="rate-emoji">🧱</span><span class="rate-label">Blocked (5)</span></button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="form-group" style="margin-top: 1rem; margin-bottom: 1rem;">
-                                <label>Current Mood / Emotion?</label>
-                                <div class="rating-group" id="mood-rating" style="flex-wrap: wrap; gap: 0.5rem; justify-content: flex-start;">
-                                    <button type="button" class="rate-btn" data-val="Calm" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😌</span><span class="rate-label">Calm</span></button>
-                                    <button type="button" class="rate-btn" data-val="Focused" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">🎯</span><span class="rate-label">Focused</span></button>
-                                    <button type="button" class="rate-btn active" data-val="Neutral" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😐</span><span class="rate-label">Neutral</span></button>
-                                    <button type="button" class="rate-btn" data-val="Anxious" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😟</span><span class="rate-label">Anxious</span></button>
-                                    <button type="button" class="rate-btn" data-val="Overwhelmed" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">🤯</span><span class="rate-label">Overwhelmed</span></button>
-                                    <button type="button" class="rate-btn" data-val="Frustrated" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😤</span><span class="rate-label">Frustrated</span></button>
-                                    <button type="button" class="rate-btn" data-val="Exhausted" style="padding: 0.4rem 0.65rem; font-size: 0.75rem;"><span class="rate-emoji">😴</span><span class="rate-label">Exhausted</span></button>
+                                <div class="forecast-timeline-labels flex justify-between text-[10px] text-text-muted font-semibold tracking-wider uppercase mt-2">
+                                    <span>Now</span>
+                                    <span>+1h</span>
+                                    <span>+2h</span>
+                                    <span>+3h</span>
                                 </div>
                             </div>
                             
-                            <div class="form-row sleep-row" style="margin-top: 1rem; margin-bottom: 1rem; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 1rem;">
-                                <div class="form-group" style="flex: 1;">
-                                    <label>Sleep Hours (Last Night)</label>
-                                    <input type="number" id="sleep-hours" min="0" max="24" step="0.1" placeholder="e.g. 7.5" style="width: 100%; box-sizing: border-box; height: 38px;">
+                            <div class="forecast-status-info flex flex-col gap-2 mt-auto">
+                                <div class="forecast-status-alert flex items-center gap-2 bg-input-bg border border-border/40 rounded p-2.5 text-xs text-text-secondary" id="forecast-status-alert">
+                                    <span class="alert-icon">🌿</span>
+                                    <span id="forecast-alert-text">Stamina optimal. Pacing window active.</span>
                                 </div>
-                                <div class="form-group" style="flex: 2;">
-                                    <label>Sleep Quality?</label>
-                                    <div class="rating-group" id="sleep-quality-rating">
-                                        <button type="button" class="rate-btn" data-val="1" style="padding: 0.4rem 0.25rem;"><span class="rate-emoji" style="font-size:1.1rem; line-height:1;">🥱</span><span class="rate-label" style="font-size:0.55rem;">Poor</span></button>
-                                        <button type="button" class="rate-btn" data-val="2" style="padding: 0.4rem 0.25rem;"><span class="rate-emoji" style="font-size:1.1rem; line-height:1;">😴</span><span class="rate-label" style="font-size:0.55rem;">Fair</span></button>
-                                        <button type="button" class="rate-btn active" data-val="3" style="padding: 0.4rem 0.25rem;"><span class="rate-emoji" style="font-size:1.1rem; line-height:1;">😐</span><span class="rate-label" style="font-size:0.55rem;">Okay</span></button>
-                                        <button type="button" class="rate-btn" data-val="4" style="padding: 0.4rem 0.25rem;"><span class="rate-emoji" style="font-size:1.1rem; line-height:1;">😌</span><span class="rate-label" style="font-size:0.55rem;">Good</span></button>
-                                        <button type="button" class="rate-btn" data-val="5" style="padding: 0.4rem 0.25rem;"><span class="rate-emoji" style="font-size:1.1rem; line-height:1;">🔋</span><span class="rate-label" style="font-size:0.55rem;">Restored</span></button>
-                                    </div>
+                                <div class="forecast-status-alert slump flex items-center gap-2 bg-red-500/10 border border-red-500/25 rounded p-2.5 text-xs text-red-400" id="forecast-sleep-alert" style="display: none;">
+                                    <span class="alert-icon">😴</span>
+                                    <span id="forecast-sleep-text">No sleep logged yet today.</span>
+                                </div>
+                                <div class="forecast-status-alert slump flex items-center gap-2 bg-blue-500/10 border border-blue-500/25 rounded p-2.5 text-xs text-blue-400" id="forecast-hydration-alert" style="display: none;">
+                                    <span class="alert-icon">💧</span>
+                                    <span id="forecast-hydration-text">No hydration logged yet today.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Vitality Rings Card -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-1">Daily Vitality</h3>
+                            <p class="card-desc text-text-muted text-xs mb-4">Your baseline health targets for sleep, steps, and hydration.</p>
+                            
+                            <div class="zenith-vitality-container flex justify-around items-center gap-4 py-2">
+                                <!-- Steps Ring -->
+                                <div class="zenith-vitality-ring-wrapper flex flex-col items-center relative">
+                                    <svg class="zenith-vitality-ring-svg w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+                                        <circle class="zenith-vitality-ring-bg fill-none stroke-black/10 dark:stroke-white/5" cx="50" cy="50" r="40" stroke-width="8" />
+                                        <circle class="zenith-vitality-ring-active fill-none stroke-linecap-round transition-all duration-500" id="ring-steps" cx="50" cy="50" r="40" stroke-width="8" stroke="var(--work-color)" stroke-dasharray="251.2" stroke-dashoffset="251.2" />
+                                    </svg>
+                                    <div class="zenith-vitality-ring-text absolute top-[34px] font-display font-bold text-xs text-text-primary" id="ring-steps-text">0%</div>
+                                    <div class="zenith-vitality-label text-[10px] font-bold text-text-muted tracking-wider uppercase mt-2">Steps</div>
+                                </div>
+                                <!-- Sleep Ring -->
+                                <div class="zenith-vitality-ring-wrapper flex flex-col items-center relative">
+                                    <svg class="zenith-vitality-ring-svg w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+                                        <circle class="zenith-vitality-ring-bg fill-none stroke-black/10 dark:stroke-white/5" cx="50" cy="50" r="40" stroke-width="8" />
+                                        <circle class="zenith-vitality-ring-active fill-none stroke-linecap-round transition-all duration-500" id="ring-sleep" cx="50" cy="50" r="40" stroke-width="8" stroke="var(--recharge-color)" stroke-dasharray="251.2" stroke-dashoffset="251.2" />
+                                    </svg>
+                                    <div class="zenith-vitality-ring-text absolute top-[34px] font-display font-bold text-xs text-text-primary" id="ring-sleep-text">0%</div>
+                                    <div class="zenith-vitality-label text-[10px] font-bold text-text-muted tracking-wider uppercase mt-2">Sleep</div>
+                                </div>
+                                <!-- Hydration Ring -->
+                                <div class="zenith-vitality-ring-wrapper flex flex-col items-center relative">
+                                    <svg class="zenith-vitality-ring-svg w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+                                        <circle class="zenith-vitality-ring-bg fill-none stroke-black/10 dark:stroke-white/5" cx="50" cy="50" r="40" stroke-width="8" />
+                                        <circle class="zenith-vitality-ring-active fill-none stroke-linecap-round transition-all duration-500" id="ring-hydration" cx="50" cy="50" r="40" stroke-width="8" stroke="var(--rest-color)" stroke-dasharray="251.2" stroke-dashoffset="251.2" />
+                                    </svg>
+                                    <div class="zenith-vitality-ring-text absolute top-[34px] font-display font-bold text-xs text-text-primary" id="ring-hydration-text">0%</div>
+                                    <div class="zenith-vitality-label text-[10px] font-bold text-text-muted tracking-wider uppercase mt-2">Hydration</div>
                                 </div>
                             </div>
                             
-                            <div class="form-group">
-                                <label for="reflection-summary">roadblock / win summary</label>
-                                <div class="summary-input-wrapper">
-                                    <input type="text" id="reflection-summary" placeholder="e.g. Cleared the Docker database connection bug! (Win)" required>
+                            <div class="border-t border-dashed border-border/40 mt-4 pt-4 flex gap-4">
+                                <div class="flex-1">
+                                    <label class="text-[11px] font-bold block mb-1 text-text-secondary">Log Steps</label>
+                                    <div class="flex gap-2">
+                                        <input type="number" id="vitality-steps-input" placeholder="e.g. 8000" class="flex-grow bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-work/50 min-w-0 h-9">
+                                        <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-work/30 text-text-primary px-3 rounded-lg text-xs font-semibold h-9" onclick="submitVitalitySteps()">Save</button>
+                                    </div>
                                 </div>
-                                <div class="reflection-tags">
-                                    <button type="button" class="ref-tag" onclick="addTag('Coding Win')">+ Coding Win</button>
-                                    <button type="button" class="ref-tag" onclick="addTag('Bug Roadblock')">+ Bug Roadblock</button>
-                                    <button type="button" class="ref-tag" onclick="addTag('Stuck in Loop')">+ Stuck in Loop</button>
-                                    <button type="button" class="ref-tag" onclick="addTag('Deep Flow')">+ Deep Flow</button>
-                                    <button type="button" class="ref-tag" onclick="addTag('Rest Break')">+ Rest Break</button>
-                                    <button type="button" class="ref-tag" onclick="addTag('Fatigue Alert')">+ Fatigue Alert</button>
-                                    <button type="button" class="ref-tag ref-tag-gratitude" onclick="prefillGratitude()" style="background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.4); color: #fbbf24; font-weight: 500;">✨ Gratitude Win</button>
+                                <div class="flex-1">
+                                    <label class="text-[11px] font-bold block mb-1 text-text-secondary">Log Sleep</label>
+                                    <div class="flex gap-2">
+                                        <input type="number" id="vitality-sleep-input" placeholder="e.g. 7.5" step="0.1" class="flex-grow bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 min-w-0 h-9">
+                                        <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-recharge/30 text-text-primary px-3 rounded-lg text-xs font-semibold h-9" onclick="submitVitalitySleep()">Save</button>
+                                    </div>
                                 </div>
-                            </div>
-                            <button type="submit" class="submit-btn">Save Reflection</button>
-                        </form>
-                    </div>
-
-                    <!-- Daily Hydration Tracker Card -->
-                    <div class="card glass-card span-2 hydration-card" id="hydration-card">
-                        <div class="hydration-header">
-                            <div>
-                                <h3>Daily Hydration Tracker</h3>
-                                <p class="card-desc">Proper hydration helps shield your brain from fatigue and visual headaches.</p>
-                            </div>
-                            <div class="hydration-progress">
-                                <span id="hydration-pct-text">0%</span>
-                                <span class="hydration-status-msg" id="hydration-msg">Not hydrated yet</span>
                             </div>
                         </div>
-                        <div class="hydration-layout">
-                            <!-- Left: Glassmorphic Beaker Visual -->
-                            <div class="hydration-visual-wrapper">
-                                <div class="hydration-beaker">
-                                    <div class="beaker-markings">
-                                        <span class="marking-line" style="bottom: 25%;"></span>
-                                        <span class="marking-line" style="bottom: 50%;"></span>
-                                        <span class="marking-line" style="bottom: 75%;"></span>
+                    </div>
+
+                    <!-- Right Column: Check-ins, Hydration, Advice -->
+                    <div class="lg:col-span-3 flex flex-col gap-6">
+                        <!-- Companion advice banner -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-4 flex gap-3 items-center hover:border-work/20 shadow-lg transition-all duration-300" id="companion-message-banner">
+                            <span class="advice-icon text-2xl">🛡️</span>
+                            <p class="text-text-primary text-xs leading-normal" id="companion-advice-text">Your companion is watching over you. Looking good!</p>
+                        </div>
+                        
+                        <!-- Quick Check-in reflection -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 reflection-quick-card">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-1">Quick Check-in</h3>
+                            <p class="card-desc text-text-muted text-xs mb-4">How are you feeling? A quick reflection builds your energy map.</p>
+                            
+                            <form id="quick-reflection-form" class="reflection-form flex flex-col gap-4">
+                                <div class="flex flex-col gap-3">
+                                    <div class="form-group flex flex-col gap-1">
+                                        <label class="text-xs font-semibold text-text-secondary">Mental Energy right now?</label>
+                                        <div class="rating-group flex gap-1 justify-between" id="energy-rating">
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="1"><span class="block text-sm">😰</span><span class="text-[9px] text-text-muted hidden md:inline">Drained (1)</span></button>
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="2"><span class="block text-sm">😮‍💨</span><span class="text-[9px] text-text-muted hidden md:inline">Low (2)</span></button>
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="3"><span class="block text-sm">😐</span><span class="text-[9px] text-text-muted hidden md:inline">Neut (3)</span></button>
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="4"><span class="block text-sm">😊</span><span class="text-[9px] text-text-muted hidden md:inline">Good (4)</span></button>
+                                            <button type="button" class="rate-btn active flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="5"><span class="block text-sm">🔥</span><span class="text-[9px] text-text-muted hidden md:inline">Peak (5)</span></button>
+                                        </div>
                                     </div>
-                                    <div class="water-stream" id="water-stream"></div>
-                                    <div class="beaker-effects-container" id="beaker-effects-container"></div>
-                                    <div class="hydration-liquid" id="hydration-liquid-fill">
-                                        <svg class="water-wave wave-1" viewBox="0 0 200 20" preserveAspectRatio="none">
-                                            <path d="M 0 10 Q 25 6, 50 10 T 100 10 Q 125 6, 150 10 T 200 10 L 200 20 L 0 20 Z" />
-                                        </svg>
-                                        <svg class="water-wave wave-2" viewBox="0 0 200 20" preserveAspectRatio="none">
-                                            <path d="M 0 10 Q 25 14, 50 10 T 100 10 Q 125 14, 150 10 T 200 10 L 200 20 L 0 20 Z" />
-                                        </svg>
-                                        <svg class="water-wave wave-3" viewBox="0 0 200 20" preserveAspectRatio="none">
-                                            <path d="M 0 10 Q 25 8, 50 10 T 100 10 Q 125 8, 150 10 T 200 10 L 200 20 L 0 20 Z" />
-                                        </svg>
-                                        <div class="hydration-bubbles-container" id="hydration-bubbles"></div>
+                                    <div class="form-group flex flex-col gap-1">
+                                        <label class="text-xs font-semibold text-text-secondary">Friction/Difficulty today?</label>
+                                        <div class="rating-group flex gap-1 justify-between" id="friction-rating">
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="1"><span class="block text-sm">🌊</span><span class="text-[9px] text-text-muted hidden md:inline">Smooth (1)</span></button>
+                                            <button type="button" class="rate-btn active flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="2"><span class="block text-sm">🌤️</span><span class="text-[9px] text-text-muted hidden md:inline">Easy (2)</span></button>
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="3"><span class="block text-sm">⛅</span><span class="text-[9px] text-text-muted hidden md:inline">Mixed (3)</span></button>
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="4"><span class="block text-sm">🌩️</span><span class="text-[9px] text-text-muted hidden md:inline">Tough (4)</span></button>
+                                            <button type="button" class="rate-btn flex-1 bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-xs transition-all duration-200" data-val="5"><span class="block text-sm">🧱</span><span class="text-[9px] text-text-muted hidden md:inline">Block (5)</span></button>
+                                        </div>
                                     </div>
-                                    <div class="beaker-gloss"></div>
+                                </div>
+                                <div class="form-group flex flex-col gap-1">
+                                    <label class="text-xs font-semibold text-text-secondary">Current Mood / Emotion?</label>
+                                    <div class="rating-group flex flex-wrap gap-1.5 justify-start" id="mood-rating">
+                                        <button type="button" class="rate-btn bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Calm"><span class="mr-1">😌</span>Calm</button>
+                                        <button type="button" class="rate-btn bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Focused"><span class="mr-1">🎯</span>Focused</button>
+                                        <button type="button" class="rate-btn active bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Neutral"><span class="mr-1">😐</span>Neutral</button>
+                                        <button type="button" class="rate-btn bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Anxious"><span class="mr-1">😟</span>Anxious</button>
+                                        <button type="button" class="rate-btn bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Overwhelmed"><span class="mr-1">🤯</span>Overwhelmed</button>
+                                        <button type="button" class="rate-btn bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Frustrated"><span class="mr-1">😤</span>Frustrated</button>
+                                        <button type="button" class="rate-btn bg-input-bg hover:bg-card-bg border border-border px-2.5 py-1 rounded text-xs transition-all duration-200" data-val="Exhausted"><span class="mr-1">😴</span>Exh</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row sleep-row border-t border-dashed border-border/40 pt-3 flex gap-3">
+                                    <div class="form-group flex-1 flex flex-col gap-1">
+                                        <label class="text-xs font-semibold text-text-secondary">Sleep Hours</label>
+                                        <input type="number" id="sleep-hours" min="0" max="24" step="0.1" placeholder="e.g. 7.5" class="bg-input-bg border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8">
+                                    </div>
+                                    <div class="form-group flex-[2] flex flex-col gap-1">
+                                        <label class="text-xs font-semibold text-text-secondary">Sleep Quality?</label>
+                                        <div class="rating-group flex gap-0.5 justify-between" id="sleep-quality-rating">
+                                            <button type="button" class="rate-btn flex-grow bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-[10px] transition-all duration-200" data-val="1" title="Poor">🥱</button>
+                                            <button type="button" class="rate-btn flex-grow bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-[10px] transition-all duration-200" data-val="2" title="Fair">😴</button>
+                                            <button type="button" class="rate-btn active flex-grow bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-[10px] transition-all duration-200" data-val="3" title="Okay">😐</button>
+                                            <button type="button" class="rate-btn flex-grow bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-[10px] transition-all duration-200" data-val="4" title="Good">😌</button>
+                                            <button type="button" class="rate-btn flex-grow bg-input-bg hover:bg-card-bg border border-border p-1 rounded text-center text-[10px] transition-all duration-200" data-val="5" title="Restored">🔋</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group flex flex-col gap-1 border-t border-dashed border-border/40 pt-3">
+                                    <label for="reflection-summary" class="text-xs font-semibold text-text-secondary">Roadblock / Win Summary</label>
+                                    <input type="text" id="reflection-summary" placeholder="e.g. Cleared connection bug! (Win)" class="bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-work/50 w-full h-8" required>
+                                    <div class="reflection-tags flex flex-wrap gap-1 mt-2">
+                                        <button type="button" class="ref-tag text-[9px] font-bold bg-input-bg hover:bg-card-bg border border-border/60 px-2 py-0.5 rounded transition-all duration-200" onclick="addTag('Coding Win')">+ Coding Win</button>
+                                        <button type="button" class="ref-tag text-[9px] font-bold bg-input-bg hover:bg-card-bg border border-border/60 px-2 py-0.5 rounded transition-all duration-200" onclick="addTag('Bug Roadblock')">+ Bug Roadblock</button>
+                                        <button type="button" class="ref-tag text-[9px] font-bold bg-input-bg hover:bg-card-bg border border-border/60 px-2 py-0.5 rounded transition-all duration-200" onclick="addTag('Stuck in Loop')">+ Stuck in Loop</button>
+                                        <button type="button" class="ref-tag text-[9px] font-bold bg-input-bg hover:bg-card-bg border border-border/60 px-2 py-0.5 rounded transition-all duration-200" onclick="addTag('Deep Flow')">+ Deep Flow</button>
+                                        <button type="button" class="ref-tag text-[9px] font-bold bg-input-bg hover:bg-card-bg border border-border/60 px-2 py-0.5 rounded transition-all duration-200" onclick="addTag('Rest Break')">+ Rest Break</button>
+                                        <button type="button" class="ref-tag text-[9px] font-bold bg-input-bg hover:bg-card-bg border border-border/60 px-2 py-0.5 rounded transition-all duration-200" onclick="addTag('Fatigue Alert')">+ Fatigue Alert</button>
+                                        <button type="button" class="ref-tag ref-tag-gratitude text-[9px] font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 px-2 py-0.5 rounded transition-all duration-200" onclick="prefillGratitude()">✨ Gratitude Win</button>
+                                    </div>
+                                </div>
+                                <button type="submit" class="submit-btn w-full mt-2 bg-work/20 hover:bg-work/30 border border-work/30 hover:border-work/50 text-text-primary py-2 rounded-lg text-xs font-semibold transition-all duration-200 shadow-md">Save Reflection</button>
+                            </form>
+                        </div>
+
+                        <!-- Daily Hydration Tracker -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 hydration-card" id="hydration-card">
+                            <div class="hydration-header flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 class="font-display font-medium text-base text-text-primary mb-0.5">Hydration Tracker</h3>
+                                    <p class="card-desc text-text-muted text-[11px] mb-0 leading-tight">Proper hydration shields your brain from fatigue.</p>
+                                </div>
+                                <div class="hydration-progress flex flex-col items-end text-right">
+                                    <span class="font-display font-bold text-lg text-text-primary" id="hydration-pct-text">0%</span>
+                                    <span class="hydration-status-msg text-[10px] text-text-muted" id="hydration-msg">Not hydrated yet</span>
                                 </div>
                             </div>
-                            <!-- Right: Logging Controls & Presets -->
-                            <div class="hydration-controls-panel">
-                                <div class="hydration-quick-row">
-                                    <button type="button" class="hydration-add-btn" id="hydration-quick-add-btn" title="Log default increment amount">+ Quick Log</button>
-                                    <button type="button" class="hydration-sub-btn" id="hydration-quick-sub-btn" title="Subtract default increment amount">−</button>
+                            <div class="hydration-layout flex items-center gap-5 justify-between">
+                                <!-- Beaker Visual -->
+                                <div class="hydration-visual-wrapper flex-shrink-0 w-24 h-36 flex justify-center items-center">
+                                    <div class="hydration-beaker w-16 h-32 border-2 border-border/50 rounded-b-xl rounded-t-sm p-1.5 relative overflow-hidden bg-black/15 shadow-inner">
+                                        <div class="beaker-markings absolute left-1.5 top-0 w-1 h-full flex flex-col justify-between py-4 pointer-events-none opacity-50 z-10">
+                                            <span class="marking-line w-2 h-px bg-white/20"></span>
+                                            <span class="marking-line w-2 h-px bg-white/20"></span>
+                                            <span class="marking-line w-2 h-px bg-white/20"></span>
+                                            <span class="marking-line w-2 h-px bg-white/20"></span>
+                                        </div>
+                                        <div class="water-stream absolute top-0 left-[calc(50%-1px)] w-0.5 h-0 bg-sky-400 opacity-60 z-20 pointer-events-none transition-all duration-300" id="water-stream"></div>
+                                        <div class="beaker-effects-container absolute inset-0 pointer-events-none z-10" id="beaker-effects-container"></div>
+                                        <div class="hydration-liquid absolute left-0 bottom-0 w-full bg-gradient-to-t from-sky-500/80 to-cyan-400/70 border-t border-sky-300 transition-all duration-700 ease-in-out" id="hydration-liquid-fill" style="height: 0%;">
+                                            <svg class="water-wave wave-1 absolute -top-2 left-0 w-[200%] h-2 fill-sky-300/40 pointer-events-none" viewBox="0 0 200 20" preserveAspectRatio="none">
+                                                <path d="M 0 10 Q 25 6, 50 10 T 100 10 Q 125 6, 150 10 T 200 10 L 200 20 L 0 20 Z" />
+                                            </svg>
+                                            <svg class="water-wave wave-2 absolute -top-2 left-[-100%] w-[200%] h-2 fill-cyan-300/30 pointer-events-none" viewBox="0 0 200 20" preserveAspectRatio="none">
+                                                <path d="M 0 10 Q 25 14, 50 10 T 100 10 Q 125 14, 150 10 T 200 10 L 200 20 L 0 20 Z" />
+                                            </svg>
+                                            <div class="hydration-bubbles-container absolute inset-0 pointer-events-none" id="hydration-bubbles"></div>
+                                        </div>
+                                        <div class="beaker-gloss absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/10 pointer-events-none"></div>
+                                    </div>
                                 </div>
-                                <div class="hydration-presets-label">Custom Presets</div>
-                                <div class="hydration-presets-row" id="hydration-presets-container">
-                                    <!-- Dynamic preset buttons loaded by JS depending on settings -->
+                                <!-- Controls & Presets -->
+                                <div class="hydration-controls-panel flex-grow flex flex-col gap-3">
+                                    <div class="hydration-quick-row flex gap-2">
+                                        <button type="button" class="hydration-add-btn flex-grow bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary py-2 rounded-lg text-xs font-semibold transition-all duration-200" id="hydration-quick-add-btn" title="Log default increment amount">+ Quick Log</button>
+                                        <button type="button" class="hydration-sub-btn bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-3 rounded-lg text-xs font-semibold transition-all duration-200" id="hydration-quick-sub-btn" title="Subtract default increment amount">−</button>
+                                    </div>
+                                    <div class="flex flex-col gap-1.5">
+                                        <div class="hydration-presets-label text-[10px] text-text-muted font-bold tracking-wider uppercase">Custom Presets</div>
+                                        <div class="hydration-presets-row flex gap-1 flex-wrap" id="hydration-presets-container">
+                                            <!-- Preset buttons populated by JS -->
+                                        </div>
+                                    </div>
+                                </div>
+                        </div>
+
+                        <!-- Breathing Guide Card (Zenith Only) -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 zenith-only-card">
+                            <div class="zenith-breathing-guide">
+                                <h3 class="font-display font-medium text-base text-text-primary mb-1">Breathing Guide</h3>
+                                <p class="card-desc text-text-muted text-xs mb-2">Synchronize your focus with a deep breathing guide.</p>
+                                <div class="zenith-breathing-circle-container">
+                                    <div id="dashboard-breathing-circle" class="zenith-breathing-circle"></div>
+                                </div>
+                                <span id="dashboard-breathing-text" class="text-xs font-bold text-text-secondary tracking-wide uppercase">Breathe</span>
+                            </div>
+                        </div>
+
+                        <!-- Stress Level Log Card (Zenith Only) -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 zenith-only-card">
+                            <div class="stress-slider-card">
+                                <h3 class="font-display font-medium text-base text-text-primary mb-1">Stress Level Log</h3>
+                                <p class="card-desc text-text-muted text-xs mb-2">Check in and map your current stress level.</p>
+                                <div class="stress-slider-container">
+                                    <input type="range" id="stress-level-slider" min="1" max="5" value="3" class="stress-slider" oninput="updateStressLabel(this.value)">
+                                    <div class="flex justify-between items-center mt-3">
+                                        <span class="text-xs font-semibold text-text-secondary" id="stress-slider-value">Neutral (3)</span>
+                                        <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-work/30 text-text-primary px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200" onclick="submitStressCheckIn()">Log Stress</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Daily Focus Timeline & Activity Breakdown Widget -->
-                    <div class="card glass-card span-3 timeline-card">
-                        <div class="timeline-header">
-                            <div>
-                                <h3>Today's Focus Timeline & Activity</h3>
-                                <p class="card-desc" style="margin-bottom: 0;">Chronological focus states aligned with active foreground applications today.</p>
-                            </div>
-                            <span class="timeline-summary-pill" id="timeline-summary-pill">0h 0m total track</span>
-                        </div>
-                        <div class="timeline-wrapper">
-                            <div class="timeline-track-outer">
-                                <div id="timeline-tooltip" class="timeline-tooltip"></div>
-                                <div class="timeline-track" id="timeline-track">
-                                    <!-- Floating segments filled by JS -->
+                    <!-- Bottom Span: Timeline & Activity Breakdown -->
+                    <div class="lg:col-span-12">
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 timeline-card">
+                            <div class="timeline-header flex justify-between items-center mb-4 flex-wrap gap-4">
+                                <div>
+                                    <h3 class="font-display font-medium text-base text-text-primary">Today's Focus Timeline & Activity</h3>
+                                    <p class="card-desc text-text-muted text-xs mb-0">Chronological focus states aligned with active foreground applications today.</p>
                                 </div>
-                                <div class="timeline-axis" id="timeline-axis">
-                                    <!-- Ticks filled by JS -->
-                                </div>
+                                <span class="timeline-summary-pill bg-work/10 border border-work/20 text-work text-xs font-semibold px-3 py-1 rounded-full" id="timeline-summary-pill">0h 0m total track</span>
                             </div>
-                            <div class="timeline-legend">
-                                <div class="legend-item"><span class="legend-color work-legend-color"></span><span>Work</span></div>
-                                <div class="legend-item"><span class="legend-color recharge-legend-color"></span><span>Recharge</span></div>
-                                <div class="legend-item"><span class="legend-color rest-legend-color"></span><span>Rest</span></div>
-                                <div class="legend-item"><span class="legend-color neutral-legend-color"></span><span>Neutral/Off</span></div>
-                            </div>
-                            
-                            <div class="timeline-details-grid">
-                                <!-- Left column: Activity Stream -->
-                                <div class="timeline-events-column">
-                                    <h4 class="column-subtitle">Activity Stream</h4>
-                                    <div class="timeline-events-list" id="timeline-events-list">
-                                        <!-- Reflection list timeline events filled by JS -->
+                            <div class="timeline-wrapper flex flex-col gap-6">
+                                <div class="timeline-track-outer relative py-2">
+                                    <div id="timeline-tooltip" class="timeline-tooltip absolute hidden bg-surface border border-border px-3 py-1.5 rounded-lg text-xs shadow-xl z-50 pointer-events-none text-text-primary"></div>
+                                    <div class="timeline-track w-full h-8 bg-black/15 border border-border/40 rounded-xl relative overflow-hidden shadow-inner flex" id="timeline-track">
+                                        <!-- Floating segments populated by JS -->
                                     </div>
+                                    <div class="timeline-axis flex justify-between text-[10px] text-text-muted font-semibold mt-2 px-1" id="timeline-axis">
+                                        <!-- Ticks populated by JS -->
+                                    </div>
+                                </div>
+                                <div class="timeline-legend flex justify-start gap-4 text-xs font-semibold text-text-secondary flex-wrap border-b border-border/40 pb-4">
+                                    <div class="legend-item flex items-center gap-1.5"><span class="legend-color w-3 h-3 rounded-full bg-work"></span><span>Work</span></div>
+                                    <div class="legend-item flex items-center gap-1.5"><span class="legend-color w-3 h-3 rounded-full bg-recharge"></span><span>Recharge</span></div>
+                                    <div class="legend-item flex items-center gap-1.5"><span class="legend-color w-3 h-3 rounded-full bg-rest"></span><span>Rest</span></div>
+                                    <div class="legend-item flex items-center gap-1.5"><span class="legend-color w-3 h-3 rounded-full bg-neutral"></span><span>Neutral/Off</span></div>
                                 </div>
                                 
-                                <!-- Right column: Application Focus Breakdown -->
-                                <div class="app-breakdown-column">
-                                    <div class="app-stats-header">
-                                        <h4 class="column-subtitle" style="margin: 0; border: none; padding-bottom: 0;">Application Focus</h4>
-                                        <div class="app-stats-filters">
-                                            <button type="button" class="filter-pill active" id="app-filter-today" onclick="setAppStatsFilter('today')">Today</button>
-                                            <button type="button" class="filter-pill" id="app-filter-weekly" onclick="setAppStatsFilter('weekly')">7 Days</button>
+                                <div class="timeline-details-grid grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+                                    <!-- Left column: Activity Stream -->
+                                    <div class="timeline-events-column flex flex-col min-w-0">
+                                        <h4 class="column-subtitle font-display font-medium text-sm text-text-primary border-b border-border/40 pb-2 mb-3">Activity Stream</h4>
+                                        <div class="timeline-events-list flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-2" id="timeline-events-list">
+                                            <!-- Reflection list timeline events populated by JS -->
                                         </div>
                                     </div>
                                     
-                                    <!-- Category Ratio Segmented Progress Bar -->
-                                    <div class="app-ratio-bar-container" id="app-ratio-bar-container" style="display: none;">
-                                        <div class="app-ratio-bar" id="app-ratio-bar">
-                                            <div class="app-ratio-segment work" id="ratio-seg-work" style="width: 0%;"></div>
-                                            <div class="app-ratio-segment recharge" id="ratio-seg-recharge" style="width: 0%;"></div>
-                                            <div class="app-ratio-segment neutral" id="ratio-seg-neutral" style="width: 0%;"></div>
+                                    <!-- Right column: Application Focus Breakdown -->
+                                    <div class="app-breakdown-column flex flex-col min-w-0">
+                                        <div class="app-stats-header flex justify-between items-center pb-2 border-b border-border/40 mb-3">
+                                            <h4 class="column-subtitle font-display font-medium text-sm text-text-primary">Application Focus</h4>
+                                            <div class="app-stats-filters flex gap-1 bg-input-bg border border-border p-0.5 rounded-lg">
+                                                <button type="button" class="filter-pill active text-[10px] font-bold px-2 py-1 rounded" id="app-filter-today" onclick="setAppStatsFilter('today')">Today</button>
+                                                <button type="button" class="filter-pill text-[10px] font-bold px-2 py-1 rounded" id="app-filter-weekly" onclick="setAppStatsFilter('weekly')">7 Days</button>
+                                            </div>
                                         </div>
-                                        <div class="app-ratio-legend">
-                                            <span class="ratio-legend-item"><span class="legend-dot work"></span>Work: <span id="ratio-pct-work">0%</span></span>
-                                            <span class="ratio-legend-item"><span class="legend-dot recharge"></span>Recharge: <span id="ratio-pct-recharge">0%</span></span>
-                                            <span class="ratio-legend-item"><span class="legend-dot neutral"></span>Neutral: <span id="ratio-pct-neutral">0%</span></span>
+                                        
+                                        <!-- Category Ratio Segmented Progress Bar -->
+                                        <div class="app-ratio-bar-container mb-4" id="app-ratio-bar-container" style="display: none;">
+                                            <div class="app-ratio-bar w-full h-2 bg-black/10 rounded-full overflow-hidden flex" id="app-ratio-bar">
+                                                <div class="app-ratio-segment work h-full bg-work" id="ratio-seg-work" style="width: 0%;"></div>
+                                                <div class="app-ratio-segment recharge h-full bg-recharge" id="ratio-seg-recharge" style="width: 0%;"></div>
+                                                <div class="app-ratio-segment neutral h-full bg-neutral" id="ratio-seg-neutral" style="width: 0%;"></div>
+                                            </div>
+                                            <div class="app-ratio-legend flex gap-4 mt-2 text-[10px] font-semibold text-text-muted justify-center">
+                                                <span class="ratio-legend-item flex items-center gap-1"><span class="legend-dot w-2 h-2 rounded-full bg-work"></span>Work: <span id="ratio-pct-work" class="text-text-primary">0%</span></span>
+                                                <span class="ratio-legend-item flex items-center gap-1"><span class="legend-dot w-2 h-2 rounded-full bg-recharge"></span>Recharge: <span id="ratio-pct-recharge" class="text-text-primary">0%</span></span>
+                                                <span class="ratio-legend-item flex items-center gap-1"><span class="legend-dot w-2 h-2 rounded-full bg-neutral"></span>Neutral: <span id="ratio-pct-neutral" class="text-text-primary">0%</span></span>
+                                            </div>
                                         </div>
-                                    </div>
-                                    
-                                    <p class="app-stats-hint">💡 Click any row to expand details and view active window titles.</p>
-                                    
-                                    <div class="app-stats-list-wrapper">
-                                        <div class="app-stats-list" id="app-stats-list">
-                                            <!-- Dynamic entries injected by JS -->
+                                        
+                                        <p class="app-stats-hint text-[10px] text-text-muted mb-3 italic">💡 Click any row to expand details and view active window titles.</p>
+                                        
+                                        <div class="app-stats-list-wrapper">
+                                            <div class="app-stats-list flex flex-col gap-2 max-h-[260px] overflow-y-auto pr-2" id="app-stats-list">
+                                                <!-- Dynamic entries populated by JS -->
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -465,97 +584,106 @@
 
             <!-- TAB 2: ANALYTICS / ENERGY MAP -->
             <section class="tab-content" id="tab-analytics">
-                <header class="section-header">
+                <header class="section-header flex justify-between items-start mb-6">
                     <div>
-                        <h2>Your Energy Map</h2>
-                        <p class="subtitle">See how your energy and focus patterns evolve throughout the week.</p>
+                        <h2 class="font-display font-semibold text-2xl tracking-tight bg-gradient-to-r from-text-primary to-work bg-clip-text text-transparent">Your Energy Map</h2>
+                        <p class="subtitle text-text-secondary text-sm mt-1">See how your energy and focus patterns evolve throughout the week.</p>
                     </div>
                 </header>
 
-                <div class="grid-layout">
-                    <div class="card glass-card span-3 chart-card">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.5rem;">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    <!-- Weekly Chart Card -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-12 chart-card">
+                        <div class="flex justify-between items-start flex-wrap gap-4 mb-4">
                             <div>
-                                <h3>Weekly Fatigue & Friction Analysis</h3>
-                                <p class="card-desc">Comparison of task friction against mental energy levels throughout the week.</p>
+                                <h3 class="font-display font-medium text-base text-text-primary mb-1">Weekly Fatigue & Friction Analysis</h3>
+                                <p class="card-desc text-text-muted text-xs mb-0">Comparison of task friction against mental energy levels throughout the week.</p>
                             </div>
-                            <div class="week-navigation" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; background: var(--input-bg); border: 1px solid var(--border-color); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); align-self: flex-start; width: 250px; box-sizing: border-box;">
-                                <button type="button" class="week-nav-btn" id="prev-week-btn" onclick="navigateWeek(1)" style="background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0.5rem; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='none'" title="Previous Week">◀</button>
-                                <span id="current-week-label" style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); text-align: center; white-space: nowrap; user-select: none; flex: 1; overflow: hidden; text-overflow: ellipsis;">Loading week...</span>
-                                <button type="button" class="week-nav-btn" id="next-week-btn" onclick="navigateWeek(-1)" style="background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0.5rem; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; opacity: 0.4;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='none'" title="Next Week" disabled>▶</button>
+                            <div class="week-navigation flex items-center gap-3 bg-input-bg border border-border px-3 py-1.5 rounded-lg w-60">
+                                <button type="button" class="week-nav-btn text-text-primary text-xs hover:bg-white/5 px-2 py-0.5 rounded transition-all duration-200" id="prev-week-btn" onclick="navigateWeek(1)" title="Previous Week">◀</button>
+                                <span class="text-xs font-semibold text-text-secondary text-center flex-grow truncate" id="current-week-label">Loading week...</span>
+                                <button type="button" class="week-nav-btn text-text-primary text-xs hover:bg-white/5 px-2 py-0.5 rounded transition-all duration-200 opacity-40" id="next-week-btn" onclick="navigateWeek(-1)" title="Next Week" disabled>▶</button>
                             </div>
                         </div>
-                        <div class="chart-container" id="chart-container">
-                            <!-- Loading skeleton shown before data loads -->
-                            <div class="skeleton-container" id="chart-skeleton">
-                                <div class="skeleton skeleton-chart"></div>
+                        <div class="chart-container relative h-72 w-full flex items-center justify-center" id="chart-container">
+                            <div class="skeleton-container w-full" id="chart-skeleton">
+                                <div class="skeleton skeleton-chart w-full h-64 bg-white/5 rounded-lg animate-pulse"></div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- AI Insights / Recommendations -->
-                    <div class="card glass-card insight-card">
-                        <h3>Wellbeing Insights</h3>
-                        <div class="insights-list" id="insights-list">
+                    <!-- Narrative Reflection Card -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-12 calming-narrative-card" id="calming-narrative-panel">
+                        <h3 class="font-display font-medium text-base text-text-primary mb-2">Calming Reflections</h3>
+                        <p class="card-desc text-text-muted text-xs mb-4">Personalized weekly analysis of your biometric and work correlations.</p>
+                        <div class="italic text-text-secondary text-sm leading-relaxed" id="calming-narrative-text">
+                            Gathering your wellness narrative...
+                        </div>
+                    </div>
+
+                    <!-- Wellbeing Insights -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-4 insight-card">
+                        <h3 class="font-display font-medium text-base text-text-primary mb-3">Wellbeing Insights</h3>
+                        <div class="insights-list flex flex-col gap-3" id="insights-list">
                             <!-- Injected insights -->
                         </div>
                     </div>
 
-                    <!-- Cognitive Flow Analyser Widget -->
-                    <div class="card glass-card flow-analysis-card" id="flow-analysis-card">
-                        <h3>Cognitive Flow Analyzer</h3>
-                        <p class="card-desc" style="margin-bottom: 0.85rem;">Weekly detection of focus drivers (Flow Triggers) and friction hotspots (Cognitive Leaks).</p>
-                        <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+                    <!-- Cognitive Flow Analyzer -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-4 flow-analysis-card" id="flow-analysis-card">
+                        <h3 class="font-display font-medium text-base text-text-primary mb-1">Cognitive Flow Analyzer</h3>
+                        <p class="card-desc text-text-muted text-xs mb-4">Weekly detection of focus drivers (Flow Triggers) and friction hotspots (Cognitive Leaks).</p>
+                        <div class="flex flex-col gap-4">
                             <div>
-                                <h4 style="font-size: 0.78rem; font-weight: 700; color: var(--recharge-color); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem;">
+                                <h4 class="text-xs font-bold text-recharge flex items-center gap-1 mb-2">
                                     <span>🚀</span> Flow Triggers
                                 </h4>
-                                <div id="flow-triggers-list" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                                <div class="flex flex-wrap gap-1.5" id="flow-triggers-list">
                                     <!-- Injected tags -->
                                 </div>
                             </div>
-                            <div style="border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 0.85rem;">
-                                <h4 style="font-size: 0.78rem; font-weight: 700; color: #ef4444; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem;">
+                            <div class="border-t border-dashed border-border/40 pt-4">
+                                <h4 class="text-xs font-bold text-red-400 flex items-center gap-1 mb-2">
                                     <span>🚧</span> Cognitive Leaks
                                 </h4>
-                                <div id="cognitive-leaks-list" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                                <div class="flex flex-wrap gap-1.5" id="cognitive-leaks-list">
                                     <!-- Injected tags -->
                                 </div>
                             </div>
                         </div>
                     </div>
- 
-                    <!-- Mental Well-being Card -->
-                    <div class="card glass-card mood-analysis-card" id="mood-analysis-card">
-                        <h3>Weekly Mood Distribution</h3>
-                        <p class="card-desc" style="margin-bottom: 0.85rem;">Aggregated tracking of your emotional states during work and recovery blocks.</p>
-                        <div id="mood-distribution-list" style="display: flex; flex-direction: column; gap: 0.6rem;">
-                            <div style="text-align: center; padding: 1rem 0; color: var(--text-muted); font-size: 0.85rem;">
+
+                    <!-- Mood Distribution -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-4 mood-analysis-card" id="mood-analysis-card">
+                        <h3 class="font-display font-medium text-base text-text-primary mb-1">Weekly Mood Distribution</h3>
+                        <p class="card-desc text-text-muted text-xs mb-4">Aggregated tracking of your emotional states during work and recovery blocks.</p>
+                        <div class="flex flex-col gap-2.5" id="mood-distribution-list">
+                            <div class="text-center py-4 text-text-muted text-xs">
                                 No mood data logged this week.
                             </div>
                         </div>
                     </div>
 
-                    <!-- Recent Roadblocks & Reflection Log -->
-                    <div class="card glass-card span-2 reflections-list-card">
-                        <h3>Reflection Logs</h3>
-                        <div class="reflections-table-wrapper">
-                            <table class="reflections-table">
+                    <!-- Reflection Table -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-7 reflections-list-card">
+                        <h3 class="font-display font-medium text-base text-text-primary mb-4">Reflection Logs</h3>
+                        <div class="reflections-table-wrapper max-h-96 overflow-y-auto pr-1">
+                            <table class="reflections-table w-full text-left border-collapse text-xs">
                                 <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Energy</th>
-                                        <th>Friction</th>
-                                        <th>ROADBLOCK / WIN Summary</th>
+                                    <tr class="border-b border-border/40 text-text-muted font-bold">
+                                        <th class="py-2.5">Date</th>
+                                        <th class="py-2.5">Energy</th>
+                                        <th class="py-2.5">Friction</th>
+                                        <th class="py-2.5">ROADBLOCK / WIN Summary</th>
                                     </tr>
                                 </thead>
                                 <tbody id="reflections-log-body">
-                                    <!-- Loading skeletons -->
+                                    <!-- Loading skeleton -->
                                     <tr class="skeleton-container" id="table-skeleton">
-                                        <td colspan="4">
-                                            <div class="skeleton skeleton-row"></div>
-                                            <div class="skeleton skeleton-row"></div>
-                                            <div class="skeleton skeleton-row"></div>
+                                        <td colspan="4" class="py-4">
+                                            <div class="skeleton skeleton-row h-4 w-full bg-white/5 animate-pulse rounded mb-2"></div>
+                                            <div class="skeleton skeleton-row h-4 w-full bg-white/5 animate-pulse rounded mb-2"></div>
+                                            <div class="skeleton skeleton-row h-4 w-full bg-white/5 animate-pulse rounded"></div>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -563,68 +691,52 @@
                         </div>
                     </div>
 
-                    <!-- Application Focus & Distraction Dashboard Card -->
-                    <div class="card glass-card span-3 app-productivity-card" id="app-productivity-card">
-                        <div class="card-header">
-                            <div>
-                                <h3>Productivity & Distraction Analytics</h3>
-                                <p class="card-desc">Comprehensive analysis of productive focus hours versus distracting and leisure application usage.</p>
-                            </div>
-                        </div>
+                    <!-- Productivity Donut & App stats breakdown -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-5 app-productivity-card" id="app-productivity-card">
+                        <h3 class="font-display font-medium text-base text-text-primary mb-1">Productivity & Distraction Analytics</h3>
+                        <p class="card-desc text-text-muted text-xs mb-4">Focus hours vs leisure/distracting app usage breakdown.</p>
                         
-                        <div class="app-productivity-grid">
-                            <!-- Column 1: Donut & Summary -->
-                            <div class="prod-donut-column">
-                                <div class="productivity-score-container">
-                                    <svg width="140" height="140" viewBox="0 0 120 120" class="productivity-donut-svg">
-                                        <circle cx="60" cy="60" r="50" class="donut-bg" fill="none" stroke-width="8"></circle>
-                                        <circle cx="60" cy="60" r="50" class="donut-work" fill="none" stroke-width="8" stroke-dasharray="314.16" stroke-dashoffset="314.16" stroke-linecap="round" transform="rotate(-90 60 60)"></circle>
-                                        <circle cx="60" cy="60" r="50" class="donut-distract" fill="none" stroke-width="8" stroke-dasharray="314.16" stroke-dashoffset="314.16" stroke-linecap="round" transform="rotate(-90 60 60)"></circle>
+                        <div class="app-productivity-grid flex flex-col gap-6">
+                            <div class="flex items-center justify-around gap-6">
+                                <div class="productivity-score-container relative w-28 h-28 flex items-center justify-center flex-shrink-0">
+                                    <svg width="112" height="112" viewBox="0 0 120 120" class="productivity-donut-svg -rotate-90">
+                                        <circle cx="60" cy="60" r="50" class="donut-bg fill-none stroke-black/15 dark:stroke-white/5" stroke-width="8"></circle>
+                                        <circle cx="60" cy="60" r="50" class="donut-work fill-none transition-all duration-700 ease-out" stroke-width="8" stroke-dasharray="314.16" stroke-dashoffset="314.16" stroke-linecap="round"></circle>
+                                        <circle cx="60" cy="60" r="50" class="donut-distract fill-none transition-all duration-700 ease-out" stroke-width="8" stroke-dasharray="314.16" stroke-dashoffset="314.16" stroke-linecap="round"></circle>
                                     </svg>
-                                    <div class="productivity-pct-label">
-                                        <span class="pct-num" id="prod-pct-num">--%</span>
-                                        <span class="pct-text">Productive</span>
+                                    <div class="productivity-pct-label absolute flex flex-col items-center justify-center text-center">
+                                        <span class="pct-num font-display font-extrabold text-xl text-text-primary leading-none" id="prod-pct-num">--%</span>
+                                        <span class="pct-text text-[8px] text-text-muted tracking-wider uppercase font-bold mt-1">Productive</span>
                                     </div>
                                 </div>
-                                
-                                <div class="prod-duration-breakdown">
-                                    <div class="prod-breakdown-row">
-                                        <span class="breakdown-label">
-                                            <span class="legend-dot work"></span>
-                                            Productive Focus
-                                        </span>
-                                        <span id="prod-focus-dur" class="breakdown-val">--</span>
+                                <div class="prod-duration-breakdown flex-grow flex flex-col gap-2 max-w-xs text-xs font-semibold">
+                                    <div class="prod-breakdown-row flex justify-between items-center">
+                                        <span class="breakdown-label flex items-center gap-1.5"><span class="legend-dot w-2 h-2 rounded-full bg-work"></span>Productive Focus</span>
+                                        <span id="prod-focus-dur" class="breakdown-val text-text-primary">--</span>
                                     </div>
-                                    <div class="prod-breakdown-row">
-                                        <span class="breakdown-label">
-                                            <span class="legend-dot distract"></span>
-                                            Distracting Leisure
-                                        </span>
-                                        <span id="prod-distract-dur" class="breakdown-val">--</span>
+                                    <div class="prod-breakdown-row flex justify-between items-center">
+                                        <span class="breakdown-label flex items-center gap-1.5"><span class="legend-dot w-2 h-2 rounded-full bg-red-400"></span>Distracting Leisure</span>
+                                        <span id="prod-distract-dur" class="breakdown-val text-text-primary">--</span>
                                     </div>
-                                    <div class="prod-breakdown-row">
-                                        <span class="breakdown-label">
-                                            <span class="legend-dot neutral"></span>
-                                            Neutral / System
-                                        </span>
-                                        <span id="prod-neutral-dur" class="breakdown-val">--</span>
+                                    <div class="prod-breakdown-row flex justify-between items-center">
+                                        <span class="breakdown-label flex items-center gap-1.5"><span class="legend-dot w-2 h-2 rounded-full bg-neutral"></span>Neutral / System</span>
+                                        <span id="prod-neutral-dur" class="breakdown-val text-text-primary">--</span>
                                     </div>
                                 </div>
                             </div>
                             
-                            <!-- Column 2: Productive Apps -->
-                            <div class="prod-apps-column prod-work-column">
-                                <h4 class="column-subtitle">🎯 Productive Apps</h4>
-                                <div id="prod-focus-apps-list" class="prod-apps-sublist">
-                                    <!-- Dynamic rows -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-border/40 pt-4">
+                                <div class="prod-apps-column prod-work-column pr-2 md:border-r md:border-border/40 min-w-0">
+                                    <h4 class="column-subtitle font-display font-medium text-xs text-work tracking-wider uppercase mb-3 flex items-center gap-1">🎯 Productive Apps</h4>
+                                    <div id="prod-focus-apps-list" class="prod-apps-sublist flex flex-col gap-3">
+                                        <!-- Dynamic list -->
+                                    </div>
                                 </div>
-                            </div>
-                            
-                            <!-- Column 3: Distracting Apps -->
-                            <div class="prod-apps-column prod-distract-column">
-                                <h4 class="column-subtitle">🎮 Distractions & Leisure</h4>
-                                <div id="prod-distract-apps-list" class="prod-apps-sublist">
-                                    <!-- Dynamic rows -->
+                                <div class="prod-apps-column prod-distract-column pl-0 md:pl-2 min-w-0">
+                                    <h4 class="column-subtitle font-display font-medium text-xs text-red-400 tracking-wider uppercase mb-3 flex items-center gap-1">🎮 Distractions</h4>
+                                    <div id="prod-distract-apps-list" class="prod-apps-sublist flex flex-col gap-3">
+                                        <!-- Dynamic list -->
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -634,330 +746,392 @@
 
             <!-- TAB 3: SETTINGS -->
             <section class="tab-content" id="tab-settings">
-                <header class="section-header">
+                <header class="section-header flex justify-between items-start mb-6">
                     <div>
-                        <h2>Your Preferences</h2>
-                        <p class="subtitle">Customize how your companion monitors focus windows and manages breaks.</p>
+                        <h2 class="font-display font-semibold text-2xl tracking-tight bg-gradient-to-r from-text-primary to-work bg-clip-text text-transparent">Your Preferences</h2>
+                        <p class="subtitle text-text-secondary text-sm mt-1">Customize how your companion monitors focus windows and manages breaks.</p>
                     </div>
                 </header>
 
                 <form id="settings-form" class="settings-form-layout">
-                    <div class="grid-layout">
-                        <!-- Card 1: Focus & Sprint Timers -->
-                        <div class="card glass-card">
-                            <h3>Focus & Sprint Timers</h3>
-                            <p class="card-desc">Configure the cognitive duration and idle thresholds.</p>
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                        
+                        <!-- Sprint Timers (Bento Card 1) -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-6 flex flex-col gap-4">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-1">Focus & Sprint Timers</h3>
+                            <p class="card-desc text-text-muted text-xs mb-2">Configure the cognitive duration and idle thresholds.</p>
                             
-                            <div class="form-group">
-                                <label for="work-limit-input">Work Block Limit (Minutes)</label>
-                                <p class="setting-desc">Maximum duration before visual break.</p>
-                                <input type="number" id="work-limit-input" min="5" max="180" required>
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="zen-level-input" class="text-xs font-semibold text-text-secondary">Zen Level</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Adjust sprint and rest pacing profiles dynamically.</p>
+                                <select id="zen-level-input" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-work/50 w-full h-9 mt-1">
+                                    <option value="tranquil">Tranquil (35m focus / 30s rest)</option>
+                                    <option value="balanced">Balanced (Respect focus / rest settings)</option>
+                                    <option value="sprint">Sprint (55m focus / 15s rest)</option>
+                                </select>
                             </div>
                             
-                            <div class="form-group" style="margin-top: 1rem;">
-                                <label for="idle-timeout-input">Idle Sensing Timeout (Seconds)</label>
-                                <p class="setting-desc">Inactivity period before switching to Rest.</p>
-                                <input type="number" id="idle-timeout-input" min="10" max="600" required>
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="work-limit-input" class="text-xs font-semibold text-text-secondary">Work Block Limit (Minutes)</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Maximum duration before visual break.</p>
+                                <input type="number" id="work-limit-input" min="5" max="180" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-work/50 w-full h-9 mt-1" required>
                             </div>
                             
-                            <div class="form-group" style="margin-top: 1rem;">
-                                <label for="rest-duration-input">Rest Break Duration (Seconds)</label>
-                                <p class="setting-desc">Base duration of the lockout rest screen.</p>
-                                <input type="number" id="rest-duration-input" min="10" max="600" required>
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="idle-timeout-input" class="text-xs font-semibold text-text-secondary">Idle Sensing Timeout (Seconds)</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Inactivity period before switching to Rest.</p>
+                                <input type="number" id="idle-timeout-input" min="10" max="600" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-work/50 w-full h-9 mt-1" required>
                             </div>
                             
-                            <div class="form-group checkbox-group" style="margin-top: 1.25rem;">
-                                <input type="checkbox" id="autopilot-input" style="width: 18px; height: 18px; cursor: pointer;">
-                                <div>
-                                    <label for="autopilot-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Cognitive Autopilot</label>
-                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Scale limits dynamically based on ratings.</p>
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="rest-duration-input" class="text-xs font-semibold text-text-secondary">Rest Break Duration (Seconds)</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Base duration of the lockout rest screen.</p>
+                                <input type="number" id="rest-duration-input" min="10" max="600" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-work/50 w-full h-9 mt-1" required>
+                            </div>
+                            
+                            <div class="flex flex-col gap-3 border-t border-dashed border-border/40 pt-4 mt-2">
+                                <div class="form-group checkbox-group flex items-start gap-3">
+                                    <input type="checkbox" id="autopilot-input" class="w-4.5 h-4.5 rounded bg-input-bg border-border text-work focus:ring-work/30 cursor-pointer mt-0.5">
+                                    <div class="flex flex-col">
+                                        <label for="autopilot-input" class="text-xs font-bold text-text-primary cursor-pointer select-none">Enable Cognitive Autopilot</label>
+                                        <p class="setting-desc text-[10px] text-text-muted leading-relaxed">Scale limits dynamically based on check-in ratings.</p>
+                                    </div>
+                                </div>
+
+                                <div class="form-group checkbox-group flex items-start gap-3">
+                                    <input type="checkbox" id="eyecare-input" class="w-4.5 h-4.5 rounded bg-input-bg border-border text-work focus:ring-work/30 cursor-pointer mt-0.5">
+                                    <div class="flex flex-col">
+                                        <label for="eyecare-input" class="text-xs font-bold text-text-primary cursor-pointer select-none">Enable Eye Care Shield</label>
+                                        <p class="setting-desc text-[10px] text-text-muted leading-relaxed">Apply a warm, low-contrast night light filter to reduce eye strain.</p>
+                                    </div>
+                                </div>
+
+                                <div class="form-group checkbox-group flex items-start gap-3">
+                                    <input type="checkbox" id="circadian-forecast-enabled-input" class="w-4.5 h-4.5 rounded bg-input-bg border-border text-work focus:ring-work/30 cursor-pointer mt-0.5">
+                                    <div class="flex flex-col">
+                                        <label for="circadian-forecast-enabled-input" class="text-xs font-bold text-text-primary cursor-pointer select-none">Enable Circadian Forecast</label>
+                                        <p class="setting-desc text-[10px] text-text-muted leading-relaxed">Predict energy slumps and adjust sprint pacing proactively.</p>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div class="form-group checkbox-group" style="margin-top: 1rem;">
-                                <input type="checkbox" id="eyecare-input" style="width: 18px; height: 18px; cursor: pointer;">
-                                <div>
-                                    <label for="eyecare-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Eye Care Shield</label>
-                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Apply a warm, low-contrast night light filter to reduce fatigue.</p>
-                                </div>
-                            </div>
-
-                            <div class="form-group checkbox-group" style="margin-top: 1rem; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 1rem;">
-                                <input type="checkbox" id="circadian-forecast-enabled-input" style="width: 18px; height: 18px; cursor: pointer;">
-                                <div>
-                                    <label for="circadian-forecast-enabled-input" style="margin-bottom: 0; cursor: pointer; font-weight: 600;">Enable Circadian Forecast</label>
-                                    <p class="setting-desc" style="margin-bottom: 0; font-size: 0.75rem; color: var(--text-muted);">Predict energy slumps and adjust sprint pacing.</p>
-                                </div>
-                            </div>
-
-                            <div class="form-group" style="margin-top: 1rem;" id="circadian-sensitivity-group">
-                                <label for="circadian-forecast-sensitivity-input">Forecast Pacing Sensitivity</label>
-                                <p class="setting-desc">Adjust how aggressively Autopilot pacing shortens focus blocks.</p>
-                                <select id="circadian-forecast-sensitivity-input" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.95rem; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.9rem;">
+                            <div class="form-group flex flex-col gap-1 border-t border-dashed border-border/40 pt-3" id="circadian-sensitivity-group">
+                                <label for="circadian-forecast-sensitivity-input" class="text-xs font-semibold text-text-secondary">Forecast Pacing Sensitivity</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Adjust how aggressively Autopilot pacing shortens focus blocks.</p>
+                                <select id="circadian-forecast-sensitivity-input" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-work/50 w-full h-9 mt-1">
                                     <option value="low">Low (Mild scaling)</option>
                                     <option value="medium">Medium (Standard scaling)</option>
                                     <option value="high">High (Proactive scaling)</option>
                                 </select>
                             </div>
-
                         </div>
 
-                        <!-- Card 2: Foreground Classifier Rules -->
-                        <div class="card glass-card span-2">
-                            <h3>Foreground Classifier Rules</h3>
-                            <p class="card-desc">Define which window titles trigger Work or Recharge modes.</p>
+                        <!-- Classifier Keywords Rules (Bento Card 2) -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-6 flex flex-col gap-4">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-1">Foreground Classifier Rules</h3>
+                            <p class="card-desc text-text-muted text-xs mb-2">Define which window titles trigger Work or Recharge modes.</p>
                             
-                            <div class="form-group">
-                                <label for="work-keywords-input">Work Mode Window Title Keywords</label>
-                                <p class="setting-desc">Comma-separated active window title parts that shift the app to Work Mode.</p>
-                                <textarea id="work-keywords-input" rows="3" placeholder="e.g. vs code, visual studio, word, docs"></textarea>
+                            <div class="form-group flex flex-col gap-1 flex-1">
+                                <label for="work-keywords-input" class="text-xs font-semibold text-text-secondary">Work Mode Window Title Keywords</label>
+                                <p class="setting-desc text-[10px] text-text-muted mb-1">Comma-separated active window title parts that shift the app to Work Mode.</p>
+                                <textarea id="work-keywords-input" rows="4" class="bg-input-bg border border-border rounded-lg p-3 text-xs text-text-primary outline-none focus:border-work/50 w-full resize-y font-mono" placeholder="e.g. vs code, visual studio, word, docs"></textarea>
                             </div>
 
-                            <div class="form-group" style="margin-top: 1.25rem;">
-                                <label for="recharge-keywords-input">Recharge Mode Window Title Keywords</label>
-                                <p class="setting-desc">Comma-separated active window title parts that shift the app to Recharge Mode.</p>
-                                <textarea id="recharge-keywords-input" rows="3" placeholder="e.g. steam, vlc, netflix, youtube, spotify"></textarea>
+                            <div class="form-group flex flex-col gap-1 flex-1 border-t border-dashed border-border/40 pt-4 mt-2">
+                                <label for="recharge-keywords-input" class="text-xs font-semibold text-text-secondary">Recharge Mode Window Title Keywords</label>
+                                <p class="setting-desc text-[10px] text-text-muted mb-1">Comma-separated active window title parts that shift the app to Recharge Mode.</p>
+                                <textarea id="recharge-keywords-input" rows="4" class="bg-input-bg border border-border rounded-lg p-3 text-xs text-text-primary outline-none focus:border-recharge/50 w-full resize-y font-mono" placeholder="e.g. steam, vlc, netflix, youtube, spotify"></textarea>
                             </div>
                         </div>
 
-                        <!-- Card 3: Hydration Preferences -->
-                        <div class="card glass-card">
-                            <h3>Hydration Preferences</h3>
-                            <p class="card-desc">Configure your daily water intake goal, units, and logging sizes.</p>
+                        <!-- Hydration Preferences (Bento Card 3) -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-6 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-6 flex flex-col gap-4">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-1">Hydration Preferences</h3>
+                            <p class="card-desc text-text-muted text-xs mb-2">Configure your daily water intake goal, units, and logging sizes.</p>
                             
-                            <div class="form-group">
-                                <label for="hydration-target-input">Daily Intake Target</label>
-                                <p class="setting-desc">The amount of water you want to drink daily.</p>
-                                <input type="number" id="hydration-target-input" min="1" max="10000" required>
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="hydration-target-input" class="text-xs font-semibold text-text-secondary">Daily Intake Target</label>
+                                <p class="setting-desc text-[10px] text-text-muted">The amount of water you want to drink daily.</p>
+                                <input type="number" id="hydration-target-input" min="1" max="10000" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-rest/50 w-full h-9 mt-1" required>
                             </div>
                             
-                            <div class="form-group" style="margin-top: 1rem;">
-                                <label for="hydration-unit-input">Measurement Unit</label>
-                                <p class="setting-desc">Preferred unit of measurement.</p>
-                                <select id="hydration-unit-input" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.95rem; color: var(--text-primary); outline: none; font-family: inherit; font-size: 0.9rem;">
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="hydration-unit-input" class="text-xs font-semibold text-text-secondary">Measurement Unit</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Preferred unit of measurement.</p>
+                                <select id="hydration-unit-input" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-rest/50 w-full h-9 mt-1">
                                     <option value="cups">Cups (c)</option>
                                     <option value="ml">Milliliters (ml)</option>
                                     <option value="oz">Ounces (oz)</option>
                                 </select>
                             </div>
                             
-                            <div class="form-group" style="margin-top: 1rem;">
-                                <label for="hydration-increment-input">Quick Log Amount</label>
-                                <p class="setting-desc">Volume logged per quick-add click.</p>
-                                <input type="number" id="hydration-increment-input" min="1" max="5000" step="any" required>
+                            <div class="form-group flex flex-col gap-1">
+                                <label for="hydration-increment-input" class="text-xs font-semibold text-text-secondary">Quick Log Amount</label>
+                                <p class="setting-desc text-[10px] text-text-muted">Volume logged per quick-add click.</p>
+                                <input type="number" id="hydration-increment-input" min="1" max="5000" step="any" class="bg-input-bg border border-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-rest/50 w-full h-9 mt-1" required>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="settings-actions">
-                        <span class="status-msg" id="settings-save-status"></span>
-                        <button type="submit" class="submit-btn">Apply Settings</button>
+                        <!-- Settings Actions banner -->
+                        <div class="lg:col-span-12 flex justify-between items-center mt-4 bg-card-bg/40 border border-border p-4 rounded-xl">
+                            <span class="status-msg text-xs text-text-secondary font-medium" id="settings-save-status"></span>
+                            <button type="submit" class="submit-btn bg-work/20 hover:bg-work/30 border border-work/40 text-text-primary font-bold px-6 py-2.5 rounded-lg transition-all duration-200 shadow-md">Apply Settings</button>
+                        </div>
                     </div>
                 </form>
             </section>
 
             <!-- TAB 4: ZEN SPACE -->
             <section class="tab-content" id="tab-zen">
-                <header class="section-header">
+                <header class="section-header flex justify-between items-start mb-6">
                     <div>
-                        <h2>Attention Restoration Room</h2>
-                        <p class="subtitle">Relax your directed attention. Gently move your mouse over the canvas and breathe in rhythm with the stardust expansion.</p>
+                        <h2 class="font-display font-semibold text-2xl tracking-tight bg-gradient-to-r from-text-primary to-work bg-clip-text text-transparent">Attention Restoration Room</h2>
+                        <p class="subtitle text-text-secondary text-sm mt-1">Relax your directed attention. Gently move your mouse over the canvas and breathe in rhythm with the stardust expansion.</p>
                     </div>
                 </header>
-                <div class="grid-layout">
-                    <!-- Left: Stardust breathing canvas (span-2) -->
-                    <div class="card glass-card span-2 zen-card" style="padding: 1.5rem;">
-                        <div class="zen-visualizer-bar" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; width: 100%; justify-content: flex-start; align-items: center; flex-wrap: wrap;">
-                            <span style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; margin-right: 0.5rem;">Visualizer Mode</span>
-                            <button type="button" class="filter-pill active" id="zen-mode-cosmic" onclick="setZenVisualizerMode('cosmic')">✨ Cosmic Flow</button>
-                            <button type="button" class="filter-pill" id="zen-mode-ocean" onclick="setZenVisualizerMode('ocean')">🌊 Ocean Waves</button>
-                            <button type="button" class="filter-pill" id="zen-mode-forest" onclick="setZenVisualizerMode('forest')">🌿 Forest Light</button>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    
+                    <!-- Left: Stardust Breathing Canvas -->
+                    <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 lg:col-span-8 flex flex-col gap-4">
+                        <div class="zen-visualizer-bar flex items-center gap-2 flex-wrap pb-2 border-b border-border/40">
+                            <span class="text-[10px] font-bold text-text-muted uppercase tracking-wider mr-2">Visualizer Mode</span>
+                            <button type="button" class="filter-pill active text-xs font-semibold px-3 py-1 rounded-full" id="zen-mode-cosmic" onclick="setZenVisualizerMode('cosmic')">✨ Cosmic Flow</button>
+                            <button type="button" class="filter-pill text-xs font-semibold px-3 py-1 rounded-full" id="zen-mode-ocean" onclick="setZenVisualizerMode('ocean')">🌊 Ocean Waves</button>
+                            <button type="button" class="filter-pill text-xs font-semibold px-3 py-1 rounded-full" id="zen-mode-forest" onclick="setZenVisualizerMode('forest')">🌿 Forest Light</button>
                         </div>
-                        <div class="zen-breathing-bar" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; width: 100%; justify-content: flex-start; align-items: center; flex-wrap: wrap; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 0.5rem;">
-                            <span style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; margin-right: 0.5rem;">Breathing Rhythm</span>
-                            <button type="button" class="filter-pill active" id="breath-rhythm-box" onclick="setBreathingRhythm('box')">💨 Box (4-4-4-4)</button>
-                            <button type="button" class="filter-pill" id="breath-rhythm-relax" onclick="setBreathingRhythm('relax')">💤 Relax (4-7-8)</button>
-                            <button type="button" class="filter-pill" id="breath-rhythm-coherent" onclick="setBreathingRhythm('coherent')">⚖️ Coherent (5-5)</button>
+                        <div class="zen-breathing-bar flex items-center gap-2 flex-wrap pb-3">
+                            <span class="text-[10px] font-bold text-text-muted uppercase tracking-wider mr-2">Breathing Rhythm</span>
+                            <button type="button" class="filter-pill active text-xs font-semibold px-3 py-1 rounded-full" id="breath-rhythm-box" onclick="setBreathingRhythm('box')">💨 Box (4-4-4-4)</button>
+                            <button type="button" class="filter-pill text-xs font-semibold px-3 py-1 rounded-full" id="breath-rhythm-relax" onclick="setBreathingRhythm('relax')">💤 Relax (4-7-8)</button>
+                            <button type="button" class="filter-pill text-xs font-semibold px-3 py-1 rounded-full" id="breath-rhythm-coherent" onclick="setBreathingRhythm('coherent')">⚖️ Coherent (5-5)</button>
                         </div>
-                        <div class="zen-canvas-container visualizer-cosmic">
-                            <canvas id="zen-canvas"></canvas>
-                            <div class="zen-overlay">
-                                <div class="zen-breather" id="zen-breather-bubble"></div>
-                                <div class="zen-breather-text" id="zen-breather-text">Zen Active</div>
+                        
+                        <div class="zen-canvas-container relative w-full h-[400px] border border-border/60 bg-black/40 rounded-xl overflow-hidden shadow-inner flex items-center justify-center visualizer-cosmic">
+                            <canvas id="zen-canvas" class="absolute inset-0 w-full h-full block cursor-crosshair"></canvas>
+                            <div class="zen-overlay relative pointer-events-none flex flex-col items-center justify-center text-center z-10">
+                                <div class="zen-breather w-20 h-20 bg-recharge/30 border border-recharge/40 rounded-full transition-all duration-[3000ms] ease-in-out shadow-[0_0_30px_rgba(var(--recharge-color-rgb),0.3)] mb-4" id="zen-breather-bubble"></div>
+                                <div class="zen-breather-text font-display font-bold text-lg text-text-primary uppercase tracking-widest drop-shadow" id="zen-breather-text">Zen Active</div>
                             </div>
                         </div>
-                        <div class="zen-controls" style="margin-top: 1.5rem; display: flex; justify-content: center;">
-                            <button type="button" class="toggle-btn" id="zen-reset-particles-btn" onclick="resetZenParticles()">Re-seed Particles</button>
+                        
+                        <div class="zen-controls flex justify-center mt-2">
+                            <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200" id="zen-reset-particles-btn" onclick="resetZenParticles()">Re-seed Particles</button>
                         </div>
-                        <div class="zen-instructions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); width: 100%;">
-                            <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                                <span>💨</span> Box Breathing Guide
-                            </h4>
-                            <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 1rem;">
-                                This room uses <strong>Box Breathing (4-4-4-4)</strong>: inhale for 4 seconds, hold for 4 seconds, exhale for 4 seconds, and hold for 4 seconds. This technique regulates your autonomic nervous system, clears mental fatigue, and restores directed attention capacity.
-                            </p>
-                            <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                                <span>✨</span> Interactive Atmosphere
-                            </h4>
-                            <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 0;">
-                                Hover your mouse cursor over the canvas or click to interact with the environment. The atmosphere shifts in absolute sync with your breathing rhythm.
-                            </p>
+                        
+                        <div class="zen-instructions border-t border-border/40 mt-4 pt-4 flex flex-col gap-4">
+                            <div>
+                                <h4 class="font-display font-semibold text-sm text-text-primary mb-1 flex items-center gap-1.5">
+                                    <span>💨</span> Box Breathing Guide
+                                </h4>
+                                <p class="text-text-muted text-xs leading-relaxed">
+                                    This room utilizes <strong>Box Breathing (4-4-4-4)</strong>: inhale for 4 seconds, hold for 4 seconds, exhale for 4 seconds, and hold for 4 seconds. This technique regulates your autonomic nervous system, clears mental fatigue, and restores directed attention capacity.
+                                </p>
+                            </div>
+                            <div>
+                                <h4 class="font-display font-semibold text-sm text-text-primary mb-1 flex items-center gap-1.5">
+                                    <span>✨</span> Interactive Atmosphere
+                                </h4>
+                                <p class="text-text-muted text-xs leading-relaxed">
+                                    Hover your mouse cursor over the canvas or click to interact with the environment. The particle streams adjust in absolute synchronization with your selected breathing rhythm.
+                                </p>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Right: Zen Widgets (span-1) -->
-                    <div class="span-1" style="display: flex; flex-direction: column; gap: 1.5rem;">
-                        <!-- Ambient Soundscapes Synthesizer Widget -->
-                        <div class="card glass-card soundscape-card" id="soundscape-card">
-                            <div>
-                                <h3 style="margin-bottom: 0.25rem;">Ambient Soundscapes</h3>
-                                <p class="card-desc" style="margin-bottom: 0.85rem;">Dynamically synthesized offline audio to restore focus.</p>
-                                
-                                <div class="soundscape-visualizer-container" id="soundscape-eq">
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                    <div class="eq-bar"></div>
-                                </div>
-                                
-                                <div class="soundscape-presets-grid">
-                                    <button type="button" class="sound-toggle-btn" id="sound-btn-drone" onclick="toggleSynthSound('drone')">
-                                        <span class="sound-icon">🧘</span>
-                                        <div class="sound-info">
-                                            <span class="sound-name">Alpha Drone</span>
-                                            <span class="sound-status" id="status-drone">Muted</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" class="sound-toggle-btn" id="sound-btn-rain" onclick="toggleSynthSound('rain')">
-                                        <span class="sound-icon">🌧️</span>
-                                        <div class="sound-info">
-                                            <span class="sound-name">Forest Rain</span>
-                                            <span class="sound-status" id="status-rain">Muted</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" class="sound-toggle-btn" id="sound-btn-chimes" onclick="toggleSynthSound('chimes')">
-                                        <span class="sound-icon">🎐</span>
-                                        <div class="sound-info">
-                                            <span class="sound-name">Wind Chimes</span>
-                                            <span class="sound-status" id="status-chimes">Muted</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" class="sound-toggle-btn strike-btn" id="sound-btn-bowl" onclick="strikeSingingBowl()">
-                                        <span class="sound-icon">🥣</span>
-                                        <div class="sound-info">
-                                            <span class="sound-name">Singing Bowl</span>
-                                            <span class="sound-status">Strike Bowl</span>
-                                        </div>
-                                    </button>
-                                </div>
+                    <!-- Right Column: Soundscapes, Community, Grounding, Words -->
+                    <div class="lg:col-span-4 flex flex-col gap-6">
+                        
+                        <!-- Ambient Soundscapes Synthesizer -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 soundscape-card" id="soundscape-card">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-0.5">Ambient Soundscapes</h3>
+                            <p class="card-desc text-text-muted text-xs mb-3">Dynamically synthesized offline audio to restore focus.</p>
+                            
+                            <div class="soundscape-visualizer-container flex items-end justify-center gap-[3px] h-10 bg-black/10 rounded-lg p-2 mb-4 border border-border/40 shadow-inner overflow-hidden" id="soundscape-eq">
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
+                                <div class="eq-bar w-1 bg-recharge rounded-t transition-all duration-300" style="height: 10%;"></div>
                             </div>
                             
-                            <div class="soundscape-volume-control" style="border-top: 1px solid var(--border-color); padding-top: 1rem; display: flex; align-items: center; gap: 0.75rem; width: 100%;">
-                                <span style="font-size: 1rem;">🔊</span>
-                                <input type="range" id="master-volume-slider" min="0" max="100" value="50" oninput="updateMasterVolume(this.value)" style="flex: 1; accent-color: var(--recharge-color); height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; cursor: pointer;">
-                                <span id="master-volume-label" style="font-size: 0.75rem; font-family: 'Outfit', sans-serif; color: var(--text-secondary); min-width: 28px; text-align: right;">50%</span>
+                            <div class="soundscape-presets-grid grid grid-cols-2 gap-2">
+                                <button type="button" class="sound-toggle-btn flex items-center gap-2.5 p-2 bg-input-bg border border-border rounded-lg hover:bg-card-bg transition-all duration-200 text-left min-w-0" id="sound-btn-drone" onclick="toggleSynthSound('drone')">
+                                    <span class="sound-icon text-lg flex-shrink-0">🧘</span>
+                                    <div class="sound-info flex flex-col min-w-0 leading-tight">
+                                        <span class="sound-name text-xs font-semibold text-text-primary truncate">Alpha Drone</span>
+                                        <span class="sound-status text-[9px] text-text-muted mt-0.5" id="status-drone">Muted</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="sound-toggle-btn flex items-center gap-2.5 p-2 bg-input-bg border border-border rounded-lg hover:bg-card-bg transition-all duration-200 text-left min-w-0" id="sound-btn-rain" onclick="toggleSynthSound('rain')">
+                                    <span class="sound-icon text-lg flex-shrink-0">🌧️</span>
+                                    <div class="sound-info flex flex-col min-w-0 leading-tight">
+                                        <span class="sound-name text-xs font-semibold text-text-primary truncate">Forest Rain</span>
+                                        <span class="sound-status text-[9px] text-text-muted mt-0.5" id="status-rain">Muted</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="sound-toggle-btn flex items-center gap-2.5 p-2 bg-input-bg border border-border rounded-lg hover:bg-card-bg transition-all duration-200 text-left min-w-0" id="sound-btn-chimes" onclick="toggleSynthSound('chimes')">
+                                    <span class="sound-icon text-lg flex-shrink-0">🎐</span>
+                                    <div class="sound-info flex flex-col min-w-0 leading-tight">
+                                        <span class="sound-name text-xs font-semibold text-text-primary truncate">Wind Chimes</span>
+                                        <span class="sound-status text-[9px] text-text-muted mt-0.5" id="status-chimes">Muted</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="sound-toggle-btn strike-btn flex items-center gap-2.5 p-2 bg-input-bg border border-border rounded-lg hover:bg-card-bg transition-all duration-200 text-left min-w-0" id="sound-btn-bowl" onclick="strikeSingingBowl()">
+                                    <span class="sound-icon text-lg flex-shrink-0">🥣</span>
+                                    <div class="sound-info flex flex-col min-w-0 leading-tight">
+                                        <span class="sound-name text-xs font-semibold text-text-primary truncate">Singing Bowl</span>
+                                        <span class="sound-status text-[9px] text-text-muted mt-0.5">Strike Bowl</span>
+                                    </div>
+                                </button>
+                            </div>
+                            
+                            <div class="soundscape-volume-control border-t border-border/40 mt-4 pt-3 flex items-center gap-3 w-full">
+                                <span class="text-xs">🔊</span>
+                                <input type="range" id="master-volume-slider" min="0" max="100" value="50" oninput="updateMasterVolume(this.value)" class="flex-grow accent-recharge h-1 bg-white/10 rounded-full cursor-pointer outline-none">
+                                <span class="text-[10px] font-semibold text-text-muted min-w-[28px] text-right" id="master-volume-label">50%</span>
                             </div>
                         </div>
 
-                        <!-- 5-4-3-2-1 Sensory Grounding Widget -->
-                        <div class="card glass-card grounding-card" id="grounding-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 1.5rem;">
+                        <!-- Simulated community circles -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 community-panel" id="community-card">
+                            <h3 class="font-display font-medium text-base text-text-primary mb-0.5">Shared Stillness</h3>
+                            <p class="card-desc text-text-muted text-xs mb-3">Simulated mindfulness circles and collective milestones.</p>
+                            
+                            <div class="border-b border-dashed border-border/40 pb-3 mb-3">
+                                <label class="text-[9px] font-bold text-text-muted uppercase tracking-wider block mb-1">Today's Prompt</label>
+                                <p class="text-xs text-text-secondary italic" id="community-prompt">"Take a moment to listen to the furthest sound you can hear."</p>
+                            </div>
+                            
+                            <div class="border-b border-dashed border-border/40 pb-3 mb-3">
+                                <label class="text-[9px] font-bold text-text-muted uppercase tracking-wider block mb-1">Collective Milestones</label>
+                                <div class="flex justify-between items-baseline mt-1 text-xs">
+                                    <span class="text-text-secondary">Collective Breaths Logged:</span>
+                                    <strong class="font-display text-base text-recharge font-bold" id="collective-breaths-counter">10,482</strong>
+                                </div>
+                                <div class="w-full h-1.5 bg-black/10 rounded-full overflow-hidden mt-1.5">
+                                    <div class="h-full bg-recharge rounded-full transition-all duration-500 ease-out" id="collective-breaths-progress" style="width: 70%;"></div>
+                                </div>
+                            </div>
+                            
                             <div>
-                                <h3 style="margin-bottom: 0.25rem;">Sensory Reset</h3>
-                                <p class="card-desc" style="margin-bottom: 1.25rem;">The 5-4-3-2-1 grounding method helps reset a fatigued nervous system.</p>
+                                <label class="text-[9px] font-bold text-text-muted uppercase tracking-wider block mb-2">Active Circles</label>
+                                <div class="flex flex-col gap-2">
+                                    <div class="community-circle-item flex items-center justify-between p-2 bg-input-bg border border-border/60 rounded-lg text-xs">
+                                        <div class="min-w-0">
+                                            <span class="font-semibold text-text-primary block truncate">Morning Calm</span>
+                                            <span class="text-[10px] text-text-muted block truncate mt-0.5">48 online breathing now</span>
+                                        </div>
+                                        <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-3 py-1 rounded-md text-[10px] font-bold transition-all duration-200" id="circle-join-btn-morning" onclick="toggleJoinCircle('morning')">Join</button>
+                                    </div>
+                                    <div class="community-circle-item flex items-center justify-between p-2 bg-input-bg border border-border/60 rounded-lg text-xs">
+                                        <div class="min-w-0">
+                                            <span class="font-semibold text-text-primary block truncate">Deep Focus</span>
+                                            <span class="text-[10px] text-text-muted block truncate mt-0.5">132 in the sprint zone</span>
+                                        </div>
+                                        <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-3 py-1 rounded-md text-[10px] font-bold transition-all duration-200" id="circle-join-btn-focus" onclick="toggleJoinCircle('focus')">Join</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 5-4-3-2-1 Sensory Grounding -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 grounding-card flex flex-col justify-between min-h-[380px]" id="grounding-card">
+                            <div>
+                                <h3 class="font-display font-medium text-base text-text-primary mb-0.5">Sensory Reset</h3>
+                                <p class="card-desc text-text-muted text-xs mb-4">The 5-4-3-2-1 grounding method resets a fatigued nervous system.</p>
                                 
                                 <div class="grounding-step-container">
-                                    <div class="grounding-step-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-                                        <span class="grounding-step-badge" id="grounding-badge" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--recharge-color); letter-spacing: 0.05em;">Step 1 of 5</span>
-                                        <span class="grounding-step-sense" id="grounding-sense" style="font-size: 0.95rem; font-weight: 600;">👀 Sight</span>
+                                    <div class="grounding-step-header flex justify-between items-center border-b border-border/40 pb-2 mb-3">
+                                        <span class="grounding-step-badge text-[10px] font-bold text-recharge uppercase tracking-wider" id="grounding-badge">Step 1 of 5</span>
+                                        <span class="grounding-step-sense text-xs font-semibold text-text-primary" id="grounding-sense">👀 Sight</span>
                                     </div>
                                     
-                                    <div class="grounding-step-body">
-                                        <h4 id="grounding-prompt-title" style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">Find 5 things you can see</h4>
-                                        <p id="grounding-prompt-desc" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 1.25rem;">Acknowledge 5 items in your visual field. Type them below to ground your focus.</p>
+                                    <div class="grounding-step-body mb-4">
+                                        <h4 class="font-display font-semibold text-sm text-text-primary mb-1" id="grounding-prompt-title">Find 5 things you can see</h4>
+                                        <p class="text-text-muted text-[11px] leading-relaxed" id="grounding-prompt-desc">Acknowledge 5 items in your visual field. Type them below to ground your focus.</p>
                                     </div>
                                     
-                                    <div class="grounding-inputs-area" id="grounding-inputs-area">
-                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;">
-                                            <input type="text" class="grounding-field" id="grounding-input-0" placeholder="Acknowledge item 1..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                    <div class="grounding-inputs-area flex flex-col gap-2" id="grounding-inputs-area">
+                                        <div class="grounding-input-row" id="row-input-0">
+                                            <input type="text" class="grounding-field bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8" id="grounding-input-0" placeholder="Acknowledge item 1...">
                                         </div>
-                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-1">
-                                            <input type="text" class="grounding-field" id="grounding-input-1" placeholder="Acknowledge item 2..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        <div class="grounding-input-row" id="row-input-1">
+                                            <input type="text" class="grounding-field bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8" id="grounding-input-1" placeholder="Acknowledge item 2...">
                                         </div>
-                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-2">
-                                            <input type="text" class="grounding-field" id="grounding-input-2" placeholder="Acknowledge item 3..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        <div class="grounding-input-row" id="row-input-2">
+                                            <input type="text" class="grounding-field bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8" id="grounding-input-2" placeholder="Acknowledge item 3...">
                                         </div>
-                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-3">
-                                            <input type="text" class="grounding-field" id="grounding-input-3" placeholder="Acknowledge item 4..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        <div class="grounding-input-row" id="row-input-3">
+                                            <input type="text" class="grounding-field bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8" id="grounding-input-3" placeholder="Acknowledge item 4...">
                                         </div>
-                                        <div class="grounding-input-row" style="margin-bottom: 0.5rem;" id="row-input-4">
-                                            <input type="text" class="grounding-field" id="grounding-input-4" placeholder="Acknowledge item 5..." style="width: 100%; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color var(--transition-speed) ease;">
+                                        <div class="grounding-input-row" id="row-input-4">
+                                            <input type="text" class="grounding-field bg-input-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8" id="grounding-input-4" placeholder="Acknowledge item 5...">
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="grounding-actions" style="margin-top: 1.25rem; display: flex; gap: 0.5rem; justify-content: flex-end; width: 100%;">
-                                <button type="button" class="goal-clear-btn" id="grounding-prev-btn" onclick="prevGroundingStep()" style="display: none; padding: 0.45rem 0.85rem; font-size: 0.8rem; margin: 0;">Back</button>
-                                <button type="button" class="submit-btn" id="grounding-next-btn" onclick="nextGroundingStep()" style="padding: 0.45rem 1rem; font-size: 0.8rem; margin: 0; background: var(--recharge-color); border-color: var(--recharge-color); color: #0b0f19; font-weight: 600;">Next Step</button>
+                            <div class="grounding-actions flex justify-end gap-2 mt-4 pt-3 border-t border-border/40 w-full">
+                                <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-3 py-1.5 rounded-lg text-xs font-semibold" id="grounding-prev-btn" onclick="prevGroundingStep()" style="display: none;">Back</button>
+                                <button type="button" class="submit-btn bg-recharge hover:bg-recharge/90 text-background border border-recharge px-4 py-1.5 rounded-lg text-xs font-bold shadow" id="grounding-next-btn" onclick="nextGroundingStep()">Next Step</button>
                             </div>
                         </div>
 
-                        <!-- Mindful Word Recommender Widget -->
-                        <div class="card glass-card word-recommender-card" id="word-recommender-card" style="display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 1.5rem;">
+                        <!-- Mindful Word Recommender -->
+                        <div class="card bg-card-bg/60 backdrop-blur-2xl border border-border rounded-xl p-5 hover:border-work/20 shadow-lg transition-all duration-300 word-recommender-card flex flex-col justify-between min-h-[380px]" id="word-recommender-card">
                             <div>
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.25rem;">
-                                    <h3 style="margin-bottom: 0;">Focus Themes</h3>
-                                    <span class="word-badge badge-calm" id="active-word-badge">Calm</span>
+                                <div class="flex justify-between items-start mb-2">
+                                    <h3 class="font-display font-medium text-base text-text-primary">Focus Themes</h3>
+                                    <span class="word-badge text-[9px] font-bold px-2 py-0.5 rounded border border-recharge/30 bg-recharge/10 text-recharge uppercase tracking-wider" id="active-word-badge">Calm</span>
                                 </div>
-                                <p class="card-desc" style="margin-bottom: 1rem;">Select a mindful theme to anchor your focus and energy during breaks.</p>
+                                <p class="card-desc text-text-muted text-xs mb-3">Select a mindful theme to anchor your focus and energy during breaks.</p>
                                 
-                                <div class="word-content-container" id="active-word-content" style="background: var(--input-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; transition: opacity 0.2s ease;">
-                                    <div style="display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem;">
-                                        <h4 id="active-word-title" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0;">Stillness</h4>
-                                        <span id="active-word-pronounce" style="font-size: 0.8rem; color: var(--text-muted); font-family: 'Outfit', sans-serif;">/ˈstɪlnəs/</span>
+                                <div class="word-content-container bg-input-bg border border-border rounded-lg p-3.5 mb-3 transition-opacity duration-200" id="active-word-content">
+                                    <div class="flex items-baseline gap-2 mb-1">
+                                        <h4 class="font-display font-bold text-base text-text-primary" id="active-word-title">Stillness</h4>
+                                        <span class="text-xs text-text-muted" id="active-word-pronounce">/ˈstɪlnəs/</span>
                                     </div>
-                                    <p id="active-word-prompt" style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">Observe the quiet space between your breaths. In this stillness, find your center.</p>
+                                    <p class="text-[11px] text-text-secondary leading-relaxed" id="active-word-prompt">Observe the quiet space between your breaths. In this stillness, find your center.</p>
                                 </div>
                                 
-                                <div style="margin-bottom: 1rem;">
-                                    <label style="font-size: 0.7rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Select Theme</label>
-                                    <div class="words-grid">
-                                        <button type="button" class="word-pill-btn active" onclick="selectRecommendedWordByVal('Stillness')">Stillness</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Clarity')">Clarity</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Presence')">Presence</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Release')">Release</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Serenity')">Serenity</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Flow')">Flow</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Patience')">Patience</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Gratitude')">Gratitude</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Balance')">Balance</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Harmony')">Harmony</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Resilience')">Resilience</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Simplicity')">Simplicity</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Intention')">Intention</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Compassion')">Compassion</button>
-                                        <button type="button" class="word-pill-btn" onclick="selectRecommendedWordByVal('Acceptance')">Acceptance</button>
+                                <div class="mb-3">
+                                    <label class="text-[9px] font-bold text-text-muted uppercase tracking-wider block mb-2">Select Theme</label>
+                                    <div class="words-grid flex flex-wrap gap-1">
+                                        <button type="button" class="word-pill-btn active text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Stillness')">Stillness</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Clarity')">Clarity</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Presence')">Presence</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Release')">Release</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Serenity')">Serenity</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Flow')">Flow</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Patience')">Patience</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Gratitude')">Gratitude</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Balance')">Balance</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Harmony')">Harmony</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Resilience')">Resilience</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Simplicity')">Simplicity</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Intention')">Intention</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Compassion')">Compassion</button>
+                                        <button type="button" class="word-pill-btn text-[10px] font-bold bg-input-bg hover:bg-card-bg border border-border/80 px-2 py-1 rounded transition-all duration-200" onclick="selectRecommendedWordByVal('Acceptance')">Acceptance</button>
                                     </div>
                                 </div>
                                 
-                                <div class="word-reflection-section" style="margin-bottom: 0.75rem;">
-                                    <label for="word-reflection-input" style="font-size: 0.7rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem;">Quick Reflection</label>
-                                    <input type="text" id="word-reflection-input" placeholder="Type a sentence about this theme..." class="grounding-field" style="font-size: 0.8rem; padding: 0.45rem 0.75rem;">
+                                <div class="word-reflection-section mb-3">
+                                    <label for="word-reflection-input" class="text-[9px] font-bold text-text-muted uppercase tracking-wider block mb-1">Quick Reflection</label>
+                                    <input type="text" id="word-reflection-input" placeholder="Type a sentence about this theme..." class="grounding-field bg-input-bg border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-recharge/50 w-full h-8">
                                 </div>
                             </div>
                             
-                            <div class="word-actions" style="display: flex; gap: 0.5rem; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; margin-top: 0.5rem;">
-                                <div style="display: flex; gap: 0.35rem;">
-                                    <button type="button" class="goal-clear-btn" onclick="recommendRandomWord()" style="padding: 0.4rem 0.75rem; font-size: 0.75rem; margin: 0;" title="Shuffle to a random word">🎲 Shuffle</button>
-                                    <button type="button" class="goal-clear-btn" onclick="setAsReflectionTheme()" style="padding: 0.4rem 0.75rem; font-size: 0.75rem; margin: 0;" title="Prefill Dashboard Reflection with this theme">🧘 Set Theme</button>
+                            <div class="word-actions flex justify-between items-center gap-2 mt-4 pt-3 border-t border-border/40 w-full flex-wrap">
+                                <div class="flex gap-1.5">
+                                    <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200" onclick="recommendRandomWord()" title="Shuffle theme">🎲 Shuffle</button>
+                                    <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200" onclick="setAsReflectionTheme()" title="Prefill theme to dashboard reflection">🧘 Set Theme</button>
                                 </div>
-                                <button type="button" class="submit-btn" id="save-word-reflection-btn" onclick="saveZenWordReflection()" style="padding: 0.4rem 0.95rem; font-size: 0.75rem; margin: 0; background: var(--recharge-color); border-color: var(--recharge-color); color: #0b0f19; font-weight: 600;">Save Reflection</button>
+                                <button type="button" class="submit-btn bg-recharge hover:bg-recharge/90 text-background border border-recharge px-3.5 py-1.5 rounded-lg text-[10px] font-bold shadow" id="save-word-reflection-btn" onclick="saveZenWordReflection()">Save Reflection</button>
                             </div>
                         </div>
                     </div>
@@ -967,27 +1141,27 @@
     </div>
 
     <!-- Scroll to Top -->
-    <button class="scroll-top-btn" id="scroll-top-btn" aria-label="Scroll to top" onclick="scrollToTop()">↑</button>
+    <button class="scroll-top-btn fixed bottom-6 right-6 w-10 h-10 rounded-full bg-surface border border-border hover:border-border-hover text-text-primary flex items-center justify-center shadow-2xl z-40 transition-all duration-300 hover:scale-105" id="scroll-top-btn" aria-label="Scroll to top" onclick="scrollToTop()">↑</button>
 
     <!-- Floating Settings Changes Banner -->
-    <div class="floating-settings-banner" id="unsaved-changes-banner">
-        <div class="banner-content">
-            <span class="banner-icon">⚙️</span>
-            <span class="banner-text">You have unsaved preferences changes.</span>
+    <div class="floating-settings-banner fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface/90 border border-border px-5 py-3.5 rounded-xl shadow-2xl z-50 flex items-center gap-5 backdrop-blur-md transition-all duration-300 translate-y-20 opacity-0 pointer-events-none" id="unsaved-changes-banner">
+        <div class="banner-content flex items-center gap-2">
+            <span class="banner-icon text-lg">⚙️</span>
+            <span class="banner-text text-xs text-text-secondary font-medium">You have unsaved preferences changes.</span>
         </div>
-        <div class="banner-actions">
-            <button type="button" class="banner-btn discard-btn" onclick="discardSettingsChanges()">Discard</button>
-            <button type="button" class="banner-btn apply-btn" onclick="applySettingsChanges()">Apply Settings</button>
+        <div class="banner-actions flex gap-2">
+            <button type="button" class="bg-input-bg hover:bg-card-bg border border-border hover:border-border-hover text-text-primary px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200" onclick="discardSettingsChanges()">Discard</button>
+            <button type="button" class="bg-work/20 hover:bg-work/30 border border-work/40 text-text-primary px-4 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 shadow" onclick="applySettingsChanges()">Apply Settings</button>
         </div>
     </div>
 
     <!-- Notification Toast -->
-    <div class="toast" id="app-toast">
-        <span class="toast-icon" id="toast-icon">✓</span>
-        <span id="toast-text">Settings Saved successfully!</span>
-        <div class="toast-progress" id="toast-progress"></div>
+    <div class="toast fixed top-6 right-6 bg-surface border border-border/80 px-4 py-3 rounded-xl shadow-2xl z-50 flex items-center gap-2.5 backdrop-blur-md transition-all duration-300 translate-y-[-100px] opacity-0" id="app-toast">
+        <span class="toast-icon text-recharge font-bold" id="toast-icon">✓</span>
+        <span class="text-xs text-text-primary font-medium" id="toast-text">Settings Saved successfully!</span>
+        <div class="toast-progress absolute bottom-0 left-0 h-0.5 bg-recharge transition-all duration-300" id="toast-progress"></div>
     </div>
 
-    <script src="/static/js/dashboard.js?v=18"></script>
+    <script src="/static/js/dashboard.js?v=19"></script>
 </body>
 </html>

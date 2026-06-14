@@ -61,9 +61,27 @@ def require_local_origin(f):
         return f(*args, **kwargs)
     return decorated
 
+import secrets
+SHARED_API_TOKEN = secrets.token_hex(16)
+
+def require_api_token(f):
+    """API token validation decorator to protect backend from unauthorized local calls."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get("X-MIND-FLOW-TOKEN")
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+        
+        if not token or not secrets.compare_digest(token, SHARED_API_TOKEN):
+            return jsonify({"error": "Unauthorized: invalid or missing API token"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
 # Adjust path to import from parent folder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from backend.database import MindFlowDB, matches_keyword, get_default_data_dir, matches_any_keyword
+from backend.database import MindFlowDB, matches_keyword, get_default_data_dir, matches_any_keyword, is_browser_process
 
 def get_resource_path(relative_path):
     """ Get absolute path to resource, prioritizing local disk paths before PyInstaller bundled ones """
@@ -189,6 +207,7 @@ shared_state = ThreadSafeDict({
 
 # In-memory cache for weekly analytics endpoint responses
 _analytics_cache = {}
+_analytics_cache_date = None
 
 
 @app.route("/")
@@ -197,6 +216,7 @@ def index():
     return send_from_directory(app.template_folder, "index.html")
 
 @app.route("/api/status", methods=["GET"])
+@require_api_token
 def get_status():
     settings = db.get_settings()
     adaptive = db.get_adaptive_times()
@@ -206,8 +226,13 @@ def get_status():
     work_limit_seconds = settings["work_duration_minutes"] * 60
     
     # Retrieve base cached status data
+    # Retrieve base cached status data
     stats = db.get_cached_status_data()
-    current_energy = stats["current_energy"]
+    
+    # Read in-memory battery capacity and map to 1-5 scale for backward compatibility
+    battery_cap = shared_state.get('battery_capacity', 100.0)
+    current_energy = max(1.0, min(5.0, battery_cap / 20.0))
+    
     high_stress_alert = stats["high_stress_alert"]
     latest_mood = stats["latest_mood"]
     today_work = stats["today_work_seconds"]
@@ -254,7 +279,7 @@ def get_status():
             companion_message = "😴 Exhaustion detected. Give yourself permission to log off early or start a rest block."
     elif current_energy <= 2:
         companion_message = "🔋 Battery critical! Focus blocks are blocked. Rest more, start your rest cycle, and let your mind drift in Zen Space."
-    elif current_energy == 3:
+    elif current_energy <= 3:
         companion_message = "🌿 Medium energy. Rest more before you reach exhaustion. Pace yourself and take a deep, mindful breath."
     elif cur_mode == "work":
         companion_message = "💻 Focus session active. Remember: to sustain this, plan to rest more during upcoming recharge blocks!"
@@ -267,13 +292,13 @@ def get_status():
  
     # Calculate battery forecast & circadian check
     base_forecast = ""
-    if cur_mode == "work" and current_energy > 1:
-        minutes_left = (current_energy - 1) * 5
-        base_forecast = f"Forecast: Battery will deplete to critical in ~{minutes_left} minutes of continuous focus."
-    elif cur_mode in ["recharge", "rest"] and current_energy < 5:
-        minutes_left = (5 - current_energy) * 2
-        base_forecast = f"Forecast: Fully charged battery expected in ~{minutes_left} minutes of continuous recharge."
-    elif current_energy == 1:
+    if cur_mode == "work" and battery_cap > 0:
+        minutes_left = int(battery_cap / 0.5)
+        base_forecast = f"Forecast: Battery will deplete in ~{minutes_left} minutes of focus."
+    elif cur_mode in ["recharge", "rest"] and battery_cap < 100:
+        minutes_left = int((100 - battery_cap) / 2.5)
+        base_forecast = f"Forecast: Fully charged battery expected in ~{minutes_left} minutes."
+    elif battery_cap <= 0:
         base_forecast = f"Warning: Cognitive stamina depleted. Recommend a rest cycle of {adaptive_rest_limit_seconds} seconds."
     else:
         base_forecast = "Forecast: Stamina optimal. Pace your sprints to sustain focus."
@@ -291,7 +316,9 @@ def get_status():
         "adaptive_reason": adaptive_reason,
         "idle_seconds": idle,
         "tracking_active": shared_state["tracking_active"],
-        "current_energy": current_energy,
+        "current_energy": round(current_energy, 2),
+        "battery_capacity": round(battery_cap, 2),
+        "consecutive_work_minutes": round(shared_state.get('battery_consecutive_work', 0.0), 2),
         "today_work_seconds": int(today_work),
         "today_recharge_seconds": int(today_recharge),
         "today_rest_seconds": int(today_rest),
@@ -309,6 +336,7 @@ def get_status():
 
 @app.route("/api/status/toggle", methods=["POST"])
 @require_local_origin
+@require_api_token
 def toggle_tracking():
     data = request.get_json(silent=True) or {}
     enable = data.get("enable", not shared_state["tracking_active"])
@@ -318,6 +346,7 @@ def toggle_tracking():
 
 @app.route("/api/settings", methods=["GET", "POST"])
 @require_local_origin
+@require_api_token
 def manage_settings():
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
@@ -328,6 +357,7 @@ def manage_settings():
 
 @app.route("/api/goal", methods=["GET", "POST"])
 @require_local_origin
+@require_api_token
 def manage_goal():
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
@@ -341,6 +371,7 @@ def manage_goal():
 
 @app.route("/api/hydration", methods=["GET", "POST"])
 @require_local_origin
+@require_api_token
 def manage_hydration():
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
@@ -373,6 +404,7 @@ def manage_hydration():
 
 @app.route("/api/reflections", methods=["GET", "POST"])
 @require_local_origin
+@require_api_token
 def manage_reflections():
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
@@ -425,7 +457,9 @@ def manage_reflections():
         return jsonify(db.get_reflections())
 
 @app.route("/api/analytics", methods=["GET"])
+@require_api_token
 def get_analytics():
+    global _analytics_cache, _analytics_cache_date
     # Parse week offset
     week_offset = 0
     try:
@@ -435,6 +469,12 @@ def get_analytics():
         
     from datetime import date, timedelta, datetime
     today = date.today()
+    
+    # Invalidate cache if the date has changed to prevent memory leaks from unbounded old entries
+    if _analytics_cache_date != today:
+        _analytics_cache.clear()
+        _analytics_cache_date = today
+        
     today_str = today.isoformat()
     
     settings = db.get_settings()
@@ -442,9 +482,10 @@ def get_analytics():
     recharge_keywords = settings.get("recharge_keywords", [])
     
     with db.lock:
-        sessions_len = len(db.data["sessions"])
-        reflections_len = len(db.data["reflections"])
-        app_usage_len = len(db.data.setdefault("app_usage", []))
+        with db.connection() as conn:
+            sessions_len = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            reflections_len = conn.execute("SELECT COUNT(*) FROM reflections").fetchone()[0]
+            app_usage_len = conn.execute("SELECT COUNT(*) FROM app_usage").fetchone()[0]
         
     cache_key = (
         week_offset,
@@ -537,10 +578,16 @@ def get_analytics():
                         cat = classification_cache[cache_key_cls]
                     else:
                         cat = "neutral"
-                        if matches_any_keyword(work_keywords, process) or matches_any_keyword(work_keywords, t):
-                            cat = "work"
-                        elif matches_any_keyword(recharge_keywords, process) or matches_any_keyword(recharge_keywords, t):
-                            cat = "recharge"
+                        if is_browser_process(process):
+                            if matches_any_keyword(work_keywords, t):
+                                cat = "work"
+                            elif matches_any_keyword(recharge_keywords, t):
+                                cat = "recharge"
+                        else:
+                            if matches_any_keyword(work_keywords, process) or matches_any_keyword(work_keywords, t):
+                                cat = "work"
+                            elif matches_any_keyword(recharge_keywords, process) or matches_any_keyword(recharge_keywords, t):
+                                cat = "recharge"
                         classification_cache[cache_key_cls] = cat
                     
                     title_categories[t] = cat
@@ -557,10 +604,16 @@ def get_analytics():
                     cat = classification_cache[cache_key_cls]
                 else:
                     cat = "neutral"
-                    if matches_any_keyword(work_keywords, process) or matches_any_keyword(work_keywords, title):
-                        cat = "work"
-                    elif matches_any_keyword(recharge_keywords, process) or matches_any_keyword(recharge_keywords, title):
-                        cat = "recharge"
+                    if is_browser_process(process):
+                        if matches_any_keyword(work_keywords, title):
+                            cat = "work"
+                        elif matches_any_keyword(recharge_keywords, title):
+                            cat = "recharge"
+                    else:
+                        if matches_any_keyword(work_keywords, process) or matches_any_keyword(work_keywords, title):
+                            cat = "work"
+                        elif matches_any_keyword(recharge_keywords, process) or matches_any_keyword(recharge_keywords, title):
+                            cat = "recharge"
                     classification_cache[cache_key_cls] = cat
                 title_categories[title] = cat
                 dur = entry.get("duration", 0)
@@ -833,7 +886,7 @@ def get_analytics():
                 try:
                     if datetime.fromisoformat(s["start"]).date() < today:
                         break
-                except:
+                except Exception:
                     pass
         base_today_sessions.reverse()
 
@@ -877,10 +930,59 @@ def get_analytics():
             }
             response_data["today_sessions"].append(ongoing_session)
 
+    response_data["calming_narrative"] = generate_calming_narrative()
     return jsonify(response_data)
+
+
+@app.route("/api/workspace/status", methods=["GET"])
+@require_api_token
+def get_workspace_status():
+    from backend.workspace_manager import WorkspaceManager
+    from backend.database import get_default_data_dir
+    try:
+        workspace_mgr = WorkspaceManager(get_default_data_dir())
+        cloud_sync = workspace_mgr.detect_cloud_sync()
+        
+        # List files in profiles
+        work_files = []
+        recharge_files = []
+        
+        work_dir = os.path.join(workspace_mgr.profiles_dir, "Work")
+        if os.path.exists(work_dir):
+            work_files = [f for f in os.listdir(work_dir) if f.lower() not in ["work_readme.txt", "work_readme.txt.bak"]]
+            
+        recharge_dir = os.path.join(workspace_mgr.profiles_dir, "Recharge")
+        if os.path.exists(recharge_dir):
+            recharge_files = [f for f in os.listdir(recharge_dir) if f.lower() not in ["recharge_readme.txt", "recharge_readme.txt.bak"]]
+            
+        return jsonify({
+            "cloud_sync": cloud_sync,
+            "current_mode": shared_state["current_mode"],
+            "work_files": work_files,
+            "recharge_files": recharge_files
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/workspace/restore", methods=["POST"])
+@require_local_origin
+@require_api_token
+def emergency_restore_workspace():
+    from backend.workspace_manager import WorkspaceManager
+    from backend.database import get_default_data_dir
+    try:
+        workspace_mgr = WorkspaceManager(get_default_data_dir())
+        restored = workspace_mgr.emergency_restore_all()
+        return jsonify({
+            "status": "success",
+            "restored_files": restored
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/shutdown", methods=["POST"])
 @require_local_origin
+@require_api_token
 def shutdown_app():
     cur_mode = shared_state["current_mode"]
     
@@ -904,9 +1006,22 @@ def shutdown_app():
             print(f"Error logging session on shutdown: {e}")
     
     # Graceful shutdown: flush database and exit cleanly
+    try:
+        db.save()
+    except Exception as e:
+        print(f"Error saving database on shutdown: {e}")
+        
     def terminate():
         import time
         time.sleep(0.5)
+        # Sweep back all workspace files on shutdown
+        try:
+            from backend.workspace_manager import WorkspaceManager
+            from backend.database import get_default_data_dir
+            workspace_mgr = WorkspaceManager(get_default_data_dir())
+            workspace_mgr.sweep_back_all()
+        except Exception as e:
+            print(f"Error sweeping workspace on API shutdown: {e}")
         db.save(sync=True)  # Ensure final data flush before exit
         import os
         os._exit(0)
@@ -915,8 +1030,161 @@ def shutdown_app():
     threading.Thread(target=terminate, daemon=True).start()
     return jsonify({"status": "shutdown_initiated"})
 
+
+def generate_calming_narrative():
+    from datetime import date, datetime, timedelta
+    today = date.today()
+    
+    # Gather data for the last 7 days
+    sleep_days = []
+    steps_days = []
+    energy_days = []
+    friction_days = []
+    bypassed_breaks = 0
+    
+    # Load settings
+    settings = db.get_settings()
+    sleep_target = settings.get("daily_sleep_target", 8.0)
+    step_target = settings.get("daily_step_target", 10000)
+    
+    # Scan sleep, steps, reflections, and sessions
+    with db.lock:
+        sleep_list = db.get_sleep_list()
+        steps_list = db.get_steps_list()
+        reflections = db.get_reflections()
+        sessions = db.get_sessions()
+        
+        # Get last 7 days strings
+        last_7_days = [(today - timedelta(days=i)).isoformat() for i in range(7)]
+        
+        for d in last_7_days:
+            # Sleep hours
+            for s in sleep_list:
+                if s.get("date") == d:
+                    sleep_days.append(s.get("hours", 0.0))
+                    break
+            # Steps
+            for st in steps_list:
+                if st.get("date") == d:
+                    steps_days.append(st.get("count", 0))
+                    break
+                    
+            # Reflections on that day
+            day_energy = []
+            day_friction = []
+            for r in reflections:
+                try:
+                    r_dt = datetime.fromisoformat(r["timestamp"])
+                    # Remove timezone if any
+                    if r_dt.tzinfo is not None:
+                        r_dt = r_dt.replace(tzinfo=None)
+                    if r_dt.date().isoformat() == d:
+                        day_energy.append(r.get("energy_level", 3))
+                        day_friction.append(r.get("friction_level", 3))
+                except Exception:
+                    pass
+            if day_energy:
+                energy_days.append(sum(day_energy) / len(day_energy))
+            if day_friction:
+                friction_days.append(sum(day_friction) / len(day_friction))
+                
+        # Count bypasses in the last 7 days
+        for s in sessions:
+            try:
+                s_dt = datetime.fromisoformat(s["start"])
+                if s_dt.tzinfo is not None:
+                    s_dt = s_dt.replace(tzinfo=None)
+                if (today - s_dt.date()).days < 7:
+                    if s.get("bypassed", False):
+                        bypassed_breaks += 1
+            except Exception:
+                pass
+
+    # Compute averages
+    avg_sleep = sum(sleep_days) / len(sleep_days) if sleep_days else 0.0
+    avg_steps = sum(steps_days) / len(steps_days) if steps_days else 0
+    avg_energy = sum(energy_days) / len(energy_days) if energy_days else 3.0
+    avg_friction = sum(friction_days) / len(friction_days) if friction_days else 3.0
+
+    # Build correlation points
+    narrative_parts = []
+    
+    # 1. Sleep correlation
+    if avg_sleep > 0:
+        if avg_sleep >= sleep_target:
+            narrative_parts.append(f"Your sleep averaged a restful {avg_sleep:.1f} hours, meeting your daily target. Adequate sleep keeps your mind shielded against quick friction.")
+        else:
+            narrative_parts.append(f"Your sleep averaged {avg_sleep:.1f} hours, which is slightly below your {sleep_target}h target. Tending to sleep is the foundation of cognitive rest.")
+    else:
+        narrative_parts.append("Consider logging your sleep hours on the dashboard to build calming bedtime insights.")
+        
+    # 2. Steps correlation
+    if avg_steps > 0:
+        if avg_steps >= step_target:
+            narrative_parts.append(f"With an average of {avg_steps:,.0f} steps daily, you achieved your movement goal. Mindful movement helps balance your energy.")
+        else:
+            narrative_parts.append(f"You walked an average of {avg_steps:,.0f} steps. Taking even a brief, gentle walk can clear build-up stress.")
+            
+    # 3. Energy / Stress correlation
+    if avg_friction > 3.0:
+        narrative_parts.append(f"We noticed higher friction levels ({avg_friction:.1f}/5) this week. When friction rises, your focus energy benefits from shorter, gentle sprints.")
+    else:
+        narrative_parts.append(f"Your focus friction remained low and steady ({avg_friction:.1f}/5), keeping your cognitive shield calm.")
+        
+    # 4. Break bypasses
+    if bypassed_breaks > 0:
+        narrative_parts.append(f"You bypassed {bypassed_breaks} rest breaks this week. Remember: taking a micro-break is not a delay, it is a restoration.")
+    else:
+        narrative_parts.append("You completed all your scheduled rest breaks without bypasses. A perfect rhythm of work and rest.")
+
+    return " ".join(narrative_parts)
+
+@app.route("/api/vitality", methods=["GET", "POST"])
+@require_local_origin
+@require_api_token
+def manage_vitality():
+    from datetime import date
+    date_str = None
+    if request.is_json:
+        data = request.get_json(force=True, silent=True) or {}
+        date_str = data.get("date")
+    if not date_str:
+        date_str = request.args.get("date")
+    if not date_str:
+        date_str = date.today().isoformat()
+        
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        
+        if "steps" in data:
+            db.log_steps(data["steps"], date_str)
+        if "sleep_hours" in data or "sleep_quality" in data:
+            existing = db.get_sleep(date_str)
+            hours = data.get("sleep_hours", existing.get("hours", 0.0))
+            quality = data.get("sleep_quality", existing.get("quality", 3))
+            db.log_sleep(hours, quality, date_str)
+        if "hydration_cups" in data:
+            db.increment_hydration(data["hydration_cups"])
+            
+    settings = db.get_settings()
+    hyd_data = db.get_hydration()
+    steps_count = db.get_steps(date_str)
+    sleep_data = db.get_sleep(date_str)
+    
+    return jsonify({
+        "date": date_str,
+        "steps": steps_count,
+        "sleep_hours": sleep_data["hours"],
+        "sleep_quality": sleep_data["quality"],
+        "hydration_cups": hyd_data.get("cups", 0),
+        "step_target": settings.get("daily_step_target", 10000),
+        "sleep_target": settings.get("daily_sleep_target", 8.0),
+        "hydration_target": settings.get("hydration_target", 8)
+    })
+
 def run_server(port=5000):
     # Run flask app on localhost and port 5000
+    print(f"API Token: {SHARED_API_TOKEN}")
     app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
 
 if __name__ == "__main__":

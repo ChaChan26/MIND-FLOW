@@ -18,10 +18,16 @@ def build_exe():
     # --name MIND-FLOW: output name is MIND-FLOW.exe
     # --add-data: bundle static and templates folders (format is SOURCE;DEST on Windows)
     # --noconsole: hide the command window for clean desktop experience
+    pyinstaller_bin = os.path.join(os.path.dirname(sys.executable), "pyinstaller")
+    if sys.platform == "win32" and not pyinstaller_bin.endswith(".exe"):
+        pyinstaller_bin += ".exe"
+    if not os.path.exists(pyinstaller_bin):
+        pyinstaller_bin = "pyinstaller"
+
     cmd = [
-        "pyinstaller",
+        pyinstaller_bin,
         "--clean",
-        "--onefile",
+        "--onedir",
         "--name", "MIND-FLOW",
         "--add-data", "static;static",
         "--add-data", "templates;templates",
@@ -35,7 +41,8 @@ def build_exe():
     try:
         subprocess.check_call(cmd)
         print("\nSUCCESS! Packaging complete.")
-        print("The standalone executable has been built inside: C:\\MIND\\dist\\MIND-FLOW.exe")
+        output_dir = os.path.abspath(os.path.join("dist", "MIND-FLOW"))
+        print(f"The packaged app directory has been built inside: {output_dir}")
     except subprocess.CalledProcessError as e:
         print(f"\nERROR: Packaging failed: {e}")
         sys.exit(1)
