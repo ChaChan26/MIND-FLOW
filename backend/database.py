@@ -183,6 +183,18 @@ class FileLock:
                 pass
             self.acquired = False
 
+def is_safe_regex(pattern):
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False
+    if len(pattern) > 150:
+        return False
+    # Check for catastrophic backtracking patterns (nested repetitions like (a+)+ or (a*)* or (a|b)+)
+    if re.search(r'\([^)]*[\*\+\?][^)]*\)[*+?{]', pattern):
+        return False
+    return True
+
 class MindFlowDB:
     def __init__(self):
         self.lock = threading.RLock()
@@ -190,7 +202,7 @@ class MindFlowDB:
         self._thread_local = threading.local()
         self._master_conn = None
         self.app_usage_buffer = {}
-        self.buffer_lock = threading.Lock()
+        self.buffer_lock = self.lock
         
         if self.filepath == ":memory:":
             # Instantiate a persistent master connection to maintain the shared memory database lifecycle
@@ -214,6 +226,14 @@ class MindFlowDB:
             "last_check_time": 0.0,
             "result": None
         }
+        self._achievements_cache = {
+            "last_sessions_len": -1,
+            "last_reflections_len": -1,
+            "last_hydration_len": -1,
+            "last_check_time": 0.0,
+            "result": None
+        }
+
 
     def _get_conn(self):
         if self.filepath == ":memory:":
@@ -255,6 +275,15 @@ class MindFlowDB:
                 except Exception:
                     pass
                 self._master_conn = None
+
+    def close_thread_connection(self):
+        with self.lock:
+            if hasattr(self._thread_local, "conn") and self._thread_local.conn is not None:
+                try:
+                    self._thread_local.conn.close()
+                except Exception:
+                    pass
+                self._thread_local.conn = None
 
 
     def _init_db(self):
@@ -338,6 +367,57 @@ class MindFlowDB:
                 INSERT OR IGNORE INTO battery_state (id, current_capacity, consecutive_work_minutes) 
                 VALUES (1, 100.0, 0.0)
             """)
+            
+            # 13 Cognitive Features: New Tables
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS achievements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    description TEXT,
+                    awarded_at TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS context_switches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    from_process TEXT,
+                    to_process TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT,
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS gratitude_journal (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT UNIQUE,
+                    entry_1 TEXT,
+                    entry_2 TEXT,
+                    entry_3 TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS calendar_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT,
+                    start_time TEXT,
+                    end_time TEXT
+                )
+            """)
+            
+            # Alter sessions table to add flow fields if not present
+            info = conn.execute("PRAGMA table_info(sessions)").fetchall()
+            cols = [row["name"] for row in info]
+            if "is_flow" not in cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN is_flow INTEGER DEFAULT 0")
+            if "flow_duration" not in cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN flow_duration REAL DEFAULT 0.0")
             
             cursor = conn.execute("SELECT COUNT(*) FROM settings")
             if cursor.fetchone()[0] == 0:
@@ -587,11 +667,23 @@ class MindFlowDB:
                 conn.execute("INSERT OR REPLACE INTO sleep (date, hours, quality) VALUES (?, ?, ?)", (date_str, hours_val, quality_val))
             return {"hours": hours_val, "quality": quality_val}
 
-    def get_sleep_list(self):
+    def get_sleep_list(self, start_date=None, end_date=None):
         with self.lock:
             sleep = []
+            query = "SELECT date, hours, quality FROM sleep"
+            params = []
+            if start_date and end_date:
+                query += " WHERE date >= ? AND date <= ?"
+                params = [start_date, end_date]
+            elif start_date:
+                query += " WHERE date >= ?"
+                params = [start_date]
+            elif end_date:
+                query += " WHERE date <= ?"
+                params = [end_date]
+            query += " ORDER BY date ASC"
             with self.connection() as conn:
-                for row in conn.execute("SELECT date, hours, quality FROM sleep ORDER BY date ASC"):
+                for row in conn.execute(query, params):
                     sleep.append({
                         "date": row["date"],
                         "hours": row["hours"],
@@ -599,11 +691,23 @@ class MindFlowDB:
                     })
             return sleep
 
-    def get_steps_list(self):
+    def get_steps_list(self, start_date=None, end_date=None):
         with self.lock:
             steps = []
+            query = "SELECT date, count FROM steps"
+            params = []
+            if start_date and end_date:
+                query += " WHERE date >= ? AND date <= ?"
+                params = [start_date, end_date]
+            elif start_date:
+                query += " WHERE date >= ?"
+                params = [start_date]
+            elif end_date:
+                query += " WHERE date <= ?"
+                params = [end_date]
+            query += " ORDER BY date ASC"
             with self.connection() as conn:
-                for row in conn.execute("SELECT date, count FROM steps ORDER BY date ASC"):
+                for row in conn.execute(query, params):
                     steps.append({
                         "date": row["date"],
                         "count": row["count"]
@@ -673,10 +777,13 @@ class MindFlowDB:
                         rules = []
                         for r in v:
                             if isinstance(r, dict) and "pattern" in r and "category" in r:
-                                rules.append({
-                                    "pattern": str(r["pattern"]).strip(),
-                                    "category": str(r["category"]).strip().lower()
-                                })
+                                pat = str(r["pattern"]).strip()
+                                cat = str(r["category"]).strip().lower()
+                                if is_safe_regex(pat):
+                                    rules.append({
+                                        "pattern": pat,
+                                        "category": cat
+                                    })
                         settings[k] = rules[:50]
                     elif isinstance(v, list):
                         filtered = [str(x).strip().lower() for x in v if x]
@@ -685,16 +792,16 @@ class MindFlowDB:
                 for k, v in settings.items():
                     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, json.dumps(v)))
 
-    def log_session(self, mode, start_time, end_time, brain_dump=None, bypassed=False):
+    def log_session(self, mode, start_time, end_time, brain_dump=None, bypassed=False, is_flow=False, flow_duration=0.0):
         duration = (end_time - start_time).total_seconds()
         if duration < 5:
             return
         with self.lock:
             with self.connection() as conn:
                 conn.execute("""
-                    INSERT INTO sessions (mode, start, end, duration, brain_dump, bypassed)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (mode, start_time.isoformat(), end_time.isoformat(), duration, brain_dump, 1 if bypassed else 0))
+                    INSERT INTO sessions (mode, start, end, duration, brain_dump, bypassed, is_flow, flow_duration)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (mode, start_time.isoformat(), end_time.isoformat(), duration, brain_dump, 1 if bypassed else 0, 1 if is_flow else 0, flow_duration))
 
     def add_reflection(self, energy_level, friction_level, summary, mood=None, sleep_hours=None, sleep_quality=None):
         try:
@@ -732,11 +839,23 @@ class MindFlowDB:
                 "sleep_quality": sleep_quality_val
             }
 
-    def get_reflections(self):
+    def get_reflections(self, start_date=None, end_date=None):
         with self.lock:
             reflections = []
+            query = "SELECT timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality FROM reflections"
+            params = []
+            if start_date and end_date:
+                query += " WHERE date(timestamp) >= ? AND date(timestamp) <= ?"
+                params = [start_date, end_date]
+            elif start_date:
+                query += " WHERE date(timestamp) >= ?"
+                params = [start_date]
+            elif end_date:
+                query += " WHERE date(timestamp) <= ?"
+                params = [end_date]
+            query += " ORDER BY id ASC"
             with self.connection() as conn:
-                for row in conn.execute("SELECT timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality FROM reflections ORDER BY id ASC"):
+                for row in conn.execute(query, params):
                     reflections.append({
                         "timestamp": row["timestamp"],
                         "energy_level": row["energy_level"],
@@ -748,18 +867,32 @@ class MindFlowDB:
                     })
             return reflections
 
-    def get_sessions(self):
+    def get_sessions(self, start_date=None, end_date=None):
         with self.lock:
             sessions = []
+            query = "SELECT mode, start, end, duration, brain_dump, bypassed, is_flow, flow_duration FROM sessions"
+            params = []
+            if start_date and end_date:
+                query += " WHERE date(start) >= ? AND date(start) <= ?"
+                params = [start_date, end_date]
+            elif start_date:
+                query += " WHERE date(start) >= ?"
+                params = [start_date]
+            elif end_date:
+                query += " WHERE date(start) <= ?"
+                params = [end_date]
+            query += " ORDER BY id ASC"
             with self.connection() as conn:
-                for row in conn.execute("SELECT mode, start, end, duration, brain_dump, bypassed FROM sessions ORDER BY id ASC"):
+                for row in conn.execute(query, params):
                     sessions.append({
                         "mode": row["mode"],
                         "start": row["start"],
                         "end": row["end"],
                         "duration": row["duration"],
                         "brain_dump": row["brain_dump"],
-                        "bypassed": bool(row["bypassed"])
+                        "bypassed": bool(row["bypassed"]),
+                        "is_flow": bool(row["is_flow"]) if row["is_flow"] is not None else False,
+                        "flow_duration": row["flow_duration"] if row["flow_duration"] is not None else 0.0
                     })
             return sessions
 
@@ -799,12 +932,24 @@ class MindFlowDB:
                             """, (today_str, process, title if title else "None", json.dumps(titles), duration))
                     self.app_usage_buffer.clear()
 
-    def get_app_usage(self):
+    def get_app_usage(self, start_date=None, end_date=None):
         self.flush_app_usage()
         with self.lock:
             usage = []
+            query = "SELECT date, process, title, titles, duration FROM app_usage"
+            params = []
+            if start_date and end_date:
+                query += " WHERE date >= ? AND date <= ?"
+                params = [start_date, end_date]
+            elif start_date:
+                query += " WHERE date >= ?"
+                params = [start_date]
+            elif end_date:
+                query += " WHERE date <= ?"
+                params = [end_date]
+            query += " ORDER BY rowid ASC"
             with self.connection() as conn:
-                for row in conn.execute("SELECT date, process, title, titles, duration FROM app_usage ORDER BY rowid ASC"):
+                for row in conn.execute(query, params):
                     usage.append({
                         "date": row["date"],
                         "process": row["process"],
@@ -1308,7 +1453,10 @@ class MindFlowDB:
                 row = conn.execute(
                     "SELECT current_capacity, consecutive_work_minutes FROM battery_state WHERE id = 1"
                 ).fetchone()
-                return {"capacity": row[0], "consecutive_work": row[1]}
+                if row:
+                    return {"capacity": row[0], "consecutive_work": row[1]}
+                else:
+                    return {"capacity": 100.0, "consecutive_work": 0.0}
 
     def flush_battery_state(self, capacity: float, consecutive_work: float):
         with self.lock:
@@ -1318,5 +1466,458 @@ class MindFlowDB:
                     SET current_capacity = ?, consecutive_work_minutes = ?, last_updated = CURRENT_TIMESTAMP
                     WHERE id = 1
                 """, (capacity, consecutive_work))
+
+    # Streaks & Achievements
+    def get_streak_info(self):
+        from datetime import datetime, date, timedelta
+        with self.lock:
+            with self.connection() as conn:
+                rows = conn.execute("""
+                    SELECT DISTINCT SUBSTR(start, 1, 10) as date_str 
+                    FROM sessions 
+                    WHERE mode = 'work' AND duration > 0
+                    ORDER BY date_str ASC
+                """).fetchall()
+                
+                dates = []
+                for r in rows:
+                    try:
+                        dates.append(date.fromisoformat(r["date_str"]))
+                    except Exception:
+                        pass
+                
+                if not dates:
+                    return {"current_streak": 0, "longest_streak": 0}
+                
+                unique_dates = sorted(list(set(dates)))
+                if not unique_dates:
+                    return {"current_streak": 0, "longest_streak": 0}
+                
+                longest = 0
+                temp_streak = 1
+                for i in range(1, len(unique_dates)):
+                    if unique_dates[i] - unique_dates[i-1] == timedelta(days=1):
+                        temp_streak += 1
+                    else:
+                        if temp_streak > longest:
+                            longest = temp_streak
+                        temp_streak = 1
+                if temp_streak > longest:
+                    longest = temp_streak
+                
+                today = date.today()
+                yesterday = today - timedelta(days=1)
+                
+                current = 0
+                if today in unique_dates or yesterday in unique_dates:
+                    idx = len(unique_dates) - 1
+                    if unique_dates[idx] == today or unique_dates[idx] == yesterday:
+                        current = 1
+                        while idx > 0:
+                            if unique_dates[idx] - unique_dates[idx-1] == timedelta(days=1):
+                                current += 1
+                                idx -= 1
+                            elif unique_dates[idx] == unique_dates[idx-1]:
+                                idx -= 1
+                            else:
+                                break
+                
+                return {"current_streak": current, "longest_streak": max(longest, current)}
+
+    def award_achievement(self, name, description):
+        from datetime import datetime
+        with self.lock:
+            with self.connection() as conn:
+                try:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO achievements (name, description, awarded_at)
+                        VALUES (?, ?, ?)
+                    """, (name, description, datetime.now().isoformat()))
+                except Exception:
+                    pass
+
+    def get_achievements(self):
+        from datetime import date, datetime, timedelta
+        with self.lock:
+            now = time.time()
+            with self.connection() as conn:
+                sess_cnt = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                ref_cnt = conn.execute("SELECT COUNT(*) FROM reflections").fetchone()[0]
+                hyd_cnt = conn.execute("SELECT COUNT(*) FROM hydration").fetchone()[0]
+                
+            # If nothing changed in DB and cache is under 5 seconds old, return cached result
+            if (self._achievements_cache["result"] is not None and 
+                (now - self._achievements_cache["last_check_time"]) < 5.0 and
+                self._achievements_cache["last_sessions_len"] == sess_cnt and
+                self._achievements_cache["last_reflections_len"] == ref_cnt and
+                self._achievements_cache["last_hydration_len"] == hyd_cnt):
+                return self._achievements_cache["result"]
+
+            streak_info = self.get_streak_info()
+            if streak_info["current_streak"] >= 7:
+                self.award_achievement("Shield Guardian", "Maintain a 7-day focus tracking streak.")
+            
+            with self.connection() as conn:
+                row = conn.execute("SELECT COUNT(*) FROM sessions WHERE mode = 'work'").fetchone()
+                if row and row[0] >= 1:
+                    self.award_achievement("First Step", "Log your first deep work focus session.")
+                
+                settings = self.get_settings()
+                target_cups = settings.get("hydration_target", 8.0)
+                
+                hyd_rows = conn.execute("SELECT date, cups FROM hydration WHERE cups >= ? ORDER BY date DESC", (target_cups,)).fetchall()
+                if len(hyd_rows) >= 3:
+                    hyd_dates = sorted([date.fromisoformat(r["date"]) for r in hyd_rows])
+                    has_hero = False
+                    for i in range(2, len(hyd_dates)):
+                        if (hyd_dates[i] - hyd_dates[i-1] == timedelta(days=1) and 
+                            hyd_dates[i-1] - hyd_dates[i-2] == timedelta(days=1)):
+                            has_hero = True
+                            break
+                    if has_hero:
+                        self.award_achievement("Hydration Hero", "Meet your daily hydration target 3 days in a row.")
+                
+                bypass_rows = conn.execute("""
+                    SELECT date(start) as d, SUM(bypassed) as bcnt 
+                    FROM sessions 
+                    GROUP BY d
+                """).fetchall()
+                bypass_map = {r["d"]: r["bcnt"] for r in bypass_rows}
+                
+                sess_dates = sorted(list(set([r["d"] for r in conn.execute("SELECT DISTINCT date(start) as d FROM sessions").fetchall()])))
+                has_perfect_week = False
+                temp_consec = 0
+                for i in range(len(sess_dates)):
+                    d = sess_dates[i]
+                    if bypass_map.get(d, 0) == 0:
+                        if i > 0 and (date.fromisoformat(sess_dates[i]) - date.fromisoformat(sess_dates[i-1]) == timedelta(days=1)):
+                            temp_consec += 1
+                        else:
+                            temp_consec = 1
+                    else:
+                        temp_consec = 0
+                    if temp_consec >= 7:
+                        has_perfect_week = True
+                        break
+                if has_perfect_week:
+                    self.award_achievement("Zero Bypass Week", "Complete a 7-day focus streak without skipping any breaks.")
+                
+                ref_rows = conn.execute("SELECT timestamp FROM reflections ORDER BY timestamp DESC").fetchall()
+                ref_dates = []
+                for r in ref_rows:
+                    try:
+                        ref_dates.append(datetime.fromisoformat(r["timestamp"]))
+                    except Exception:
+                        pass
+                
+                has_mindful = False
+                j = 0
+                for i in range(len(ref_dates)):
+                    while j < len(ref_dates) and ref_dates[i] - ref_dates[j] <= timedelta(days=7):
+                        j += 1
+                    if (j - i) >= 5:
+                        has_mindful = True
+                        break
+                if has_mindful:
+                    self.award_achievement("Mindfulness Master", "Log 5 or more state reflections within a single week.")
+
+                cursor = conn.execute("SELECT name, description, awarded_at FROM achievements ORDER BY id ASC")
+                res = [dict(row) for row in cursor]
+                
+            # Update cache
+            self._achievements_cache = {
+                "last_sessions_len": sess_cnt,
+                "last_reflections_len": ref_cnt,
+                "last_hydration_len": hyd_cnt,
+                "last_check_time": now,
+                "result": res
+            }
+            return res
+
+    # Daily Focus Score (0 - 100)
+    def calculate_focus_score(self, date_str=None):
+        from datetime import date
+        if date_str is None:
+            date_str = date.today().isoformat()
+        
+        with self.lock:
+            with self.connection() as conn:
+                ref_rows = conn.execute("""
+                    SELECT energy_level, friction_level 
+                    FROM reflections 
+                    WHERE timestamp LIKE ?
+                """, (date_str + "%",)).fetchall()
+                
+                if ref_rows:
+                    avg_energy = sum(r["energy_level"] for r in ref_rows) / len(ref_rows)
+                    avg_friction = sum(r["friction_level"] for r in ref_rows) / len(ref_rows)
+                else:
+                    avg_energy = 3.0
+                    avg_friction = 1.0
+                
+                energy_score = (avg_energy / 5.0) * 40.0
+                friction_score = ((5.0 - avg_friction) / 5.0) * 20.0
+                
+                hyd_row = conn.execute("SELECT cups FROM hydration WHERE date = ?", (date_str,)).fetchone()
+                settings = self.get_settings()
+                target_cups = settings.get("hydration_target", 8.0)
+                current_cups = hyd_row["cups"] if hyd_row else 0.0
+                hydration_score = min(1.0, current_cups / max(1.0, target_cups)) * 15.0
+                
+                sleep_row = conn.execute("SELECT hours, quality FROM sleep WHERE date = ?", (date_str,)).fetchone()
+                if sleep_row:
+                    sleep_hours = sleep_row["hours"]
+                    sleep_quality = sleep_row["quality"]
+                else:
+                    avg_sleep = conn.execute("SELECT AVG(hours), AVG(quality) FROM sleep").fetchone()
+                    sleep_hours = avg_sleep[0] if avg_sleep and avg_sleep[0] else 7.0
+                    sleep_quality = avg_sleep[1] if avg_sleep and avg_sleep[1] else 3
+                
+                sleep_score = ((sleep_quality / 5.0) * 7.5) + (min(8.0, sleep_hours) / 8.0 * 7.5)
+                
+                bypass_row = conn.execute("""
+                    SELECT SUM(bypassed) as bcnt 
+                    FROM sessions 
+                    WHERE start LIKE ?
+                """, (date_str + "%",)).fetchone()
+                bypasses = bypass_row["bcnt"] if bypass_row and bypass_row["bcnt"] else 0
+                compliance_score = max(0.0, 10.0 - bypasses * 5.0)
+                
+                total_score = energy_score + friction_score + hydration_score + sleep_score + compliance_score
+                return int(round(total_score))
+
+    def get_focus_score_history(self, days=7):
+        from datetime import date, timedelta, datetime
+        with self.lock:
+            today = date.today()
+            start_date = (today - timedelta(days=days - 1))
+            start_date_str = start_date.isoformat()
+            
+            settings = self.get_settings()
+            target_cups = settings.get("hydration_target", 8.0)
+            
+            avg_sleep_hours, avg_sleep_quality = 7.0, 3
+            with self.connection() as conn:
+                avg_row = conn.execute("SELECT AVG(hours), AVG(quality) FROM sleep").fetchone()
+                if avg_row:
+                    if avg_row[0] is not None:
+                        avg_sleep_hours = avg_row[0]
+                    if avg_row[1] is not None:
+                        avg_sleep_quality = avg_row[1]
+                        
+                ref_rows = conn.execute("""
+                    SELECT date(timestamp) as d, energy_level, friction_level 
+                    FROM reflections 
+                    WHERE date(timestamp) >= ?
+                """, (start_date_str,)).fetchall()
+                
+                hyd_rows = conn.execute("""
+                    SELECT date, cups 
+                    FROM hydration 
+                    WHERE date >= ?
+                """, (start_date_str,)).fetchall()
+                
+                sleep_rows = conn.execute("""
+                    SELECT date, hours, quality 
+                    FROM sleep 
+                    WHERE date >= ?
+                """, (start_date_str,)).fetchall()
+                
+                bypass_rows = conn.execute("""
+                    SELECT date(start) as d, SUM(bypassed) as bcnt 
+                    FROM sessions 
+                    WHERE date(start) >= ?
+                    GROUP BY d
+                """, (start_date_str,)).fetchall()
+            
+            ref_map = {}
+            for r in ref_rows:
+                d = r["d"]
+                if d not in ref_map:
+                    ref_map[d] = {"energy": [], "friction": []}
+                ref_map[d]["energy"].append(r["energy_level"])
+                ref_map[d]["friction"].append(r["friction_level"])
+                
+            hyd_map = {r["date"]: r["cups"] for r in hyd_rows}
+            sleep_map = {r["date"]: (r["hours"], r["quality"]) for r in sleep_rows}
+            bypass_map = {r["d"]: r["bcnt"] for r in bypass_rows}
+            
+            history = []
+            for i in range(days - 1, -1, -1):
+                d_str = (today - timedelta(days=i)).isoformat()
+                
+                if d_str in ref_map:
+                    avg_energy = sum(ref_map[d_str]["energy"]) / len(ref_map[d_str]["energy"])
+                    avg_friction = sum(ref_map[d_str]["friction"]) / len(ref_map[d_str]["friction"])
+                else:
+                    avg_energy = 3.0
+                    avg_friction = 1.0
+                energy_score = (avg_energy / 5.0) * 40.0
+                friction_score = ((5.0 - avg_friction) / 5.0) * 20.0
+                
+                current_cups = hyd_map.get(d_str, 0.0)
+                hydration_score = min(1.0, current_cups / max(1.0, target_cups)) * 15.0
+                
+                if d_str in sleep_map:
+                    sh, sq = sleep_map[d_str]
+                else:
+                    sh, sq = avg_sleep_hours, avg_sleep_quality
+                sleep_score = ((sq / 5.0) * 7.5) + (min(8.0, sh) / 8.0 * 7.5)
+                
+                bypasses = bypass_map.get(d_str, 0)
+                compliance_score = max(0.0, 10.0 - bypasses * 5.0)
+                
+                total_score = int(round(energy_score + friction_score + hydration_score + sleep_score + compliance_score))
+                history.append({
+                    "date": d_str,
+                    "score": total_score
+                })
+            return history
+
+    # Context Switch Tracker
+    def log_context_switch(self, from_process, to_process):
+        from datetime import datetime
+        if not from_process or from_process == "None": from_process = "Idle"
+        if not to_process or to_process == "None": to_process = "Idle"
+        if from_process == to_process:
+            return
+        with self.lock:
+            with self.connection() as conn:
+                conn.execute("""
+                    INSERT INTO context_switches (timestamp, from_process, to_process)
+                    VALUES (?, ?, ?)
+                """, (datetime.now().isoformat(), from_process, to_process))
+
+    def get_context_switches(self, date_str=None):
+        from datetime import date
+        if date_str is None:
+            date_str = date.today().isoformat()
+        with self.lock:
+            with self.connection() as conn:
+                rows = conn.execute("""
+                    SELECT timestamp, from_process, to_process 
+                    FROM context_switches 
+                    WHERE timestamp LIKE ?
+                """, (date_str + "%",)).fetchall()
+                return [dict(r) for r in rows]
+
+    def get_context_switches_hourly(self, date_str=None):
+        from datetime import datetime, date
+        if date_str is None:
+            date_str = date.today().isoformat()
+        switches = self.get_context_switches(date_str)
+        hourly = [0] * 24
+        for sw in switches:
+            try:
+                dt = datetime.fromisoformat(sw["timestamp"])
+                hourly[dt.hour] += 1
+            except Exception:
+                pass
+        return hourly
+
+    # Tasks (Micro-Planner)
+    def get_tasks(self):
+        with self.lock:
+            with self.connection() as conn:
+                rows = conn.execute("SELECT id, text, completed, created_at FROM tasks ORDER BY id ASC").fetchall()
+                return [dict(r) for r in rows]
+
+    def add_task(self, text):
+        from datetime import datetime
+        with self.lock:
+            with self.connection() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO tasks (text, completed, created_at)
+                    VALUES (?, 0, ?)
+                """, (text, datetime.now().isoformat()))
+                new_id = cursor.lastrowid
+                return {"id": new_id, "text": text, "completed": 0}
+
+    def update_task(self, task_id, completed):
+        with self.lock:
+            with self.connection() as conn:
+                conn.execute("UPDATE tasks SET completed = ? WHERE id = ?", (completed, task_id))
+                return True
+
+    def delete_task(self, task_id):
+        with self.lock:
+            with self.connection() as conn:
+                conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+                return True
+
+    # Gratitude Journal
+    def get_gratitude(self, date_str=None):
+        from datetime import date
+        if date_str is None:
+            date_str = date.today().isoformat()
+        with self.lock:
+            with self.connection() as conn:
+                row = conn.execute("""
+                    SELECT date, entry_1, entry_2, entry_3 
+                    FROM gratitude_journal 
+                    WHERE date = ?
+                """, (date_str,)).fetchone()
+                return dict(row) if row else None
+
+    def add_gratitude(self, date_str, entry_1, entry_2, entry_3):
+        with self.lock:
+            with self.connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO gratitude_journal (date, entry_1, entry_2, entry_3)
+                    VALUES (?, ?, ?, ?)
+                """, (date_str, entry_1, entry_2, entry_3))
+                return True
+
+    # Recovery Score (Morning Readiness)
+    def get_recovery_score(self):
+        from datetime import date, timedelta
+        today_str = date.today().isoformat()
+        yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+        
+        with self.lock:
+            with self.connection() as conn:
+                sleep_row = conn.execute("SELECT hours, quality FROM sleep WHERE date = ?", (today_str,)).fetchone()
+                if sleep_row:
+                    hours = sleep_row["hours"]
+                    quality = sleep_row["quality"]
+                    sleep_pct = ((hours / 8.0) * 25.0) + ((quality / 5.0) * 25.0)
+                    sleep_pct = min(50.0, sleep_pct)
+                    has_sleep = True
+                else:
+                    sleep_pct = 35.0
+                    has_sleep = False
+                
+                yesterday_sess = conn.execute("""
+                    SELECT SUM(duration) as work_dur, SUM(bypassed) as bcnt 
+                    FROM sessions 
+                    WHERE mode = 'work' AND start LIKE ?
+                """, (yesterday_str + "%",)).fetchone()
+                
+                y_work_hours = (yesterday_sess["work_dur"] or 0) / 3600.0
+                y_bypasses = yesterday_sess["bcnt"] or 0
+                
+                fatigue_penalty = (y_work_hours * 4.0) + (y_bypasses * 12.0)
+                load_pct = max(0.0, 50.0 - fatigue_penalty)
+                
+                total_recovery = sleep_pct + load_pct
+                total_recovery = max(10, min(100, int(round(total_recovery))))
+                
+                if total_recovery >= 85:
+                    suggested_work = 45
+                elif total_recovery >= 70:
+                    suggested_work = 30
+                elif total_recovery >= 50:
+                    suggested_work = 25
+                elif total_recovery >= 35:
+                    suggested_work = 20
+                else:
+                    suggested_work = 15
+                
+                return {
+                    "recovery_score": total_recovery,
+                    "suggested_work_minutes": suggested_work,
+                    "has_sleep_logged": has_sleep
+                }
+
 
 

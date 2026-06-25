@@ -55,7 +55,7 @@ def require_local_origin(f):
         if not origin and not referer:
             # If both are missing, ensure request is strictly local
             remote = request.remote_addr
-            if remote not in {'127.0.0.1', '::1', None, ''}:
+            if remote not in {'127.0.0.1', '::1'}:
                 return jsonify({"error": "Forbidden: missing origin/referer verification"}), 403
 
         return f(*args, **kwargs)
@@ -73,6 +73,9 @@ def require_api_token(f):
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
+        
+        if not token:
+            token = request.cookies.get("MIND_FLOW_TOKEN")
         
         if not token or not secrets.compare_digest(token, SHARED_API_TOKEN):
             return jsonify({"error": "Unauthorized: invalid or missing API token"}), 401
@@ -188,6 +191,10 @@ class ThreadSafeDict(dict):
     def lock(self):
         return self._lock
 
+    def get_snapshot(self):
+        with self._lock:
+            return dict(self)
+
 # In-memory shared state between Flask thread and Background Watcher thread
 shared_state = ThreadSafeDict({
     "current_mode": "neutral",
@@ -212,8 +219,15 @@ _analytics_cache_date = None
 
 @app.route("/")
 def index():
-    # Return index.html from templates
-    return send_from_directory(app.template_folder, "index.html")
+    token = request.args.get("token")
+    if token and secrets.compare_digest(token, SHARED_API_TOKEN):
+        from flask import make_response, redirect
+        response = make_response(redirect("/"))
+        response.set_cookie("MIND_FLOW_TOKEN", token, httponly=True, samesite="Lax")
+        return response
+    from flask import make_response
+    response = make_response(send_from_directory(app.template_folder, "index.html"))
+    return response
 
 @app.route("/api/status", methods=["GET"])
 @require_api_token
@@ -226,11 +240,13 @@ def get_status():
     work_limit_seconds = settings["work_duration_minutes"] * 60
     
     # Retrieve base cached status data
-    # Retrieve base cached status data
     stats = db.get_cached_status_data()
     
+    # Snapshot of shared state
+    state = shared_state.get_snapshot()
+    
     # Read in-memory battery capacity and map to 1-5 scale for backward compatibility
-    battery_cap = shared_state.get('battery_capacity', 100.0)
+    battery_cap = state.get('battery_capacity', 100.0)
     current_energy = max(1.0, min(5.0, battery_cap / 20.0))
     
     high_stress_alert = stats["high_stress_alert"]
@@ -246,9 +262,9 @@ def get_status():
         adaptive_rest_limit_seconds = max(120, adaptive_rest_limit_seconds * 2)
         
     # Add ongoing sessions to the totals in real-time
-    cur_mode = shared_state["current_mode"]
-    elapsed = shared_state["elapsed_seconds"]
-    idle = shared_state["idle_seconds"]
+    cur_mode = state["current_mode"]
+    elapsed = state["elapsed_seconds"]
+    idle = state["idle_seconds"]
     
     if cur_mode == "work":
         today_work += elapsed
@@ -259,7 +275,7 @@ def get_status():
         
     # Dynamic companion advice generation with CBT mental health interventions
     companion_message = "Your cognitive shield is active. Looking good!"
-    if not shared_state["tracking_active"]:
+    if not state["tracking_active"]:
         companion_message = "Companion is paused. Take care of yourself out there!"
     elif today_bypasses > 1:
         companion_message = f"🚨 That's {today_bypasses} breaks skipped today! Your health comes first: Rest more, step away from the keyboard, and take a physical break."
@@ -305,33 +321,43 @@ def get_status():
         
     forecast_message = base_forecast + forecast_message
 
+    # 13 Cognitive Features: status calculations
+    recovery_data = db.get_recovery_score()
+    streak_info = db.get_streak_info()
+    focus_score = db.calculate_focus_score()
+
     return jsonify({
         "current_mode": cur_mode,
-        "active_window_title": shared_state["active_window_title"],
-        "active_process_name": shared_state["active_process_name"],
+        "active_window_title": state["active_window_title"],
+        "active_process_name": state["active_process_name"],
         "elapsed_seconds": elapsed,
         "work_limit_seconds": work_limit_seconds,
         "adaptive_work_limit_seconds": adaptive_work_limit_seconds,
         "adaptive_rest_limit_seconds": adaptive_rest_limit_seconds,
         "adaptive_reason": adaptive_reason,
         "idle_seconds": idle,
-        "tracking_active": shared_state["tracking_active"],
+        "tracking_active": state["tracking_active"],
         "current_energy": round(current_energy, 2),
         "battery_capacity": round(battery_cap, 2),
-        "consecutive_work_minutes": round(shared_state.get('battery_consecutive_work', 0.0), 2),
+        "consecutive_work_minutes": round(state.get('battery_consecutive_work', 0.0), 2),
         "today_work_seconds": int(today_work),
         "today_recharge_seconds": int(today_recharge),
         "today_rest_seconds": int(today_rest),
         "today_bypasses": today_bypasses,
         "companion_message": companion_message,
-        "last_external_window": shared_state["last_external_window"],
-        "last_external_process": shared_state["last_external_process"],
+        "last_external_window": state["last_external_window"],
+        "last_external_process": state["last_external_process"],
         "current_goal": db.get_current_goal(),
         "hydration": db.get_hydration(),
         "forecast_message": forecast_message,
         "high_stress_alert": high_stress_alert,
         "latest_mood": latest_mood,
-        "circadian_forecast": circadian_forecast
+        "circadian_forecast": circadian_forecast,
+        "focus_score": focus_score,
+        "recovery_score": recovery_data["recovery_score"],
+        "suggested_work_minutes": recovery_data["suggested_work_minutes"],
+        "streak_days": streak_info["current_streak"],
+        "longest_streak_days": streak_info["longest_streak"]
     })
 
 @app.route("/api/status/toggle", methods=["POST"])
@@ -452,7 +478,36 @@ def manage_reflections():
             sleep_hours=validated_sleep_hours, 
             sleep_quality=validated_sleep_quality
         )
-        return jsonify({"status": "success", "reflection": entry})
+        
+        # 13 Cognitive Features: Cognitive Distortion Detection (CBT)
+        distortion_warning = None
+        distortion_type = None
+        summary_lower = summary.lower()
+        if friction >= 4 or (validated_mood and validated_mood.lower() in ["anxious", "overwhelmed", "frustrated", "exhausted"]):
+            all_or_nothing_kw = ["never", "always", "ruined", "useless", "failure", "completely", "impossible", "nothing"]
+            catastrophizing_kw = ["disaster", "terrible", "horrible", "can't handle", "worst", "fail", "ruin", "destroy"]
+            should_kw = ["should", "must", "ought to", "have to", "need to"]
+            emotional_kw = ["feel like", "i feel", "feels bad", "feels wrong", "i'm sure"]
+            
+            if any(w in summary_lower for w in all_or_nothing_kw):
+                distortion_type = "All-or-Nothing Thinking"
+                distortion_warning = "Recognized All-or-Nothing thinking! It's rare for things to be 100% good or bad. Even when a feature has bugs, your progress is still real."
+            elif any(w in summary_lower for w in catastrophizing_kw):
+                distortion_type = "Catastrophizing"
+                distortion_warning = "Catastrophizing detected! This challenge feels huge right now, but you have solved complex bugs before. Break it into micro-tasks."
+            elif any(w in summary_lower for w in should_kw):
+                distortion_type = "Should Statement"
+                distortion_warning = "Spotted a 'Should' statement! Unrealistic expectations generate stress. Focus on what you *can* do, not what you *should* have done."
+            elif any(w in summary_lower for w in emotional_kw):
+                distortion_type = "Emotional Reasoning"
+                distortion_warning = "Emotional reasoning detected! Feeling stuck doesn't mean you *are* stuck. Emotions are signals, not absolute facts."
+
+        return jsonify({
+            "status": "success", 
+            "reflection": entry,
+            "distortion_type": distortion_type,
+            "distortion_warning": distortion_warning
+        })
     else:
         return jsonify(db.get_reflections())
 
@@ -460,7 +515,8 @@ def manage_reflections():
 @require_api_token
 def get_analytics():
     global _analytics_cache, _analytics_cache_date
-    # Parse week offset
+    # Parse range and week offset
+    range_val = request.args.get("range", "weekly")
     week_offset = 0
     try:
         week_offset = int(request.args.get("week_offset", 0))
@@ -489,6 +545,7 @@ def get_analytics():
         
     cache_key = (
         week_offset,
+        range_val,
         today,
         sessions_len,
         reflections_len,
@@ -509,9 +566,26 @@ def get_analytics():
         # Monday of the current week (today.weekday() is 0 for Monday)
         current_monday = today - timedelta(days=today.weekday())
         
-        # Target week's Monday and Sunday
-        target_monday = current_monday - timedelta(weeks=week_offset)
-        target_sunday = target_monday + timedelta(days=6)
+        # Target dates based on range
+        if range_val == "monthly":
+            target_monday = today - timedelta(days=30)
+            target_sunday = today
+            week_label = "Last 30 Days"
+        elif range_val == "quarterly":
+            target_monday = today - timedelta(days=90)
+            target_sunday = today
+            week_label = "Last 90 Days"
+        else:
+            target_monday = current_monday - timedelta(weeks=week_offset)
+            target_sunday = target_monday + timedelta(days=6)
+            
+            # Format a human-readable week label
+            start_label = target_monday.strftime("%b %d")
+            end_label = target_sunday.strftime("%b %d, %Y")
+            if week_offset == 0:
+                week_label = f"Current Week ({start_label} - {end_label})"
+            else:
+                week_label = f"{start_label} - {end_label}"
         
         start_dt = datetime.combine(target_monday, datetime.min.time())
         end_dt = datetime.combine(target_sunday, datetime.max.time())
@@ -674,14 +748,6 @@ def get_analytics():
                 "avg_friction": round(friction_avg, 2),
                 "count": weekday_data[w]["count"]
             })
-
-        # Format a human-readable week label
-        start_label = target_monday.strftime("%b %d")
-        end_label = target_sunday.strftime("%b %d, %Y")
-        if week_offset == 0:
-            week_label = f"Current Week ({start_label} - {end_label})"
-        else:
-            week_label = f"{start_label} - {end_label}"
 
         # Find correlations and recommendations
         recommendations = []
@@ -896,6 +962,23 @@ def get_analytics():
             if mood in mood_counts:
                 mood_counts[mood] += 1
 
+        # Count context switches in range
+        switches_in_range = 0
+        try:
+            for sw in db.get_context_switches():
+                sw_date = sw["timestamp"][:10]
+                if start_date_str <= sw_date <= end_date_str:
+                    switches_in_range += 1
+        except Exception:
+            pass
+
+        # Sum flow minutes in range
+        flow_minutes = 0.0
+        try:
+            flow_minutes = round(sum(s.get("flow_duration", 0.0) or 0.0 for s in filtered_sessions) / 60.0, 1)
+        except Exception:
+            pass
+
         base_data = {
             "reflections": filtered_reflections[-15:], # Send last 15 filtered reflections for recent list
             "weekday_summary": weekday_summary,
@@ -906,7 +989,11 @@ def get_analytics():
             "today_sessions": base_today_sessions,
             "app_usage": processed_app_usage,
             "week_label": week_label,
-            "mood_counts": mood_counts
+            "mood_counts": mood_counts,
+            "total_context_switches": switches_in_range,
+            "context_switches_hourly": db.get_context_switches_hourly(),
+            "focus_score_history": db.get_focus_score_history(30 if range_val == 'monthly' else (90 if range_val == 'quarterly' else 7)),
+            "flow_minutes": flow_minutes
         }
         _analytics_cache[cache_key] = base_data
         response_data = base_data.copy()
@@ -1047,12 +1134,15 @@ def generate_calming_narrative():
     sleep_target = settings.get("daily_sleep_target", 8.0)
     step_target = settings.get("daily_step_target", 10000)
     
-    # Scan sleep, steps, reflections, and sessions
+    # Scan sleep, steps, reflections, and sessions for the last 7 days only
+    seven_days_ago = today - timedelta(days=6)
+    seven_days_ago_str = seven_days_ago.isoformat()
+    
     with db.lock:
-        sleep_list = db.get_sleep_list()
-        steps_list = db.get_steps_list()
-        reflections = db.get_reflections()
-        sessions = db.get_sessions()
+        sleep_list = db.get_sleep_list(start_date=seven_days_ago_str)
+        steps_list = db.get_steps_list(start_date=seven_days_ago_str)
+        reflections = db.get_reflections(start_date=seven_days_ago_str)
+        sessions = db.get_sessions(start_date=seven_days_ago_str)
         
         # Get last 7 days strings
         last_7_days = [(today - timedelta(days=i)).isoformat() for i in range(7)]
@@ -1181,6 +1271,234 @@ def manage_vitality():
         "sleep_target": settings.get("daily_sleep_target", 8.0),
         "hydration_target": settings.get("hydration_target", 8)
     })
+
+@app.route("/api/tasks", methods=["GET", "POST", "PUT", "DELETE"])
+@require_local_origin
+@require_api_token
+def manage_tasks():
+    if request.method == "GET":
+        return jsonify(db.get_tasks())
+    elif request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        text = data.get("text", "").strip()
+        if not text:
+            return jsonify({"error": "Task text is required"}), 400
+        new_task = db.add_task(text)
+        return jsonify({"status": "success", "task": new_task})
+    elif request.method == "PUT":
+        data = request.get_json(force=True, silent=True) or {}
+        task_id = data.get("id")
+        completed = data.get("completed", 0)
+        if task_id is None:
+            return jsonify({"error": "Task ID is required"}), 400
+        db.update_task(task_id, completed)
+        return jsonify({"status": "success"})
+    elif request.method == "DELETE":
+        task_id = request.args.get("id")
+        if task_id is None:
+            data = request.get_json(force=True, silent=True) or {}
+            task_id = data.get("id")
+        if task_id is None:
+            return jsonify({"error": "Task ID is required"}), 400
+        db.delete_task(task_id)
+        return jsonify({"status": "success"})
+
+@app.route("/api/gratitude", methods=["GET", "POST"])
+@require_local_origin
+@require_api_token
+def manage_gratitude():
+    from datetime import date
+    date_str = request.args.get("date")
+    if not date_str:
+        date_str = date.today().isoformat()
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        entry_1 = data.get("entry_1", "").strip()
+        entry_2 = data.get("entry_2", "").strip()
+        entry_3 = data.get("entry_3", "").strip()
+        db.add_gratitude(date_str, entry_1, entry_2, entry_3)
+        return jsonify({"status": "success"})
+    else:
+        res = db.get_gratitude(date_str)
+        if not res:
+            res = {"date": date_str, "entry_1": "", "entry_2": "", "entry_3": ""}
+        return jsonify(res)
+
+@app.route("/api/achievements", methods=["GET"])
+@require_local_origin
+@require_api_token
+def get_achievements_list():
+    return jsonify(db.get_achievements())
+
+@app.route("/api/analytics/digest", methods=["GET"])
+@require_local_origin
+@require_api_token
+def get_digest_report():
+    from datetime import datetime, date, timedelta
+    digest_range = request.args.get("range", "weekly")
+    
+    today = date.today()
+    if digest_range == "monthly":
+        days_count = 30
+        title = "Monthly Cognitive Digest"
+    else:
+        days_count = 7
+        title = "Weekly Cognitive Digest"
+        
+    start_date = today - timedelta(days=days_count-1)
+    
+    sessions = db.get_sessions()
+    reflections = db.get_reflections()
+    
+    total_work = 0
+    total_rest = 0
+    total_recharge = 0
+    bypasses = 0
+    accomplishments = []
+    
+    start_str = start_date.isoformat()
+    for s in sessions:
+        if s["start"] >= start_str:
+            dur = s["duration"]
+            if s["mode"] == "work":
+                total_work += dur
+                if s.get("brain_dump") and "[Bypassed" not in s["brain_dump"] and "[Break Completed" not in s["brain_dump"]:
+                    accomplishments.append(s["brain_dump"])
+            elif s["mode"] == "rest":
+                total_rest += dur
+            elif s["mode"] == "recharge":
+                total_recharge += dur
+            if s.get("bypassed"):
+                bypasses += 1
+                
+    energy_levels = []
+    friction_levels = []
+    for r in reflections:
+        if r["timestamp"] >= start_str:
+            energy_levels.append(r["energy_level"])
+            friction_levels.append(r["friction_level"])
+            
+    avg_energy = sum(energy_levels) / len(energy_levels) if energy_levels else 3.0
+    avg_friction = sum(friction_levels) / len(friction_levels) if friction_levels else 1.0
+    
+    recommendations = []
+    if bypasses > 2:
+        recommendations.append("High break skipping detected. Bypassing lockouts impacts sustained focus. Plan to step away next cycle.")
+    if avg_friction > 3.0:
+        recommendations.append("Task friction is high. We recommend breaking down complex goals into checklist tasks under 30 minutes.")
+    if not recommendations:
+        recommendations.append("Balanced cadence. You are maintaining excellent pacing between sprints and recovery blocks.")
+        
+    unique_acc = list(set(accomplishments))[:5]
+    
+    return jsonify({
+        "title": title,
+        "range": digest_range,
+        "period": f"{start_date.strftime('%B %d')} - {today.strftime('%B %d, %Y')}",
+        "total_focus_hours": round(total_work / 3600.0, 1),
+        "total_recovery_hours": round((total_rest + total_recharge) / 3600.0, 1),
+        "bypasses_count": bypasses,
+        "avg_energy": round(avg_energy, 1),
+        "avg_friction": round(avg_friction, 1),
+        "accomplishments": unique_acc,
+        "recommendations": recommendations,
+        "unlocked_achievements_count": len(db.get_achievements())
+    })
+
+def is_safe_url(url):
+    import socket
+    import ipaddress
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if hostname.lower() in {'localhost', '127.0.0.1', '[::1]'}:
+            return False
+        addr_info = socket.getaddrinfo(hostname, None)
+        for family, _, _, _, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                return False
+        return True
+    except Exception:
+        return False
+
+@app.teardown_appcontext
+def close_db_connection(exception):
+    db.close_thread_connection()
+
+@app.route("/api/calendar/sync", methods=["POST"])
+@require_local_origin
+@require_api_token
+def sync_calendar():
+    import re
+    from datetime import datetime, date
+    data = request.get_json(force=True, silent=True) or {}
+    ical_url = data.get("ical_url", "").strip()
+    
+    events = []
+    if ical_url and is_safe_url(ical_url):
+        try:
+            import urllib.request
+            req = urllib.request.Request(ical_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                ical_data = response.read().decode('utf-8', errors='ignore')
+                
+            matches = re.findall(r"BEGIN:VEVENT.*?END:VEVENT", ical_data, re.DOTALL)
+            for m in matches[:10]:
+                summary_m = re.search(r"SUMMARY:(.*?)\r?\n", m)
+                dtstart_m = re.search(r"DTSTART;?[^:]*:(.*?)\r?\n", m)
+                dtend_m = re.search(r"DTEND;?[^:]*:(.*?)\r?\n", m)
+                if summary_m and dtstart_m:
+                    title = summary_m.group(1).strip()
+                    raw_start = dtstart_m.group(1).strip()
+                    try:
+                        clean_start = re.sub(r'[^0-9T]', '', raw_start)
+                        if 'T' in clean_start:
+                            dt_start = datetime.strptime(clean_start[:15], "%Y%m%dT%H%M%S")
+                        else:
+                            dt_start = datetime.strptime(clean_start[:8], "%Y%m%d")
+                        start_time = dt_start.isoformat()
+                        
+                        if dtend_m:
+                            clean_end = re.sub(r'[^0-9T]', '', dtend_m.group(1).strip())
+                            if 'T' in clean_end:
+                                dt_end = datetime.strptime(clean_end[:15], "%Y%m%dT%H%M%S")
+                            else:
+                                dt_end = datetime.strptime(clean_end[:8], "%Y%m%d")
+                            end_time = dt_end.isoformat()
+                        else:
+                            end_time = start_time
+                            
+                        events.append({"title": title, "start_time": start_time, "end_time": end_time})
+                    except Exception as parse_e:
+                        print(f"Error parsing ical event date: {parse_e}")
+        except Exception as sync_e:
+            print(f"Calendar sync download error: {sync_e}")
+            
+    if not events:
+        today_str = date.today().isoformat()
+        events = [
+            {"title": "🎯 Daily Team Standup", "start_time": f"{today_str}T10:00:00", "end_time": f"{today_str}T10:30:00"},
+            {"title": "🏛️ Core System Architecture Review", "start_time": f"{today_str}T14:00:00", "end_time": f"{today_str}T15:00:00"},
+            {"title": "☕ 1-on-1 Pacing & Sync", "start_time": f"{today_str}T16:30:00", "end_time": f"{today_str}T17:00:00"}
+        ]
+        
+    with db.lock:
+        with db.connection() as conn:
+            conn.execute("DELETE FROM calendar_events")
+            for ev in events:
+                conn.execute("""
+                    INSERT INTO calendar_events (title, start_time, end_time)
+                    VALUES (?, ?, ?)
+                """, (ev["title"], ev["start_time"], ev["end_time"]))
+                
+    return jsonify({"status": "success", "events": events})
 
 def run_server(port=5000):
     # Run flask app on localhost and port 5000

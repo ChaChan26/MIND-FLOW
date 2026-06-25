@@ -21,3 +21,9 @@ tmp*.json
 # Data/Config files
 mind_flow_data.json
 Workspace_Profiles/
+node_modules/
+chrome_user_data_temp/
+mind_flow_data.db
+mind_flow_data.json.bak
+scratch/
+templates/index.html.bak

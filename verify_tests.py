@@ -1686,25 +1686,35 @@ class TestCognitiveBattery(unittest.TestCase):
     def test_battery_math_rest(self):
         from app import CognitiveBattery
         battery = CognitiveBattery(capacity=90.0, consecutive_work=10.0)
-        cap, streak = battery.process_tick(is_working=False, elapsed_minutes=2.0)
-        self.assertEqual(streak, 0.0)
+        
+        # Test gradual streak decay: 10.0 streak - (2.0 minutes * 3.0 decay_rate) = 4.0
+        cap, streak = battery.process_tick(is_working=False, elapsed_minutes=2.0, mode="rest")
+        self.assertEqual(streak, 4.0)
         self.assertEqual(cap, 95.0)
+        
+        # With another 2 minutes, it should decay to 0.0 (since 4.0 - 6.0 is clamped at 0.0)
+        cap, streak = battery.process_tick(is_working=False, elapsed_minutes=2.0, mode="rest")
+        self.assertEqual(streak, 0.0)
+        self.assertEqual(cap, 100.0)
 
     def test_db_battery_state(self):
         from backend.database import MindFlowDB
         db = MindFlowDB()
-        # Clear/initialize battery state database row for this test
-        with db.connection() as conn:
-            conn.execute("UPDATE battery_state SET current_capacity = 100.0, consecutive_work_minutes = 0.0 WHERE id = 1")
-        
-        state = db.get_battery_state()
-        self.assertEqual(state["capacity"], 100.0)
-        self.assertEqual(state["consecutive_work"], 0.0)
-        
-        db.flush_battery_state(85.5, 12.3)
-        state = db.get_battery_state()
-        self.assertEqual(state["capacity"], 85.5)
-        self.assertEqual(state["consecutive_work"], 12.3)
+        try:
+            # Clear/initialize battery state database row for this test
+            with db.connection() as conn:
+                conn.execute("UPDATE battery_state SET current_capacity = 100.0, consecutive_work_minutes = 0.0 WHERE id = 1")
+            
+            state = db.get_battery_state()
+            self.assertEqual(state["capacity"], 100.0)
+            self.assertEqual(state["consecutive_work"], 0.0)
+            
+            db.flush_battery_state(85.5, 12.3)
+            state = db.get_battery_state()
+            self.assertEqual(state["capacity"], 85.5)
+            self.assertEqual(state["consecutive_work"], 12.3)
+        finally:
+            db.close()
 
     def test_api_battery_status(self):
         from backend.server import app, shared_state, SHARED_API_TOKEN
@@ -1718,39 +1728,94 @@ class TestCognitiveBattery(unittest.TestCase):
             self.assertEqual(data["consecutive_work_minutes"], 15.0)
             self.assertEqual(data["current_energy"], 3.75)
 
+    def test_battery_neutral_mode(self):
+        from app import CognitiveBattery
+        battery = CognitiveBattery(capacity=80.0, consecutive_work=5.0)
+        
+        # In neutral mode, capacity and streak are frozen
+        cap, streak = battery.process_tick(is_working=True, elapsed_minutes=1.0, mode="neutral")
+        self.assertEqual(cap, 80.0)
+        self.assertEqual(streak, 5.0)
+
+    def test_regex_redos_blacklist(self):
+        from app import safe_regex_search, _blacklisted_patterns
+        import app
+        
+        # Clear blacklist first
+        _blacklisted_patterns.clear()
+        
+        # 1. Simple substring check optimization (no thread spawned)
+        match_simple = safe_regex_search("vscode", "running VSCODE editor")
+        self.assertTrue(match_simple)
+        
+        # 2. ReDoS pattern check (should time out and be blacklisted)
+        pattern = r"^(a+)+$"
+        text = "a" * 25 + "!"
+        
+        res = safe_regex_search(pattern, text, timeout=0.05)
+        
+        self.assertIsNone(res)
+        self.assertIn(pattern, _blacklisted_patterns)
+        
+        # Second call: returns None instantly without evaluating
+        res2 = safe_regex_search(pattern, text, timeout=0.05)
+        self.assertIsNone(res2)
+
+    def test_audio_misfire_hangover(self):
+        from app import is_audio_playing
+        import app
+        import time
+        
+        # Mock check_windows_audio_active
+        with patch('app.check_windows_audio_active') as mock_audio:
+            # 1. Audio active -> returns True
+            mock_audio.return_value = True
+            self.assertTrue(is_audio_playing())
+            
+            # 2. Audio goes silent -> still returns True due to 5s hangover
+            mock_audio.return_value = False
+            self.assertTrue(is_audio_playing())
+            
+            # 3. Simulate passage of time beyond hangover threshold (e.g. 6 seconds ago)
+            app._last_audio_active_time = time.time() - 6.0
+            self.assertFalse(is_audio_playing())
+
     def test_context_aware_activity_classification(self):
         from backend.database import MindFlowDB
         db = MindFlowDB()
-        from app import classify_activity_mode
-        work_keywords = ["vs code", "pycharm", "github", "stack overflow"]
-        recharge_keywords = ["youtube", "netflix", "steam"]
-        
-        # Youtube but contains godot tutorial -> Work
-        mode = classify_activity_mode("chrome.exe", "Godot Game Engine Tutorial - YouTube", work_keywords, recharge_keywords)
-        self.assertEqual(mode, "work")
-        
-        # Non-browser dev process (vscode) -> Work
-        mode = classify_activity_mode("code.exe", "index.js - Project", work_keywords, recharge_keywords)
-        self.assertEqual(mode, "work")
-        
-        # Youtube without work context -> Recharge
-        mode = classify_activity_mode("chrome.exe", "Funny Cat Videos - YouTube", work_keywords, recharge_keywords)
-        self.assertEqual(mode, "recharge")
-        
-        # Stackoverflow page -> Work (falls out of Neutral Blackhole)
-        mode = classify_activity_mode("firefox", "How to sort dict in Python - Stack Overflow", work_keywords, recharge_keywords)
-        self.assertEqual(mode, "work")
-        
-        # Custom user regex rule
-        original_settings = db.get_settings().copy()
         try:
-            db.update_settings({
-                "custom_rules": [{"pattern": "reddit\\.com/r/programming", "category": "work"}]
-            })
-            mode = classify_activity_mode("chrome.exe", "programming news on reddit.com/r/programming", work_keywords, recharge_keywords)
+            from app import classify_activity_mode
+            work_keywords = ["vs code", "pycharm", "github", "stack overflow"]
+            recharge_keywords = ["youtube", "netflix", "steam"]
+            
+            # Youtube but contains godot tutorial -> Work
+            mode = classify_activity_mode("chrome.exe", "Godot Game Engine Tutorial - YouTube", work_keywords, recharge_keywords)
             self.assertEqual(mode, "work")
+            
+            # Non-browser dev process (vscode) -> Work
+            mode = classify_activity_mode("code.exe", "index.js - Project", work_keywords, recharge_keywords)
+            self.assertEqual(mode, "work")
+            
+            # Youtube without work context -> Recharge
+            mode = classify_activity_mode("chrome.exe", "Funny Cat Videos - YouTube", work_keywords, recharge_keywords)
+            self.assertEqual(mode, "recharge")
+            
+            # Stackoverflow page -> Work (falls out of Neutral Blackhole)
+            mode = classify_activity_mode("firefox", "How to sort dict in Python - Stack Overflow", work_keywords, recharge_keywords)
+            self.assertEqual(mode, "work")
+            
+            # Custom user regex rule
+            original_settings = db.get_settings().copy()
+            try:
+                db.update_settings({
+                    "custom_rules": [{"pattern": "reddit\\.com/r/programming", "category": "work"}]
+                })
+                mode = classify_activity_mode("chrome.exe", "programming news on reddit.com/r/programming", work_keywords, recharge_keywords)
+                self.assertEqual(mode, "work")
+            finally:
+                db.update_settings(original_settings)
         finally:
-            db.update_settings(original_settings)
+            db.close()
 
     def test_workspace_cloud_sync_and_manifest_recovery(self):
         import tempfile
@@ -1795,45 +1860,49 @@ class TestCognitiveBattery(unittest.TestCase):
     def test_hydration_sleep_averages_fallbacks(self):
         from backend.database import MindFlowDB
         db = MindFlowDB()
-        import datetime
-        from datetime import date
-        
-        # Clear database records
-        with db.connection() as conn:
-            conn.execute("DELETE FROM hydration")
-            conn.execute("DELETE FROM reflections")
+        try:
+            import datetime
+            from datetime import date
             
-        today_str = date.today().isoformat()
-        
-        # 1. Test hydration fallback: no record today, but has historical logs
-        # Log 8 cups yesterday
-        yesterday_str = (date.today() - datetime.timedelta(days=1)).isoformat()
-        with db.connection() as conn:
-            conn.execute("INSERT INTO hydration (date, cups) VALUES (?, ?)", (yesterday_str, 8.0))
+            # Clear database records
+            with db.connection() as conn:
+                conn.execute("DELETE FROM hydration")
+                conn.execute("DELETE FROM reflections")
+                
+            today_str = date.today().isoformat()
             
-        # Context ratio uses 8.0 cups average, meaning no penalty (ratio >= 0.9)
-        hyd_ctx = db._get_hydration_context(datetime.datetime.now())
-        self.assertEqual(hyd_ctx["modifier"], 0.15)
-        
-        # 2. Test hydration fallback: no logs at all -> modifier is 0.0 (no penalty)
-        with db.connection() as conn:
-            conn.execute("DELETE FROM hydration")
-        hyd_ctx = db._get_hydration_context(datetime.datetime.now())
-        self.assertEqual(hyd_ctx["modifier"], 0.0)
-        
-        # 3. Test sleep fallback: no logs today, but has historical sleep log
-        # Log 8 hours sleep yesterday
-        yesterday_dt = datetime.datetime.now() - datetime.timedelta(days=1)
-        db.add_reflection(5, 1, "test sleep history", sleep_hours=8.0, sleep_quality=4)
-        # Force timestamp to yesterday
-        with db.connection() as conn:
-            conn.execute("UPDATE reflections SET timestamp = ? WHERE id = (SELECT max(id) FROM reflections)", (yesterday_dt.isoformat(),))
+            # 1. Test hydration fallback: no record today, but has historical logs
+            # Log 8 cups yesterday
+            yesterday_str = (date.today() - datetime.timedelta(days=1)).isoformat()
+            with db.connection() as conn:
+                conn.execute("INSERT INTO hydration (date, cups) VALUES (?, ?)", (yesterday_str, 8.0))
+                
+            # Context ratio uses 8.0 cups average, meaning no penalty (ratio >= 0.9)
+            test_now = datetime.datetime.combine(date.today(), datetime.time(12, 0, 0))
+            hyd_ctx = db._get_hydration_context(test_now)
+            self.assertEqual(hyd_ctx["modifier"], 0.15)
             
-        forecast = db.get_circadian_forecast()
-        # Fallback should read yesterday's sleep
-        self.assertEqual(forecast["sleep_hours"], 8.0)
-        self.assertEqual(forecast["sleep_quality"], 4)
-        self.assertGreater(forecast["sleep_modifier"], 0.0)
+            # 2. Test hydration fallback: no logs at all -> modifier is 0.0 (no penalty)
+            with db.connection() as conn:
+                conn.execute("DELETE FROM hydration")
+            hyd_ctx = db._get_hydration_context(test_now)
+            self.assertEqual(hyd_ctx["modifier"], 0.0)
+            
+            # 3. Test sleep fallback: no logs today, but has historical sleep log
+            # Log 8 hours sleep yesterday
+            yesterday_dt = datetime.datetime.now() - datetime.timedelta(days=1)
+            db.add_reflection(5, 1, "test sleep history", sleep_hours=8.0, sleep_quality=4)
+            # Force timestamp to yesterday
+            with db.connection() as conn:
+                conn.execute("UPDATE reflections SET timestamp = ? WHERE id = (SELECT max(id) FROM reflections)", (yesterday_dt.isoformat(),))
+                
+            forecast = db.get_circadian_forecast()
+            # Fallback should read yesterday's sleep
+            self.assertEqual(forecast["sleep_hours"], 8.0)
+            self.assertEqual(forecast["sleep_quality"], 4)
+            self.assertGreater(forecast["sleep_modifier"], 0.0)
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

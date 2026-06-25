@@ -85,6 +85,7 @@ let lastExternalProcess = 'None';
 let lastWeekdaySummary = null;
 let lastReflections = null;
 let appStatsFilter = 'today';
+let appStatsData = [];
 let weekOffset = 0;
 let lastAnalyticsLoadTime = 0;
 let lastVitalityLoadTime = 0;
@@ -332,23 +333,31 @@ function formatTime(seconds) {
 }
 
 // Show Custom Toast Notification with icon and progress bar
-function showToast(message, isError = false) {
+function showToast(message, isError = false, isWarning = false) {
     const toast = document.getElementById('app-toast');
     const toastIcon = document.getElementById('toast-icon');
     const toastText = document.getElementById('toast-text');
     const toastProgress = document.getElementById('toast-progress');
     
     if (toastText) toastText.textContent = message;
-    if (toastIcon) toastIcon.textContent = isError ? '✗' : '✓';
+    if (toastIcon) {
+        if (isWarning) toastIcon.textContent = '💡';
+        else toastIcon.textContent = isError ? '✗' : '✓';
+    }
     
     // Reset progress bar animation
     if (toastProgress) {
         toastProgress.style.animation = 'none';
         toastProgress.offsetHeight; // force reflow
-        toastProgress.style.animation = 'toast-countdown 3s linear forwards';
+        const duration = isWarning ? 5 : 3;
+        toastProgress.style.animation = `toast-countdown ${duration}s linear forwards`;
     }
     
-    if (isError) {
+    if (isWarning) {
+        toast.style.background = 'rgba(245, 158, 11, 0.95)';
+        toast.style.borderColor = '#f59e0b';
+        toast.style.boxShadow = '0 10px 25px rgba(245, 158, 11, 0.3)';
+    } else if (isError) {
         toast.style.background = 'rgba(239, 68, 68, 0.95)';
         toast.style.borderColor = '#ef4444';
         toast.style.boxShadow = '0 10px 25px rgba(239, 68, 68, 0.3)';
@@ -358,9 +367,11 @@ function showToast(message, isError = false) {
         toast.style.boxShadow = '0 10px 25px rgba(16, 185, 129, 0.3)';
     }
     toast.classList.add('show');
+    
+    const timeoutDuration = isWarning ? 5000 : 3000;
     setTimeout(() => {
         toast.classList.remove('show');
-    }, 3000);
+    }, timeoutDuration);
 }
 
 // Animated value counter for smooth transitions
@@ -780,6 +791,18 @@ async function pollStatus() {
                 }
             }
         }
+        // Update Focus Score Ring
+        const focusScoreText = document.getElementById('focus-score-text');
+        const focusScoreRing = document.getElementById('focus-score-ring');
+        if (focusScoreText && status.focus_score !== undefined) {
+            focusScoreText.textContent = Math.round(status.focus_score);
+            if (focusScoreRing) {
+                const ringCircumference = 87.96; // 2 * pi * r (r=14)
+                const ringProgress = Math.max(0, Math.min(100, status.focus_score)) / 100;
+                const ringOffset = ringCircumference * (1 - ringProgress);
+                focusScoreRing.style.strokeDashoffset = ringOffset;
+            }
+        }
         
     } catch (e) {
         console.error("Failed status poll: ", e);
@@ -1132,7 +1155,12 @@ document.getElementById('quick-reflection-form').addEventListener('submit', asyn
         });
         
         if (res.ok) {
-            showToast("Reflection logged inside private vault.");
+            const data = await res.json();
+            if (data.distortion_warning) {
+                showToast(data.distortion_warning, false, true);
+            } else {
+                showToast("Reflection logged inside private vault.");
+            }
             triggerParticleBurst(lastSubmitClick);
             summaryInput.value = '';
             if (sleepHoursInput) sleepHoursInput.value = '';
@@ -1397,7 +1425,7 @@ function smoothSessions(sessions) {
 async function loadAnalytics() {
     try {
         lastAnalyticsLoadTime = Date.now();
-        const res = await fetch(`/api/analytics?week_offset=${weekOffset}`);
+        const res = await fetch(`/api/analytics?range=${analyticsRange}&week_offset=${weekOffset}`);
         const data = await res.json();
         hideSkeletons();
         
@@ -1617,7 +1645,7 @@ async function loadAnalytics() {
                             <div style="display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 500;">
                                 <span style="display: flex; align-items: center; gap: 0.25rem;">
                                     <span>${emoji}</span>
-                                    <span>${mood}</span>
+                                    <span>${escapeHtml(mood)}</span>
                                 </span>
                                 <span style="color: var(--text-secondary); font-weight: 600;">${count} (${pct}%)</span>
                             </div>
@@ -1633,6 +1661,11 @@ async function loadAnalytics() {
                     moodDistList.innerHTML = `<div style="text-align: center; padding: 1.5rem 0; color: var(--text-muted); font-size: 0.8rem;">No mood data logged this week. Fill some check-ins above!</div>`;
                 }
             }
+        }
+        
+        // Render Heatmap
+        if (data.context_switches_hourly) {
+            renderHeatmap(data.context_switches_hourly);
         }
         
         // 2. Load Reflection Logs table
@@ -3814,6 +3847,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initAppTheme();
     loadGoal();
     loadAnalytics();
+    
+    // Initialize new features loaders
+    loadTasks();
+    loadTrophyCase();
+    loadGratitude();
+    loadCalendarEvents();
     
     // Initialize Zenith Ethereal widgets
     if (typeof startDashboardBreathing === 'function') startDashboardBreathing();
@@ -6689,6 +6728,411 @@ function toggleJoinCircle(circleType) {
         btn.style.borderColor = '';
         btn.style.color = '';
         showToast(`Left the ${circleType === 'morning' ? 'Morning Calm' : 'Deep Focus'} circle.`);
+    }
+}
+
+// ==========================================
+// New Cognitive Companion UI Controllers
+// ==========================================
+
+let analyticsRange = 'weekly';
+
+function setAnalyticsRange(rangeVal) {
+    analyticsRange = rangeVal;
+    
+    // Update active state of filter pills
+    document.querySelectorAll('.analytics-range-selector .filter-pill').forEach(btn => {
+        if (btn.id === `range-${rangeVal}`) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Update navigation UI visibility
+    const weekNav = document.getElementById('week-nav-container');
+    if (weekNav) {
+        if (rangeVal === 'weekly') {
+            weekNav.style.display = 'flex';
+        } else {
+            weekNav.style.display = 'none';
+        }
+    }
+    
+    // Update chart title dynamically
+    const chartTitle = document.getElementById('analytics-chart-title');
+    if (chartTitle) {
+        if (rangeVal === 'weekly') {
+            chartTitle.textContent = "Weekly Fatigue & Friction Analysis";
+        } else if (rangeVal === 'monthly') {
+            chartTitle.textContent = "Monthly Fatigue & Friction Analysis";
+        } else if (rangeVal === 'quarterly') {
+            chartTitle.textContent = "Quarterly Fatigue & Friction Analysis";
+        }
+    }
+    
+    loadAnalytics();
+}
+
+function renderHeatmap(hourlySwitches) {
+    const container = document.getElementById('heatmap-container');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    if (!hourlySwitches || hourlySwitches.length === 0) {
+        hourlySwitches = Array(24).fill(0);
+    }
+    
+    const maxSwitches = Math.max(1, ...hourlySwitches);
+    
+    hourlySwitches.forEach((count, hour) => {
+        const column = document.createElement('div');
+        column.className = 'flex-grow h-full flex flex-col justify-end items-center group relative cursor-pointer';
+        
+        // Calculate height percentage
+        const pct = (count / maxSwitches) * 100;
+        
+        // Format tooltip label
+        let ampm = hour >= 12 ? 'PM' : 'AM';
+        let displayHour = hour % 12;
+        if (displayHour === 0) displayHour = 12;
+        const timeLabel = `${displayHour} ${ampm}`;
+        
+        column.innerHTML = `
+            <div class="w-full rounded-t bg-work/20 group-hover:bg-work/40 transition-all duration-200" style="height: ${Math.max(5, pct)}%; opacity: ${count > 0 ? 1 : 0.25};"></div>
+            <!-- Tooltip -->
+            <div class="absolute bottom-full mb-1 scale-0 group-hover:scale-100 bg-surface border border-border px-2 py-1 rounded text-[10px] whitespace-nowrap shadow-xl z-50 pointer-events-none transition-all duration-150">
+                <strong>${count}</strong> switches at ${timeLabel}
+            </div>
+        `;
+        container.appendChild(column);
+    });
+}
+
+function toggleDigestModal(show) {
+    const modal = document.getElementById('digest-modal');
+    if (!modal) return;
+    if (show) {
+        modal.classList.add('show');
+        modal.classList.remove('pointer-events-none');
+        modal.style.opacity = '1';
+    } else {
+        modal.classList.remove('show');
+        modal.classList.add('pointer-events-none');
+        modal.style.opacity = '0';
+    }
+}
+
+async function triggerDigestReport(rangeVal) {
+    showToast("Generating cognitive digest report...");
+    try {
+        const res = await fetch(`/api/analytics/digest?range=${rangeVal}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        
+        // Populate digest content
+        document.getElementById('digest-title').textContent = data.title;
+        document.getElementById('digest-period').textContent = data.period;
+        document.getElementById('digest-focus-hours').textContent = `${data.total_focus_hours}h`;
+        document.getElementById('digest-recovery-hours').textContent = `${data.total_recovery_hours}h`;
+        document.getElementById('digest-avg-energy').textContent = data.avg_energy;
+        document.getElementById('digest-avg-friction').textContent = data.avg_friction;
+        
+        // Populate accomplishments
+        const accList = document.getElementById('digest-accomplishments');
+        accList.innerHTML = '';
+        if (data.accomplishments.length === 0) {
+            accList.innerHTML = `<li class="italic text-text-muted">No accomplishments logged in work block brain dumps.</li>`;
+        } else {
+            data.accomplishments.forEach(acc => {
+                const li = document.createElement('li');
+                li.textContent = acc;
+                accList.appendChild(li);
+            });
+        }
+        
+        // Populate recommendations
+        const recList = document.getElementById('digest-recommendations');
+        recList.innerHTML = '';
+        data.recommendations.forEach(rec => {
+            const li = document.createElement('li');
+            li.textContent = rec;
+            recList.appendChild(li);
+        });
+        
+        toggleDigestModal(true);
+    } catch(e) {
+        showToast("Error generating digest report", true);
+    }
+}
+
+async function loadTasks() {
+    const container = document.getElementById('task-list-container');
+    if (!container) return;
+    
+    try {
+        const res = await fetch('/api/tasks');
+        if (!res.ok) throw new Error();
+        const tasks = await res.json();
+        
+        // Update task planner count and progress bar
+        const totalTasks = tasks.length;
+        const completedTasks = tasks.filter(t => t.completed).length;
+        const countEl = document.getElementById('task-planner-count');
+        const progressEl = document.getElementById('task-planner-progress-fill');
+        if (countEl) {
+            countEl.textContent = `${completedTasks}/${totalTasks}`;
+        }
+        if (progressEl) {
+            const percentage = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+            progressEl.style.width = `${percentage}%`;
+        }
+
+        container.innerHTML = '';
+        if (tasks.length === 0) {
+            container.innerHTML = `<div class="text-center text-xs text-text-muted italic py-3">No micro-tasks planned. Add one above!</div>`;
+            return;
+        }
+        
+        tasks.forEach(task => {
+            const item = document.createElement('div');
+            item.className = 'flex items-center justify-between bg-input-bg hover:bg-card-bg/60 border border-border p-2 rounded-lg transition-all duration-200';
+            
+            item.innerHTML = `
+                <div class="flex items-center gap-2 min-w-0">
+                    <input type="checkbox" ${task.completed ? 'checked' : ''} 
+                        class="w-4 h-4 rounded bg-black/10 border-border text-work focus:ring-work/30 cursor-pointer"
+                        onclick="toggleTask(${task.id}, this.checked)">
+                    <span class="text-xs text-text-primary truncate ${task.completed ? 'line-through text-text-muted' : ''}">${escapeHtml(task.text)}</span>
+                </div>
+                <button type="button" class="text-red-400 hover:text-red-300 text-xs px-1.5 transition-all duration-200" onclick="deleteTask(${task.id})">×</button>
+            `;
+            container.appendChild(item);
+        });
+    } catch(e) {
+        console.error("Error loading tasks:", e);
+    }
+}
+
+async function addTask(e) {
+    e.preventDefault();
+    const input = document.getElementById('task-text-input');
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    
+    try {
+        const res = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        });
+        if (res.ok) {
+            input.value = '';
+            loadTasks();
+            showToast("Micro-task added");
+        } else {
+            showToast("Failed to add task", true);
+        }
+    } catch(e) {
+        showToast("Error adding task", true);
+    }
+}
+
+async function toggleTask(id, completed) {
+    try {
+        const res = await fetch('/api/tasks', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, completed: completed ? 1 : 0 })
+        });
+        if (res.ok) {
+            loadTasks();
+            loadTrophyCase();
+        } else {
+            showToast("Failed to update task", true);
+        }
+    } catch(e) {
+        showToast("Error updating task", true);
+    }
+}
+
+async function deleteTask(id) {
+    try {
+        const res = await fetch(`/api/tasks?id=${id}`, {
+            method: 'DELETE'
+        });
+        if (res.ok) {
+            loadTasks();
+            showToast("Task deleted");
+        } else {
+            showToast("Failed to delete task", true);
+        }
+    } catch(e) {
+        showToast("Error deleting task", true);
+    }
+}
+
+async function loadGratitude() {
+    const entry1 = document.getElementById('gratitude-entry-1');
+    const entry2 = document.getElementById('gratitude-entry-2');
+    const entry3 = document.getElementById('gratitude-entry-3');
+    if (!entry1) return;
+    
+    try {
+        const res = await fetch('/api/gratitude');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        
+        entry1.value = data.entry_1 || '';
+        entry2.value = data.entry_2 || '';
+        entry3.value = data.entry_3 || '';
+    } catch(e) {
+        console.error("Error loading gratitude:", e);
+    }
+}
+
+async function saveGratitude(e) {
+    e.preventDefault();
+    const entry1 = document.getElementById('gratitude-entry-1');
+    const entry2 = document.getElementById('gratitude-entry-2');
+    const entry3 = document.getElementById('gratitude-entry-3');
+    if (!entry1) return;
+    
+    try {
+        const res = await fetch('/api/gratitude', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entry_1: entry1.value,
+                entry_2: entry2.value,
+                entry_3: entry3.value
+            })
+        });
+        if (res.ok) {
+            showToast("Gratitude wins committed!");
+            loadTrophyCase();
+        } else {
+            showToast("Failed to save gratitude", true);
+        }
+    } catch(e) {
+        showToast("Error saving gratitude", true);
+    }
+}
+
+async function loadTrophyCase() {
+    const trophyGrid = document.getElementById('trophy-grid');
+    if (!trophyGrid) return;
+    
+    try {
+        const res = await fetch('/api/achievements');
+        if (!res.ok) throw new Error();
+        const achievements = await res.json();
+        
+        trophyGrid.innerHTML = '';
+        
+        const allAchievements = [
+            { id: 'first_reflection', name: 'First Reflection', desc: 'Logged your first mental energy state.', icon: '🌱' },
+            { id: 'focus_streak_3', name: 'Focus Streak (3 Days)', desc: 'Maintained a focus streak for 3 consecutive days.', icon: '🔥' },
+            { id: 'focus_streak_7', name: 'Deep Flow Master', desc: 'Maintained a focus streak for 7 consecutive days.', icon: '👑' },
+            { id: 'flow_state_finder', name: 'Flow State Finder', desc: 'Detected 15+ minutes of continuous work.', icon: '⚡' },
+            { id: 'morning_ready', name: 'Morning Pacing', desc: 'Adjusted focus limit based on morning readiness.', icon: '🌅' },
+            { id: 'gratitude_champion', name: 'Gratitude Practitioner', desc: 'Committed to daily wins and gratitude.', icon: '💖' },
+            { id: 'task_slayer', name: 'Micro-planner Master', desc: 'Completed a micro-task checklist.', icon: '🎯' }
+        ];
+        
+        allAchievements.forEach(ach => {
+            const unlocked = achievements.some(a => a.name === ach.name);
+            const badge = document.createElement('div');
+            badge.className = `flex flex-col items-center p-2 rounded-lg border text-center transition-all duration-300 ${
+                unlocked 
+                ? 'bg-work/10 border-work/30 text-text-primary' 
+                : 'bg-input-bg border-border/40 text-text-muted opacity-40'
+            }`;
+            badge.title = `${ach.name}: ${ach.desc}${unlocked ? ' (Unlocked!)' : ' (Locked)'}`;
+            
+            badge.innerHTML = `
+                <span class="text-xl mb-1">${ach.icon}</span>
+                <span class="text-[9px] font-bold truncate max-w-full block leading-tight">${ach.name}</span>
+            `;
+            trophyGrid.appendChild(badge);
+        });
+    } catch (e) {
+        console.error("Error loading trophy case: ", e);
+    }
+}
+
+async function loadCalendarEvents() {
+    const list = document.getElementById('synced-events-list');
+    if (!list) return;
+    
+    try {
+        const res = await fetch('/api/calendar/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ical_url: '' })
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        
+        list.innerHTML = '';
+        if (!data.events || data.events.length === 0) {
+            list.innerHTML = `<div class="text-[11px] text-text-muted italic">No calendar synced yet. Standard pacing events active.</div>`;
+            return;
+        }
+        
+        data.events.forEach(ev => {
+            const row = document.createElement('div');
+            row.className = 'flex items-center justify-between bg-input-bg border border-border p-2 rounded-lg text-xs';
+            
+            const formatTimeStr = (isoStr) => {
+                try {
+                    const dt = new Date(isoStr);
+                    return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                } catch(e) {
+                    return isoStr;
+                }
+            };
+            
+            row.innerHTML = `
+                <div class="min-w-0">
+                    <span class="font-semibold text-text-primary block truncate">${escapeHtml(ev.title)}</span>
+                    <span class="text-[10px] text-text-muted block truncate mt-0.5">${formatTimeStr(ev.start_time)} - ${formatTimeStr(ev.end_time)}</span>
+                </div>
+            `;
+            list.appendChild(row);
+        });
+    } catch(e) {
+        console.error("Error loading calendar events:", e);
+    }
+}
+
+async function triggerCalendarSync() {
+    const input = document.getElementById('ical-url-input');
+    if (!input) return;
+    const url = input.value.trim();
+    if (!url) {
+        showToast("Please enter an iCal URL first", true);
+        return;
+    }
+    
+    showToast("Syncing calendar events...");
+    try {
+        const res = await fetch('/api/calendar/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ical_url: url })
+        });
+        if (res.ok) {
+            showToast("Calendar sync completed!");
+            loadCalendarEvents();
+        } else {
+            showToast("iCal download/parse failed. Seeded default pacing events.", true);
+            loadCalendarEvents();
+        }
+    } catch(e) {
+        showToast("Network error syncing calendar", true);
+        loadCalendarEvents();
     }
 }
 

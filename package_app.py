@@ -24,13 +24,14 @@ def build_exe():
     if not os.path.exists(pyinstaller_bin):
         pyinstaller_bin = "pyinstaller"
 
+    sep = os.pathsep
     cmd = [
         pyinstaller_bin,
         "--clean",
         "--onedir",
         "--name", "MIND-FLOW",
-        "--add-data", "static;static",
-        "--add-data", "templates;templates",
+        "--add-data", f"static{sep}static",
+        "--add-data", f"templates{sep}templates",
         "--noconsole",
         "app.py"
     ]
