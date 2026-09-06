@@ -1,0 +1,18 @@
+<!--
+MIND-FLOW Native Application Entry Point.
+
+Author: ChaChan26 <minhharry2006@gmail.com>
+Copyright (c) 2026 ChaChan26. All rights reserved.
+-->
+<Application x:Class="MindFlow.Desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Styles/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

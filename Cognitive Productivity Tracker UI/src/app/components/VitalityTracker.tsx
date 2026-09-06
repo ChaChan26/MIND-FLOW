@@ -1,19 +1,14 @@
+/**
+ * Vitality tracker component logging hydration, steps, sleep, and physical stamina metrics.
+ *
+ * Author: ChaChan26 <minhharry2006@gmail.com>
+ * Copyright (c) 2026 ChaChan26. All rights reserved.
+ */
+
 import { useState, useEffect } from "react";
 import { Plus, Minus, Droplets, Footprints, Moon, Check } from "lucide-react";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const HYDRATION_GOAL = 2000; // ml
-const STEP_GOAL = 10_000;
-const SLEEP_GOAL_HOURS = 8;
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-export function computeHydrationScore(totalMl: number): number {
-  return Math.round(Math.min(totalMl / HYDRATION_GOAL, 1) * 100);
-}
-export function computeSleepScore(hours: number, quality: number): number {
-  return Math.round(Math.min(hours / 9, 1) * 70 + ((quality - 1) / 4) * 30);
-}
-
 function calcSleepHours(bed: string, wake: string): number {
   const [bh, bm] = bed.split(":").map(Number);
   const [wh, wm] = wake.split(":").map(Number);
@@ -32,18 +27,18 @@ function VitalityRing({ label, value, color, raw }: { label: string; value: numb
   return (
     <div className="flex flex-col items-center gap-1.5">
       <svg width={72} height={72}>
-        <circle cx={36} cy={36} r={r} fill="none" stroke="#EDE8DF" strokeWidth={5} />
+        <circle cx={36} cy={36} r={r} fill="none" stroke="var(--muted)" strokeWidth={5} />
         <circle cx={36} cy={36} r={r} fill="none" stroke={color} strokeWidth={5}
           strokeLinecap="round" strokeDasharray={circ}
           strokeDashoffset={circ - (Math.min(value, 100) / 100) * circ}
           style={{ transform: "rotate(-90deg)", transformOrigin: "50% 50%", transition: "stroke-dashoffset 0.8s ease" }}
         />
-        <text x={36} y={39} textAnchor="middle" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, fill: "#2D312E", fontWeight: 500 }}>
+        <text x={36} y={39} textAnchor="middle" style={{ fontFamily: "'DM Mono', monospace", fontSize: 10.5, fill: "var(--foreground)", fontWeight: 500 }}>
           {Math.round(value)}%
         </text>
       </svg>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.72rem", color: "#7D8579" }}>{label}</div>
+        <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.72rem", color: "var(--muted-foreground)" }}>{label}</div>
         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color }}>{raw}</div>
       </div>
     </div>
@@ -69,13 +64,13 @@ function HydrationBeaker({ totalMl, goalMl }: { totalMl: number; goalMl: number 
       </defs>
 
       {/* Beaker body */}
-      <rect x={bx} y={bodyTop} width={bw} height={bodyH} rx={5} fill="#F5F3EE" stroke="rgba(45,49,46,0.14)" strokeWidth={1.5} />
+      <rect x={bx} y={bodyTop} width={bw} height={bodyH} rx={5} fill="var(--muted)" stroke="rgba(45,49,46,0.14)" strokeWidth={1.5} />
 
       {/* Lip/rim */}
-      <rect x={bx - 4} y={bodyTop - 10} width={bw + 8} height={12} rx={4} fill="#EDE8DF" stroke="rgba(45,49,46,0.12)" strokeWidth={1} />
+      <rect x={bx - 4} y={bodyTop - 10} width={bw + 8} height={12} rx={4} fill="var(--border)" stroke="rgba(45,49,46,0.12)" strokeWidth={1} />
 
       {/* Spout notch on right */}
-      <rect x={bx + bw - 2} y={bodyTop - 8} width={10} height={6} rx={2} fill="#EDE8DF" stroke="rgba(45,49,46,0.1)" strokeWidth={1} />
+      <rect x={bx + bw - 2} y={bodyTop - 8} width={10} height={6} rx={2} fill="var(--border)" stroke="rgba(45,49,46,0.1)" strokeWidth={1} />
 
       {/* Water fill */}
       <rect x={bx} y={fillY} width={bw} height={fillH} fill="url(#waterGrad)" clipPath="url(#hydBeakerClip)" style={{ transition: "y 0.8s ease, height 0.8s ease" }} />
@@ -126,14 +121,21 @@ const QUICK_ADD: { label: string; amount: number; emoji: string }[] = [
 interface Props {
   sleep: number;
   hydration: number;
+  sleepTarget: number;
+  stepsTarget: number;
+  waterTarget: number;
   onSetSleep: (v: number) => void;
   onSetHydration: (v: number) => void;
 }
 
 type VTab = "hydration" | "steps" | "sleep";
 
-export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }: Props) {
+export function VitalityTracker({ sleep, hydration, sleepTarget, stepsTarget, waterTarget, onSetSleep, onSetHydration }: Props) {
   const [vTab, setVTab] = useState<VTab>("hydration");
+
+  const hydrationGoalMl = waterTarget * 250;
+  const stepsGoal = stepsTarget;
+  const sleepGoalHours = sleepTarget;
 
   // ── Hydration state ─────────────────────────────────────────────────────
   const [hydLogs, setHydLogs] = useState<HydLog[]>([
@@ -145,7 +147,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
   const [customLabel, setCustomLabel] = useState("Water");
 
   const totalHydMl = hydLogs.reduce((s, l) => s + l.amount, 0);
-  const hydPct = computeHydrationScore(totalHydMl);
+  const hydPct = Math.round(Math.min(totalHydMl / hydrationGoalMl, 1) * 100);
 
   const addHydration = (amount: number, label: string) => {
     setHydLogs(prev => [
@@ -164,7 +166,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
     { id: "s2", amount: 3000, time: new Date(Date.now() - 3_600_000) },
   ]);
 
-  const stepPct = Math.round(Math.min(stepCount / STEP_GOAL, 1) * 100);
+  const stepPct = Math.round(Math.min(stepCount / stepsGoal, 1) * 100);
 
   const addSteps = (n: number) => {
     setStepCount(prev => prev + n);
@@ -186,8 +188,8 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
   const [sleepNote, setSleepNote] = useState("");
 
   const sleepHours = calcSleepHours(bedtime, waketime);
-  const sleepScore = computeSleepScore(sleepHours, sleepQuality);
-  const sleepPct = Math.round((sleepHours / SLEEP_GOAL_HOURS) * 100);
+  const sleepScore = Math.round(Math.min(sleepHours / (sleepGoalHours + 1), 1) * 70 + ((sleepQuality - 1) / 4) * 30);
+  const sleepPct = Math.round((sleepHours / sleepGoalHours) * 100);
 
   const sleepLabel =
     sleepHours >= 8 ? "Optimal" :
@@ -198,7 +200,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
   // ── Sync engine ─────────────────────────────────────────────────────────
   useEffect(() => { onSetHydration(hydPct); }, [hydPct, onSetHydration]);
-  useEffect(() => { onSetSleep(sleepScore); }, [sleepScore, onSetSleep]);
+  useEffect(() => { onSetSleep(sleepHours); }, [sleepHours, onSetSleep]);
 
   // ── Tab buttons ──────────────────────────────────────────────────────────
   const VTABS: { id: VTab; label: string; Icon: typeof Droplets; color: string }[] = [
@@ -211,21 +213,21 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
     <div className="rounded-2xl bg-card border border-border shadow-[0_4px_20px_rgba(45,49,46,0.05)] overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(45,49,46,0.06)" }}>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.68rem", letterSpacing: "0.1em", color: "#7D8579", textTransform: "uppercase" }}>
+        <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.68rem", letterSpacing: "0.1em", color: "var(--muted-foreground)", textTransform: "uppercase" }}>
           Daily Vitality Tracker
         </div>
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: "#B5B0A8", letterSpacing: "0.04em" }}>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: "var(--muted-foreground)", letterSpacing: "0.04em" }}>
           {new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
         </div>
       </div>
 
       {/* Vitality Rings Overview */}
-      <div className="flex items-start justify-around px-6 py-5" style={{ background: "#FDFCF9" }}>
+      <div className="flex items-start justify-around px-6 py-5" style={{ background: "var(--card)" }}>
         <VitalityRing
           label="Steps"
           value={stepPct}
           color="#C5A882"
-          raw={`${stepCount.toLocaleString()} / ${STEP_GOAL.toLocaleString()}`}
+          raw={`${stepCount.toLocaleString()} / ${stepsGoal.toLocaleString()}`}
         />
         <div style={{ width: 1, background: "rgba(45,49,46,0.07)", alignSelf: "stretch" }} />
         <VitalityRing
@@ -239,7 +241,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
           label="Hydration"
           value={hydPct}
           color="#7A9BAA"
-          raw={`${totalHydMl}ml / ${HYDRATION_GOAL}ml`}
+          raw={`${totalHydMl}ml / ${hydrationGoalMl}ml`}
         />
       </div>
 
@@ -249,9 +251,9 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
           <button
             key={id}
             onClick={() => setVTab(id)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl flex-1 justify-center transition-all duration-200 mt-3"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl flex-1 justify-center transition-all duration-200 mt-3 cursor-pointer"
             style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: "0.78rem",
+              fontFamily: "'Nunito', sans-serif", fontSize: "0.78rem",
               background: vTab === id ? `${color}18` : "transparent",
               color: vTab === id ? color : "#7D8579",
               border: `1.5px solid ${vTab === id ? color + "44" : "rgba(45,49,46,0.1)"}`,
@@ -271,13 +273,13 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
           <div className="flex gap-5">
             {/* Beaker */}
             <div className="flex flex-col items-center gap-2">
-              <HydrationBeaker totalMl={totalHydMl} goalMl={HYDRATION_GOAL} />
+              <HydrationBeaker totalMl={totalHydMl} goalMl={hydrationGoalMl} />
               <div className="flex flex-col items-center gap-0.5">
                 <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.65rem", color: "#7A9BAA", letterSpacing: "0.04em" }}>
                   {hydPct}% of daily goal
                 </div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.62rem", color: "#B5B0A8" }}>
-                  {Math.max(0, HYDRATION_GOAL - totalHydMl)}ml remaining
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.62rem", color: "var(--muted-foreground)" }}>
+                  {Math.max(0, hydrationGoalMl - totalHydMl)}ml remaining
                 </div>
               </div>
             </div>
@@ -286,7 +288,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
             <div className="flex-1 flex flex-col gap-4">
               {/* Quick-add presets */}
               <div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                   Quick Add
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -294,12 +296,12 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                     <button
                       key={label}
                       onClick={() => addHydration(amount, label)}
-                      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border transition-all duration-150 hover:opacity-80 active:scale-95"
-                      style={{ background: "#F0EDE6", textAlign: "left" }}
+                      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border transition-all duration-150 hover:opacity-80 active:scale-95 cursor-pointer"
+                      style={{ background: "var(--muted)", textAlign: "left" }}
                     >
                       <span style={{ fontSize: 16 }}>{emoji}</span>
                       <div>
-                        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#2D312E" }}>{label}</div>
+                        <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.75rem", color: "var(--foreground)" }}>{label}</div>
                         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: "#7A9BAA" }}>{amount}ml</div>
                       </div>
                     </button>
@@ -309,7 +311,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
               {/* Custom add */}
               <div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                   Custom Log
                 </div>
                 <div className="flex gap-2">
@@ -317,23 +319,23 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                     value={customLabel}
                     onChange={e => setCustomLabel(e.target.value)}
                     placeholder="Label"
-                    className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-border outline-none"
-                    style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.78rem", background: "#F0EDE6", color: "#2D312E", width: "40%" }}
+                    className="focus:ring-1 focus:ring-primary focus:border-primary transition-all duration-200 outline-none flex-1 min-w-0 px-3 py-2 rounded-xl border border-border"
+                    style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.78rem", background: "var(--muted)", color: "var(--foreground)", width: "40%" }}
                   />
                   <input
                     value={customMl}
                     onChange={e => setCustomMl(e.target.value)}
                     placeholder="ml"
                     type="number"
-                    className="px-3 py-2 rounded-xl border border-border outline-none"
-                    style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.78rem", background: "#F0EDE6", color: "#2D312E", width: 64 }}
+                    className="focus:ring-1 focus:ring-primary focus:border-primary transition-all duration-200 outline-none px-3 py-2 rounded-xl border border-border"
+                    style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.78rem", background: "var(--muted)", color: "var(--foreground)", width: 64 }}
                   />
                   <button
                     onClick={() => {
                       const amt = parseInt(customMl);
                       if (amt > 0) { addHydration(amt, customLabel || "Water"); setCustomMl(""); }
                     }}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all hover:opacity-80 active:scale-90"
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all hover:opacity-80 active:scale-90 cursor-pointer"
                     style={{ background: "#7A9BAA" }}
                   >
                     <Plus size={15} style={{ color: "#FDFCF9" }} />
@@ -343,22 +345,22 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
               {/* Log history */}
               <div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                   Today's Log
                 </div>
                 <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
                   {[...hydLogs].reverse().map(log => (
-                    <div key={log.id} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#F7F5F0" }}>
-                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: "#B5B0A8", flexShrink: 0 }}>{fmtTime(log.time)}</span>
-                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#2D312E", flex: 1 }}>{log.label}</span>
+                    <div key={log.id} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: "var(--muted-foreground)", flexShrink: 0 }}>{fmtTime(log.time)}</span>
+                      <span style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.75rem", color: "var(--foreground)", flex: 1 }}>{log.label}</span>
                       <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.68rem", color: "#7A9BAA", flexShrink: 0 }}>+{log.amount}ml</span>
-                      <button onClick={() => removeHydLog(log.id)} className="shrink-0 hover:opacity-60 transition-opacity" style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                        <Minus size={11} style={{ color: "#B5B0A8" }} />
+                      <button onClick={() => removeHydLog(log.id)} className="shrink-0 hover:opacity-60 transition-opacity cursor-pointer" style={{ background: "none", border: "none", padding: 0 }}>
+                        <Minus size={11} style={{ color: "var(--muted-foreground)" }} />
                       </button>
                     </div>
                   ))}
                   {hydLogs.length === 0 && (
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#B5B0A8", textAlign: "center", padding: "8px 0" }}>
+                    <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.75rem", color: "var(--muted-foreground)", textAlign: "center", padding: "8px 0" }}>
                       No logs yet today
                     </div>
                   )}
@@ -368,22 +370,21 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
           </div>
         )}
 
-        {/* ── STEPS TAB ── */}
         {vTab === "steps" && (
           <div className="flex flex-col gap-4">
             {/* Big step count display */}
-            <div className="flex items-center gap-4 rounded-2xl px-5 py-4" style={{ background: "#F7F5F0" }}>
+            <div className="flex items-center gap-4 rounded-2xl px-5 py-4" style={{ background: "var(--muted)" }}>
               <div className="flex flex-col">
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "2rem", color: "#2D312E", letterSpacing: "-0.02em", lineHeight: 1 }}>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "2rem", color: "var(--foreground)", letterSpacing: "-0.02em", lineHeight: 1 }}>
                   {stepCount.toLocaleString()}
                 </div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.72rem", color: "#7D8579", marginTop: 4 }}>
-                  of {STEP_GOAL.toLocaleString()} step goal
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.72rem", color: "var(--muted-foreground)", marginTop: 4 }}>
+                  of {stepsGoal.toLocaleString()} step goal
                 </div>
               </div>
               <div className="flex-1">
                 {/* Progress bar */}
-                <div className="relative h-3 rounded-full overflow-hidden mb-2" style={{ background: "#EDE8DF" }}>
+                <div className="relative h-3 rounded-full overflow-hidden mb-2" style={{ background: "var(--border)" }}>
                   <div
                     className="absolute inset-y-0 left-0 rounded-full"
                     style={{
@@ -394,15 +395,15 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                     }}
                   />
                 </div>
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.65rem", color: stepPct >= 100 ? "#C5A882" : "#B5B0A8" }}>
-                  {stepPct >= 100 ? "✓ Goal reached!" : `${stepPct}% · ${(STEP_GOAL - stepCount).toLocaleString()} to go`}
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.65rem", color: stepPct >= 100 ? "#C5A882" : "var(--muted-foreground)" }}>
+                  {stepPct >= 100 ? "✓ Goal reached!" : `${stepPct}% · ${(stepsGoal - stepCount).toLocaleString()} to go`}
                 </div>
               </div>
             </div>
 
             {/* Quick-add buttons */}
             <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                 Quick Add Steps
               </div>
               <div className="flex gap-2">
@@ -410,8 +411,8 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                   <button
                     key={n}
                     onClick={() => addSteps(n)}
-                    className="flex-1 py-2.5 rounded-xl border border-border transition-all hover:opacity-80 active:scale-95"
-                    style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.75rem", background: "#F0EDE6", color: "#C5A882" }}
+                    className="flex-1 py-2.5 rounded-xl border border-border transition-all hover:opacity-80 active:scale-95 cursor-pointer"
+                    style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.75rem", background: "var(--muted)", color: "#C5A882" }}
                   >
                     +{n.toLocaleString()}
                   </button>
@@ -421,7 +422,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
             {/* Manual entry */}
             <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                 Set Total Steps
               </div>
               <div className="flex gap-2">
@@ -431,12 +432,12 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                   onKeyDown={e => e.key === "Enter" && logManualSteps()}
                   placeholder="e.g. 8500"
                   type="number"
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-border outline-none"
-                  style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.85rem", background: "#F0EDE6", color: "#2D312E" }}
+                  className="focus:ring-1 focus:ring-primary focus:border-primary transition-all duration-200 outline-none flex-1 px-4 py-2.5 rounded-xl border border-border"
+                  style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.85rem", background: "var(--muted)", color: "var(--foreground)" }}
                 />
                 <button
                   onClick={logManualSteps}
-                  className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all hover:opacity-80 active:scale-90"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all hover:opacity-80 active:scale-90 cursor-pointer"
                   style={{ background: "#C5A882" }}
                 >
                   <Check size={15} style={{ color: "#FDFCF9" }} />
@@ -446,15 +447,15 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
             {/* Step log */}
             <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                 Activity Log
               </div>
               <div className="flex flex-col gap-1.5">
                 {[...stepLogs].reverse().map(log => (
-                  <div key={log.id} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: "#F7F5F0" }}>
+                  <div key={log.id} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: "var(--muted)" }}>
                     <Footprints size={13} style={{ color: "#C5A882", flexShrink: 0 }} />
-                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: "#B5B0A8" }}>{fmtTime(log.time)}</span>
-                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.75rem", color: "#2D312E", flex: 1 }}>+{log.amount.toLocaleString()} steps</span>
+                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: "var(--muted-foreground)" }}>{fmtTime(log.time)}</span>
+                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.75rem", color: "var(--foreground)", flex: 1 }}>+{log.amount.toLocaleString()} steps</span>
                   </div>
                 ))}
               </div>
@@ -468,11 +469,11 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
             {/* Sleep duration block */}
             <div className="flex gap-4">
               {/* Big hours display */}
-              <div className="flex-1 rounded-2xl px-5 py-4 flex flex-col items-center justify-center" style={{ background: "#F7F5F0" }}>
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "2.4rem", color: "#2D312E", letterSpacing: "-0.02em", lineHeight: 1 }}>
+              <div className="flex-1 rounded-2xl px-5 py-4 flex flex-col items-center justify-center" style={{ background: "var(--muted)" }}>
+                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "2.4rem", color: "var(--foreground)", letterSpacing: "-0.02em", lineHeight: 1 }}>
                   {sleepHours}
                 </div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.72rem", color: "#7D8579", marginTop: 4 }}>hours slept</div>
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.72rem", color: "var(--muted-foreground)", marginTop: 4 }}>hours slept</div>
                 <div className="mt-2 px-3 py-1 rounded-full" style={{ background: `${sleepLabelColor}18`, border: `1px solid ${sleepLabelColor}33` }}>
                   <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: sleepLabelColor, letterSpacing: "0.06em" }}>
                     {sleepLabel}
@@ -487,20 +488,20 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                     const r = 34, circ = 2 * Math.PI * r;
                     return (
                       <>
-                        <circle cx={40} cy={40} r={r} fill="none" stroke="#EDE8DF" strokeWidth={5} />
+                        <circle cx={40} cy={40} r={r} fill="none" stroke="var(--border)" strokeWidth={5} />
                         <circle cx={40} cy={40} r={r} fill="none" stroke="#8FA08D" strokeWidth={5}
                           strokeLinecap="round" strokeDasharray={circ}
                           strokeDashoffset={circ - (sleepScore / 100) * circ}
                           style={{ transform: "rotate(-90deg)", transformOrigin: "50% 50%", transition: "stroke-dashoffset 0.8s ease" }}
                         />
-                        <text x={40} y={44} textAnchor="middle" style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, fill: "#2D312E" }}>
+                        <text x={40} y={44} textAnchor="middle" style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, fill: "var(--foreground)" }}>
                           {sleepScore}
                         </text>
                       </>
                     );
                   })()}
                 </svg>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", color: "#7D8579", textAlign: "center" }}>
+                <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", color: "var(--muted-foreground)", textAlign: "center" }}>
                   Sleep<br />Score
                 </div>
               </div>
@@ -512,8 +513,8 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                 { label: "Bedtime", icon: "🌙", val: bedtime, set: setBedtime },
                 { label: "Wake Time", icon: "🌅", val: waketime, set: setWaketime },
               ].map(({ label, icon, val, set }) => (
-                <div key={label} className="rounded-xl px-4 py-3" style={{ background: "#F7F5F0", border: "1px solid rgba(45,49,46,0.08)" }}>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.62rem", color: "#7D8579", marginBottom: 6 }}>
+                <div key={label} className="rounded-xl px-4 py-3" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.62rem", color: "var(--muted-foreground)", marginBottom: 6 }}>
                     {icon} {label}
                   </div>
                   <input
@@ -521,7 +522,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                     value={val}
                     onChange={e => set(e.target.value)}
                     className="w-full outline-none bg-transparent"
-                    style={{ fontFamily: "'DM Mono', monospace", fontSize: "1.05rem", color: "#2D312E", border: "none" }}
+                    style={{ fontFamily: "'DM Mono', monospace", fontSize: "1.05rem", color: "var(--foreground)", border: "none" }}
                   />
                 </div>
               ))}
@@ -529,7 +530,7 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
             {/* Sleep quality stars */}
             <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 10 }}>
+              <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 10 }}>
                 Sleep Quality
               </div>
               <div className="flex gap-2 items-center">
@@ -537,13 +538,13 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
                   <button
                     key={star}
                     onClick={() => setSleepQuality(star)}
-                    className="transition-all duration-150 hover:scale-110 active:scale-95"
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: 2, fontSize: star <= sleepQuality ? "1.6rem" : "1.4rem", opacity: star <= sleepQuality ? 1 : 0.3 }}
+                    className="transition-all duration-150 hover:scale-110 active:scale-95 cursor-pointer"
+                    style={{ background: "none", border: "none", padding: 2, fontSize: star <= sleepQuality ? "1.6rem" : "1.4rem", opacity: star <= sleepQuality ? 1 : 0.3 }}
                   >
                     ⭐
                   </button>
                 ))}
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#7D8579", marginLeft: 6 }}>
+                <span style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.75rem", color: "var(--muted-foreground)", marginLeft: 6 }}>
                   {["", "Very Poor", "Poor", "Fair", "Good", "Excellent"][sleepQuality]}
                 </span>
               </div>
@@ -551,24 +552,24 @@ export function VitalityTracker({ sleep, hydration, onSetSleep, onSetHydration }
 
             {/* Sleep notes */}
             <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "#7D8579", textTransform: "uppercase", marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.65rem", letterSpacing: "0.08em", color: "var(--muted-foreground)", textTransform: "uppercase", marginBottom: 8 }}>
                 Notes
               </div>
               <input
                 value={sleepNote}
                 onChange={e => setSleepNote(e.target.value)}
                 placeholder="Vivid dreams, restless, woke at 3am…"
-                className="w-full px-4 py-2.5 rounded-xl border border-border outline-none"
-                style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.82rem", background: "#F0EDE6", color: "#2D312E" }}
+                className="focus:ring-1 focus:ring-primary focus:border-primary transition-all duration-200 outline-none w-full px-4 py-2.5 rounded-xl border border-border"
+                style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.82rem", background: "var(--muted)", color: "var(--foreground)" }}
               />
             </div>
 
             {/* Sleep tip */}
-            {sleepHours < 7 && (
+            {sleepHours < sleepGoalHours && (
               <div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background: "rgba(197,168,130,0.08)", border: "1px solid rgba(197,168,130,0.2)" }}>
                 <Moon size={13} style={{ color: "#C5A882", flexShrink: 0 }} />
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#7D8579", lineHeight: 1.5 }}>
-                  Less than 7h logged. Autopilot will apply additional fatigue scaling to protect your focus sessions.
+                <span style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.75rem", color: "var(--muted-foreground)", lineHeight: 1.55 }}>
+                  Less than {sleepGoalHours}h logged. Autopilot will apply additional fatigue scaling to protect your focus sessions.
                 </span>
               </div>
             )}

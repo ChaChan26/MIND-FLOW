@@ -1,3 +1,10 @@
+/**
+ * Zen Space immersive sensory recovery, guided breathing exercises, and ambient sounds.
+ *
+ * Author: ChaChan26 <minhharry2006@gmail.com>
+ * Copyright (c) 2026 ChaChan26. All rights reserved.
+ */
+
 import { useState, useEffect, useRef } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -11,17 +18,17 @@ interface PhaseStep { n: string; d: number; t: BreathPhase }
 
 const PATTERNS: Record<PatternKey, { label: string; tag: string; desc: string; color: string; phases: PhaseStep[] }> = {
   box: {
-    label: "Box Breathing", tag: "4-4-4-4", color: "#8FA08D",
+    label: "Box Breathing", tag: "4-4-4-4", color: "var(--primary)",
     desc: "Steady 4-second rhythm. Calms the nervous system and sharpens focus.",
     phases: [{ n: "Inhale", d: 4, t: "inhale" }, { n: "Hold", d: 4, t: "hold-in" }, { n: "Exhale", d: 4, t: "exhale" }, { n: "Hold", d: 4, t: "hold-out" }],
   },
   relax: {
-    label: "Relax Breathing", tag: "4-7-8", color: "#7A9BAA",
+    label: "Relax Breathing", tag: "4-7-8", color: "var(--chart-2)",
     desc: "Inhale 4s · Hold 7s · Exhale 8s. Quiets the fight-or-flight response.",
     phases: [{ n: "Inhale", d: 4, t: "inhale" }, { n: "Hold", d: 7, t: "hold-in" }, { n: "Exhale", d: 8, t: "exhale" }],
   },
   coherent: {
-    label: "Coherent Breathing", tag: "5-5", color: "#C5A882",
+    label: "Coherent Breathing", tag: "5-5", color: "var(--chart-3)",
     desc: "Equal inhale/exhale at 6 breaths/min. Balances heart rate variability.",
     phases: [{ n: "Inhale", d: 5, t: "inhale" }, { n: "Exhale", d: 5, t: "exhale" }],
   },
@@ -30,11 +37,11 @@ const PATTERNS: Record<PatternKey, { label: string; tag: string; desc: string; c
 const SCENE_LABELS: Record<Scene, string> = { cosmic: "✦ Cosmic Flow", ocean: "〜 Ocean Waves", forest: "❋ Forest Light" };
 
 const GROUNDING = [
-  { n: 5, sense: "See",   icon: "👁",  color: "#8FA08D", prompt: "Name 5 things you can see — their shape, color, and texture." },
-  { n: 4, sense: "Touch", icon: "🤲", color: "#7A9BAA", prompt: "Notice 4 textures around you — warm, cool, rough, smooth." },
-  { n: 3, sense: "Hear",  icon: "👂", color: "#C5A882", prompt: "Listen for 3 distinct sounds, near and far. Just observe." },
-  { n: 2, sense: "Smell", icon: "🌿", color: "#B89A8A", prompt: "Find 2 scents you can detect. Even the subtlest ones count." },
-  { n: 1, sense: "Taste", icon: "🫧", color: "#A8B5A6", prompt: "Notice 1 lingering taste. Sit with it without judgment." },
+  { n: 5, sense: "See",   icon: "👁",  color: "var(--primary)", prompt: "Name 5 things you can see — their shape, color, and texture." },
+  { n: 4, sense: "Touch", icon: "🤲", color: "var(--chart-2)", prompt: "Notice 4 textures around you — warm, cool, rough, smooth." },
+  { n: 3, sense: "Hear",  icon: "👂", color: "var(--chart-3)", prompt: "Listen for 3 distinct sounds, near and far. Just observe." },
+  { n: 2, sense: "Smell", icon: "🌿", color: "var(--chart-4)", prompt: "Find 2 scents you can detect. Even the subtlest ones count." },
+  { n: 1, sense: "Taste", icon: "🫧", color: "var(--chart-5)", prompt: "Notice 1 lingering taste. Sit with it without judgment." },
 ];
 
 const STRETCHES = [
@@ -46,8 +53,8 @@ const STRETCHES = [
 ];
 
 const CIRCLES = [
-  { id: "morning", name: "Morning Calm",  emoji: "🌅", color: "#C5A882", bg: "#F5EFE5", prompt: "Begin with stillness. What are you releasing today?",         base: 47  },
-  { id: "deep",    name: "Deep Focus",    emoji: "🌊", color: "#7A9BAA", bg: "#E0EBF0", prompt: "Flow state is near. What one thing matters most right now?",  base: 123 },
+  { id: "morning", name: "Morning Calm",  emoji: "🌅", color: "var(--chart-3)", bg: "color-mix(in srgb, var(--chart-3) 12%, transparent)", prompt: "Begin with stillness. What are you releasing today?",         base: 47  },
+  { id: "deep",    name: "Deep Focus",    emoji: "🌊", color: "var(--chart-2)", bg: "color-mix(in srgb, var(--chart-2) 12%, transparent)", prompt: "Flow state is near. What one thing matters most right now?",  base: 123 },
 ];
 
 const DAILY_PROMPTS = [
@@ -232,8 +239,13 @@ function BreathingCanvas({ scene, phaseType, phaseProgress }: { scene: Scene; ph
           if (scene === "cosmic" && p.r > 1.5) {
             for (const q of particles) {
               if (q === p || q.r <= 1.5) continue;
-              const dx = q.x - p.x, dy = q.y - p.y, dist = Math.sqrt(dx * dx + dy * dy);
-              if (dist < 60) {
+              const dx = q.x - p.x;
+              if (Math.abs(dx) > 60) continue;
+              const dy = q.y - p.y;
+              if (Math.abs(dy) > 60) continue;
+              const distSq = dx * dx + dy * dy;
+              if (distSq < 3600) {
+                const dist = Math.sqrt(distSq);
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y);
                 ctx.strokeStyle = `rgba(${r},${g},${b},${(1 - dist / 60) * 0.06})`;
                 ctx.lineWidth = 0.5; ctx.stroke();
@@ -281,7 +293,7 @@ function StretchModal({ onClose }: { onClose: () => void }) {
         {/* Progress steps */}
         <div className="flex gap-2">
           {STRETCHES.map((s, i) => (
-            <div key={s.name} style={{ width: 32, height: 4, borderRadius: 2, background: i < step ? "#8FA08D" : i === step ? "#8FA08D88" : "rgba(255,255,255,0.15)" }} />
+            <div key={s.name} style={{ width: 32, height: 4, borderRadius: 2, background: i < step ? "var(--primary)" : i === step ? "color-mix(in srgb, var(--primary) 53%, transparent)" : "rgba(255,255,255,0.15)" }} />
           ))}
         </div>
 
@@ -289,7 +301,7 @@ function StretchModal({ onClose }: { onClose: () => void }) {
         <div style={{ position: "relative", width: 120, height: 120 }}>
           <svg width={120} height={120} style={{ transform: "rotate(-90deg)" }}>
             <circle cx={60} cy={60} r={52} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={5} />
-            <circle cx={60} cy={60} r={52} fill="none" stroke="#8FA08D" strokeWidth={5}
+            <circle cx={60} cy={60} r={52} fill="none" stroke="var(--primary)" strokeWidth={5}
               strokeLinecap="round" strokeDasharray={2 * Math.PI * 52}
               strokeDashoffset={2 * Math.PI * 52 * (1 - pct)}
               style={{ transition: "stroke-dashoffset 1s linear" }}
@@ -297,24 +309,24 @@ function StretchModal({ onClose }: { onClose: () => void }) {
           </svg>
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
             <span style={{ fontSize: 28 }}>{stretch.icon}</span>
-            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.82rem", color: "#8FA08D", marginTop: 4 }}>
+            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.82rem", color: "var(--primary)", marginTop: 4 }}>
               {stretch.dur - elapsed}s
             </span>
           </div>
         </div>
 
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", letterSpacing: "0.12em", color: "#8FA08D", textTransform: "uppercase", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", letterSpacing: "0.12em", color: "var(--primary)", textTransform: "uppercase", marginBottom: 8 }}>
             Step {step + 1} of {STRETCHES.length}
           </div>
-          <h2 style={{ fontFamily: "'Lora', serif", fontSize: "1.5rem", color: "#FDFCF9", marginBottom: 12 }}>{stretch.name}</h2>
-          <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.9rem", color: "rgba(255,255,255,0.65)", lineHeight: 1.65 }}>{stretch.instr}</p>
+          <h2 style={{ fontFamily: "'Lora', serif", fontSize: "1.5rem", color: "var(--primary-foreground)", marginBottom: 12 }}>{stretch.name}</h2>
+          <p style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.9rem", color: "rgba(255,255,255,0.65)", lineHeight: 1.65 }}>{stretch.instr}</p>
         </div>
 
         <button
           onClick={onClose}
           style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: "0.78rem",
+            fontFamily: "'Nunito', sans-serif", fontSize: "0.78rem",
             color: "rgba(255,255,255,0.4)", background: "none", border: "none",
             cursor: "pointer", marginTop: 4,
           }}
@@ -327,7 +339,7 @@ function StretchModal({ onClose }: { onClose: () => void }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export function ZenSpace() {
+export function ZenSpace({ eyeCare, onSetEyeCare }: { eyeCare: boolean; onSetEyeCare: (v: boolean) => void }) {
   const [scene, setScene] = useState<Scene>("cosmic");
   const [pattern, setPattern] = useState<PatternKey>("box");
   const [breathing, setBreathing] = useState(false);
@@ -335,7 +347,6 @@ export function ZenSpace() {
   const [phaseSeconds, setPhaseSeconds] = useState(4);
   const [totalBreaths, setTotalBreaths] = useState(14_284);
   const [tab, setTab] = useState<ZenTab>("breathe");
-  const [eyeCare, setEyeCare] = useState(false);
   const [showStretch, setShowStretch] = useState(false);
 
   // Grounding
@@ -362,7 +373,9 @@ export function ZenSpace() {
       masterGainRef.current.gain.value = masterVol;
       masterGainRef.current.connect(audioCtxRef.current.destination);
     }
-    if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+    if (masterVol > 0 && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
     return { ctx: audioCtxRef.current, master: masterGainRef.current! };
   };
 
@@ -387,13 +400,12 @@ export function ZenSpace() {
   const handleVolumeChange = (v: number) => {
     setMasterVol(v);
     if (masterGainRef.current) masterGainRef.current.gain.value = v;
+    if (v === 0) {
+      audioCtxRef.current?.suspend();
+    } else {
+      if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume();
+    }
   };
-
-  // Eye care filter on document body
-  useEffect(() => {
-    document.body.style.filter = eyeCare ? "sepia(0.2) brightness(0.88) saturate(0.85)" : "";
-    return () => { document.body.style.filter = ""; };
-  }, [eyeCare]);
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -485,8 +497,8 @@ export function ZenSpace() {
           </div>
           {/* Eye care + stretch buttons */}
           <div className="flex gap-2">
-            <button onClick={() => setEyeCare(e => !e)}
-              className="px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all"
+            <button onClick={() => onSetEyeCare(!eyeCare)}
+              className="px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
               style={{
                 fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", letterSpacing: "0.06em",
                 background: eyeCare ? "rgba(220,190,140,0.35)" : "rgba(0,0,0,0.25)",
@@ -512,12 +524,12 @@ export function ZenSpace() {
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 2, pointerEvents: "none" }}>
           <div style={{
             width: 120, height: 120, borderRadius: "50%",
-            background: `radial-gradient(circle, ${patColor}28 0%, ${patColor}08 60%, transparent 100%)`,
-            border: `2px solid ${patColor}55`,
+            background: `radial-gradient(circle, color-mix(in srgb, ${patColor} 16%, transparent) 0%, color-mix(in srgb, ${patColor} 3%, transparent) 60%, transparent 100%)`,
+            border: `2px solid color-mix(in srgb, ${patColor} 33%, transparent)`,
             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
             transform: `scale(${circleScale})`,
-            transition: `transform ${curPhase?.d ?? 4}s ease-in-out`,
-            boxShadow: breathing ? `0 0 40px ${patColor}44, 0 0 80px ${patColor}22` : "none",
+            transition: "transform 1s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.5s, box-shadow 0.5s",
+            boxShadow: breathing ? `0 0 40px color-mix(in srgb, ${patColor} 27%, transparent), 0 0 80px color-mix(in srgb, ${patColor} 13%, transparent)` : "none",
           }}>
             <div style={{ fontFamily: "'Lora', serif", fontSize: "0.85rem", color: "#fff", opacity: 0.9 }}>
               {breathing ? curPhase.n : "·"}
@@ -549,7 +561,7 @@ export function ZenSpace() {
           <button key={t.id} onClick={() => setTab(t.id)}
             className="px-4 py-2 rounded-xl transition-all duration-200"
             style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: "0.78rem",
+              fontFamily: "'Nunito', sans-serif", fontSize: "0.78rem",
               background: tab === t.id ? "var(--muted)" : "transparent",
               color: tab === t.id ? "var(--foreground)" : "var(--muted-foreground)",
               borderBottom: `2px solid ${tab === t.id ? "var(--primary)" : "transparent"}`,
@@ -561,38 +573,38 @@ export function ZenSpace() {
       </div>
 
       {/* ── Tab Content ─────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-4" style={{ scrollbarWidth: "none" }}>
+      <div className="custom-scrollbar flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-4">
 
         {/* ── BREATHE TAB ── */}
         {tab === "breathe" && (
           <div className="flex flex-col gap-4">
             {/* Pattern selector */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-3 stagger-children">
               {(Object.keys(PATTERNS) as PatternKey[]).map(pk => {
                 const p = PATTERNS[pk];
                 const active = pattern === pk;
                 return (
                   <button key={pk} onClick={() => { setPattern(pk); stopBreathing(); }}
-                    className="rounded-2xl px-4 py-4 text-left transition-all duration-200"
+                    className="card-interactive rounded-2xl px-4 py-4 text-left transition-all duration-200"
                     style={{
-                      background: active ? `${p.color}18` : "var(--card)",
-                      border: `1.5px solid ${active ? p.color + "55" : "var(--border)"}`,
-                      boxShadow: active ? `0 4px 20px ${p.color}22` : "0 2px 8px rgba(45,49,46,0.04)",
+                      background: active ? `color-mix(in srgb, ${p.color} 9%, transparent)` : "var(--card)",
+                      border: active ? `1.5px solid color-mix(in srgb, ${p.color} 33%, transparent)` : "1.5px solid var(--border)",
+                      boxShadow: active ? `0 4px 20px color-mix(in srgb, ${p.color} 13%, transparent)` : "0 2px 8px rgba(45,49,46,0.04)",
                     }}>
                     <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: p.color, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
                       {p.tag}
                     </div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.82rem", color: "#2D312E", marginBottom: 4 }}>{p.label}</div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.68rem", color: "#7D8579", lineHeight: 1.5 }}>{p.desc}</div>
+                    <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.82rem", color: "var(--foreground)", marginBottom: 4 }}>{p.label}</div>
+                    <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.68rem", color: "var(--muted-foreground)", lineHeight: 1.5 }}>{p.desc}</div>
                     {/* Phase timeline */}
                     <div className="flex gap-1 mt-3">
                       {p.phases.map((ph, i) => (
-                        <div key={i} style={{ flex: ph.d, height: 3, borderRadius: 2, background: active && breathing && phaseIdx === i ? p.color : `${p.color}44` }} />
+                        <div key={i} style={{ flex: ph.d, height: 3, borderRadius: 2, background: active && breathing && phaseIdx === i ? p.color : `color-mix(in srgb, ${p.color} 27%, transparent)` }} />
                       ))}
                     </div>
                     <div className="flex gap-1 mt-1">
                       {p.phases.map((ph, i) => (
-                        <div key={i} style={{ flex: ph.d, fontFamily: "'DM Mono', monospace", fontSize: "0.52rem", color: active && breathing && phaseIdx === i ? p.color : "#B5B0A8" }}>
+                        <div key={i} style={{ flex: ph.d, fontFamily: "'DM Mono', monospace", fontSize: "0.52rem", color: active && breathing && phaseIdx === i ? p.color : "var(--muted-foreground)" }}>
                           {ph.d}s
                         </div>
                       ))}
@@ -609,8 +621,8 @@ export function ZenSpace() {
               style={{
                 fontFamily: "'Lora', serif", fontSize: "1.05rem", fontStyle: "italic",
                 background: breathing ? "var(--muted)" : patColor,
-                color: breathing ? "var(--foreground)" : "#FDFCF9",
-                boxShadow: breathing ? "none" : `0 8px 24px ${patColor}44`,
+                color: breathing ? "var(--foreground)" : "var(--primary-foreground)",
+                boxShadow: breathing ? "none" : `0 8px 24px color-mix(in srgb, ${patColor} 27%, transparent)`,
               }}>
               {breathing ? "Pause Breathing" : `Begin ${PATTERNS[pattern].label}`}
             </button>
@@ -631,7 +643,7 @@ export function ZenSpace() {
         {/* ── SOUNDS TAB ── */}
         {tab === "sounds" && (
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 stagger-children">
               {[
                 { id: "drone",  label: "Alpha Drone",  desc: "Harmonic chord meditation", emoji: "🎵", builder: buildAlphaDrone },
                 { id: "rain",   label: "Forest Rain",  desc: "Filtered white noise rain",  emoji: "🌧",  builder: buildForestRain  },
@@ -640,68 +652,47 @@ export function ZenSpace() {
                 const on = activeSounds.has(id);
                 return (
                   <button key={id} onClick={() => toggleSound(id, builder)}
-                    className="rounded-2xl px-5 py-4 text-left transition-all duration-200 flex items-start gap-3"
+                    className="card-interactive rounded-2xl px-5 py-4 text-left transition-all duration-200 flex items-start gap-3 cursor-pointer"
                     style={{
                       background: on ? "var(--muted)" : "var(--card)",
-                      border: `1.5px solid ${on ? "#8FA08D55" : "rgba(45,49,46,0.1)"}`,
-                      boxShadow: on ? "0 4px 20px rgba(143,160,141,0.12)" : "0 2px 8px rgba(45,49,46,0.04)",
+                      border: `1.5px solid ${on ? "color-mix(in srgb, var(--primary) 33%, transparent)" : "var(--border)"}`,
+                      boxShadow: on ? "0 4px 20px color-mix(in srgb, var(--primary) 12%, transparent)" : "0 2px 8px rgba(45,49,46,0.04)",
                     }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: on ? "#E4EDE3" : "#EDE8DF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--muted)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>
                       {emoji}
                     </div>
                     <div>
-                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.82rem", color: "#2D312E", marginBottom: 2 }}>{label}</div>
-                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.68rem", color: "#7D8579" }}>{desc}</div>
+                      <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.82rem", color: "var(--foreground)", marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontFamily: "'Nunito', sans-serif", fontSize: "0.68rem", color: "var(--muted-foreground)" }}>{desc}</div>
                       {on && (
-                        <div className="flex items-center gap-1 mt-2">
+                        <div className="flex gap-1 items-end h-4 mt-2">
                           {[0, 1, 2, 3, 4].map(b => (
-                            <div key={b} style={{ width: 2, height: 6 + Math.sin(b * 1.3) * 4, borderRadius: 1, background: "#8FA08D", animation: "none", opacity: 0.5 + b * 0.1 }} />
+                            <div key={b} className="eq-bar playing" />
                           ))}
-                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "#8FA08D", marginLeft: 4 }}>playing</span>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "var(--primary)", marginLeft: 4 }}>playing</span>
                         </div>
                       )}
                     </div>
                   </button>
                 );
               })}
-
               {/* Singing Bowl */}
               <button onClick={handleStrikeBowl}
-                className="rounded-2xl px-5 py-4 text-left transition-all duration-200 flex items-start gap-3"
+                className="card-interactive rounded-2xl px-5 py-4 text-left transition-all duration-200 flex items-start gap-3 cursor-pointer"
                 style={{
-                  background: bowlRinging ? "rgba(197,168,130,0.12)" : "var(--card)",
-                  border: `1.5px solid ${bowlRinging ? "#C5A88255" : "var(--border)"}`,
-                  boxShadow: bowlRinging ? "0 4px 20px rgba(197,168,130,0.15)" : "0 2px 8px rgba(45,49,46,0.04)",
+                  background: bowlRinging ? "color-mix(in srgb, var(--chart-3) 12%, transparent)" : "var(--card)",
+                  border: `1.5px solid ${bowlRinging ? "color-mix(in srgb, var(--chart-3) 33%, transparent)" : "var(--border)"}`,
+                  boxShadow: bowlRinging ? "0 4px 20px color-mix(in srgb, var(--chart-3) 15%, transparent)" : "0 2px 8px rgba(45,49,46,0.04)",
                 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: bowlRinging ? "#F5EFE5" : "#EDE8DF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>
-                  🥣
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--muted)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>
+                  🎐
                 </div>
                 <div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.82rem", color: "#2D312E", marginBottom: 2 }}>Singing Bowl</div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.68rem", color: "#7D8579" }}>Strike for 432 Hz bell tone</div>
-                  {bowlRinging && <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "#C5A882", marginTop: 4 }}>ringing…</div>}
+                  <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.82rem", color: "var(--foreground)", marginBottom: 2 }}>Singing Bowl</div>
+                  <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.68rem", color: "var(--muted-foreground)" }}>Strike for 432 Hz bell tone</div>
+                  {bowlRinging && <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.58rem", color: "var(--chart-3)", marginTop: 4 }}>ringing</div>}
                 </div>
               </button>
-            </div>
-
-            {/* Master Volume */}
-            <div className="rounded-2xl bg-card border border-border px-5 py-4">
-              <div className="flex justify-between mb-3">
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#7D8579" }}>Master Volume</span>
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.72rem", color: "#8FA08D" }}>{Math.round(masterVol * 100)}%</span>
-              </div>
-              <input type="range" min={0} max={1} step={0.01} value={masterVol}
-                onChange={e => handleVolumeChange(Number(e.target.value))}
-                className="w-full h-1.5 rounded-full appearance-none outline-none cursor-pointer"
-                style={{ accentColor: "#8FA08D", background: `linear-gradient(to right, #8FA08D ${masterVol * 100}%, #EDE8DF ${masterVol * 100}%)` }}
-              />
-              <div className="flex justify-between mt-2">
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "#B5B0A8" }}>Quiet</span>
-                <button onClick={() => handleVolumeChange(0)} style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: activeSounds.size ? "#C17B6B" : "#B5B0A8", background: "none", border: "none", cursor: "pointer" }}>
-                  {activeSounds.size > 0 ? "Mute all" : ""}
-                </button>
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "#B5B0A8" }}>Full</span>
-              </div>
             </div>
           </div>
         )}
@@ -709,67 +700,53 @@ export function ZenSpace() {
         {/* ── GROUNDING TAB ── */}
         {tab === "ground" && (
           <div className="flex flex-col gap-4">
-            <div className="rounded-2xl px-5 py-4" style={{ background: "#F0EDE6", border: "1px solid rgba(45,49,46,0.08)" }}>
-              <div style={{ fontFamily: "'Lora', serif", fontSize: "0.88rem", color: "#2D312E", lineHeight: 1.6, fontStyle: "italic" }}>
-                "{DAILY_PROMPTS[promptIdx]}"
-              </div>
+            <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.75rem", color: "var(--muted-foreground)", lineHeight: 1.6 }}>
+              The 5-4-3-2-1 technique anchors you in the present moment. Take your time with each step.
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               {GROUNDING.map((g, i) => {
                 const active = groundStep === i;
                 const done = groundDone.has(i);
                 return (
-                  <button key={g.sense}
-                    onClick={() => {
-                      setGroundStep(i);
-                      setGroundDone(prev => new Set([...prev, i]));
-                    }}
-                    className="flex items-start gap-4 px-4 py-4 rounded-2xl text-left transition-all duration-200"
+                  <div key={i} className="rounded-2xl px-5 py-4 transition-all duration-300"
                     style={{
-                      background: active ? `${g.color}14` : done ? `${g.color}08` : "var(--card)",
-                      border: `1.5px solid ${active ? g.color + "44" : done ? g.color + "22" : "var(--border)"}`,
+                      background: done ? "color-mix(in srgb, var(--primary) 8%, transparent)" : active ? "var(--card)" : "var(--card)",
+                      border: `1.5px solid ${done ? "color-mix(in srgb, var(--primary) 30%, transparent)" : active ? "var(--primary)" : "var(--border)"}`,
+                      opacity: groundStep >= i || done ? 1 : 0.6,
                     }}>
-                    <div style={{
-                      width: 40, height: 40, borderRadius: "50%",
-                      background: active ? g.color : done ? `${g.color}44` : "#EDE8DF",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0, fontSize: 18, transition: "background 0.3s ease",
-                    }}>
-                      {done && !active ? "✓" : g.icon}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span style={{
-                          width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
-                          background: active ? g.color : "#EDE8DF",
-                          color: active ? "#FDFCF9" : "#7D8579",
-                          display: "inline-flex", alignItems: "center", justifyContent: "center",
-                          fontFamily: "'DM Mono', monospace", fontSize: "0.65rem",
-                        }}>{g.n}</span>
-                        <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.88rem", color: "#2D312E" }}>Things You Can {g.sense}</span>
+                    <div className="flex items-start gap-4">
+                      <div style={{ width: 32, height: 32, borderRadius: "50%", background: done ? g.color : active ? g.color : "var(--muted)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.8rem", flexShrink: 0 }}>
+                        {done ? "✓" : i + 1}
                       </div>
-                      <div style={{
-                        fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#7D8579",
-                        lineHeight: 1.6, maxHeight: active ? 80 : 0, overflow: "hidden",
-                        transition: "max-height 0.3s ease",
-                      }}>
-                        {g.prompt}
+                      <div className="flex-1">
+                        <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.85rem", color: "var(--foreground)", marginBottom: 2 }}>{g.n} Things to {g.sense} {g.icon}</div>
+                        <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.72rem", color: "var(--muted-foreground)", marginBottom: 8 }}>{g.prompt}</div>
+                        {!done && active && (
+                          <button onClick={(e) => {
+                              e.stopPropagation();
+                              setGroundDone(prev => new Set([...prev, i]));
+                            }}
+                            className="px-3 py-1 rounded-lg text-white font-medium text-xs transition-opacity hover:opacity-90 cursor-pointer"
+                            style={{ background: g.color, border: "none" }}
+                          >
+                            I've noticed these
+                          </button>
+                        )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
-
             {groundDone.size === 5 && (
-              <div className="rounded-2xl px-5 py-4 flex items-center gap-3" style={{ background: "#E4EDE3", border: "1px solid #8FA08D44" }}>
+              <div className="rounded-2xl px-5 py-4 flex items-center gap-3" style={{ background: "color-mix(in srgb, var(--primary) 15%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)" }}>
                 <span style={{ fontSize: 20 }}>✦</span>
                 <div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.82rem", color: "#2D312E" }}>Grounding complete</div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.72rem", color: "#7D8579" }}>Your nervous system is anchored. Well done.</div>
+                  <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.82rem", color: "var(--foreground)" }}>Grounding complete</div>
+                  <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.72rem", color: "var(--muted-foreground)" }}>Your nervous system is anchored. Well done.</div>
                 </div>
-                <button onClick={() => { setGroundStep(-1); setGroundDone(new Set()); }} style={{ marginLeft: "auto", fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: "#8FA08D", background: "none", border: "none", cursor: "pointer" }}>
+                <button onClick={() => { setGroundStep(-1); setGroundDone(new Set()); }} style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: "0.6rem", color: "var(--primary)", background: "none", border: "none", cursor: "pointer" }}>
                   Reset
                 </button>
               </div>
@@ -780,7 +757,7 @@ export function ZenSpace() {
         {/* ── COMMUNITY TAB ── */}
         {tab === "community" && (
           <div className="flex flex-col gap-4">
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.75rem", color: "#7D8579", lineHeight: 1.6 }}>
+            <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.75rem", color: "var(--muted-foreground)", lineHeight: 1.6 }}>
               Breathe alongside others in a shared virtual space. Your participation adds to the collective.
             </div>
 
@@ -793,31 +770,31 @@ export function ZenSpace() {
                     <div className="flex items-center gap-2">
                       <span style={{ fontSize: 20 }}>{circle.emoji}</span>
                       <div>
-                        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.88rem", color: "#2D312E" }}>{circle.name}</div>
+                        <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.88rem", color: "var(--foreground)" }}>{circle.name}</div>
                         <div className="flex items-center gap-1.5">
                           <span style={{ width: 6, height: 6, borderRadius: "50%", background: circle.color, display: "inline-block", boxShadow: `0 0 6px ${circle.color}` }} />
-                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: circle.color }}>{count} breathing now</span>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.62rem", color: circle.color }}>{count} breathing now</span>
                         </div>
                       </div>
                     </div>
                     <button
                       onClick={() => setJoined(isJoined ? null : circle.id)}
-                      className="px-4 py-2 rounded-xl transition-all duration-200"
+                      className="px-4 py-2 rounded-xl transition-all duration-200 cursor-pointer"
                       style={{
-                        fontFamily: "'DM Sans', sans-serif", fontSize: "0.78rem",
+                        fontFamily: "var(--font-sans)", fontSize: "0.78rem",
                         background: isJoined ? circle.color : "transparent",
-                        color: isJoined ? "#FDFCF9" : circle.color,
+                        color: isJoined ? "var(--primary-foreground)" : circle.color,
                         border: `1px solid ${circle.color}55`,
                       }}>
                       {isJoined ? "Breathing Together" : "Join Circle"}
                     </button>
                   </div>
 
-                  <div className="rounded-xl px-4 py-3 mb-3" style={{ background: "rgba(255,255,255,0.55)" }}>
-                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: circle.color, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+                  <div className="rounded-xl px-4 py-3 mb-3" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.58rem", color: circle.color, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
                       Today's Prompt
                     </div>
-                    <div style={{ fontFamily: "'Lora', serif", fontSize: "0.85rem", color: "#2D312E", lineHeight: 1.6, fontStyle: "italic" }}>
+                    <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.85rem", color: "var(--foreground)", lineHeight: 1.6, fontStyle: "italic" }}>
                       "{circle.prompt}"
                     </div>
                   </div>
@@ -831,12 +808,12 @@ export function ZenSpace() {
                         boxShadow: i < 3 ? `0 0 6px ${circle.color}88` : "none",
                       }} />
                     ))}
-                    {count > 24 && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "#B5B0A8" }}>+{count - 24}</span>}
+                    {count > 24 && <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.58rem", color: "var(--muted-foreground)" }}>+{count - 24}</span>}
                   </div>
 
                   {isJoined && (
                     <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${circle.color}22` }}>
-                      <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.65rem", color: circle.color, letterSpacing: "0.08em" }}>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: circle.color, letterSpacing: "0.08em" }}>
                         You are breathing with this circle. {count} participants · Collective milestone: {(count * 1440).toLocaleString()} breaths today
                       </div>
                     </div>
@@ -846,11 +823,11 @@ export function ZenSpace() {
             })}
 
             {/* Milestone */}
-            <div className="rounded-2xl px-5 py-4 flex items-center gap-3" style={{ background: "#F0EDE6", border: "1px solid rgba(45,49,46,0.08)" }}>
+            <div className="rounded-2xl px-5 py-4 flex items-center gap-3" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
               <span style={{ fontSize: 20 }}>✦</span>
               <div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: "0.82rem", color: "#2D312E" }}>Daily Collective</div>
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.68rem", color: "#7D8579" }}>
+                <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.82rem", color: "var(--foreground)" }}>Daily Collective</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.68rem", color: "var(--muted-foreground)" }}>
                   {totalBreaths.toLocaleString()} breaths shared today across all circles
                 </div>
               </div>

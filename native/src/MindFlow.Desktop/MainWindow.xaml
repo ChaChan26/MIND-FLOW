@@ -1,0 +1,384 @@
+<!--
+MIND-FLOW Native Desktop Dashboard - Full Native WPF UI.
+
+Author: ChaChan26 <minhharry2006@gmail.com>
+Copyright (c) 2026 ChaChan26. All rights reserved.
+-->
+<Window x:Class="MindFlow.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:MindFlow.Desktop.ViewModels"
+        mc:Ignorable="d"
+        Title="MIND-FLOW // Cognitive Companion"
+        Height="800" Width="1240"
+        MinHeight="680" MinWidth="1000"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}">
+
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <!-- Left Sidebar -->
+            <ColumnDefinition Width="240"/>
+            <!-- Main Content Area -->
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ==================== LEFT SIDEBAR ==================== -->
+        <Border Grid.Column="0"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,1,0"
+                Padding="24,28">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <!-- Brand Header -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Navigation Items -->
+                    <RowDefinition Height="*"/>
+                    <!-- Status / System Footnote -->
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Brand Header -->
+                <StackPanel Grid.Row="0" Margin="0,0,0,32">
+                    <TextBlock Text="✦ MIND-FLOW"
+                               FontFamily="{StaticResource AppFont}"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource PrimaryBrush}"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Text="Native Cognitive Companion"
+                               FontFamily="{StaticResource AppFont}"
+                               FontSize="12"
+                               FontWeight="Medium"
+                               Foreground="{StaticResource TextMutedBrush}"/>
+                </StackPanel>
+
+                <!-- Navigation List -->
+                <StackPanel Grid.Row="1">
+                    <RadioButton Content="🏠  Focus HUD"
+                                 Style="{StaticResource NavButton}"
+                                 IsChecked="True"
+                                 Command="{Binding NavigateCommand}"
+                                 CommandParameter="dashboard"/>
+
+                    <RadioButton Content="🧘  Zen Space"
+                                 Style="{StaticResource NavButton}"
+                                 Command="{Binding NavigateCommand}"
+                                 CommandParameter="zen"/>
+
+                    <RadioButton Content="📊  App Usage"
+                                 Style="{StaticResource NavButton}"
+                                 Command="{Binding NavigateCommand}"
+                                 CommandParameter="analytics"/>
+
+                    <RadioButton Content="⚙️  Preferences"
+                                 Style="{StaticResource NavButton}"
+                                 Command="{Binding NavigateCommand}"
+                                 CommandParameter="preferences"/>
+                </StackPanel>
+
+                <!-- Footer Telemetry -->
+                <StackPanel Grid.Row="2" VerticalAlignment="Bottom">
+                    <Border Background="{StaticResource SurfaceVariantBrush}"
+                            CornerRadius="12"
+                            Padding="12,10"
+                            Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="NATIVE ENGINE"
+                                       FontSize="10"
+                                       FontWeight="Bold"
+                                       Foreground="{StaticResource AccentMintBrush}"
+                                       Margin="0,0,0,2"/>
+                            <TextBlock Text="Direct Win32 • Zero WebView"
+                                       FontSize="11"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="© 2026 ChaChan26"
+                               FontSize="11"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ==================== MAIN CONTENT AREA ==================== -->
+        <Grid Grid.Column="1" Margin="32,24,32,24">
+            <Grid.RowDefinitions>
+                <!-- Top Status Bar -->
+                <RowDefinition Height="Auto"/>
+                <!-- Dynamic Content Views -->
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Top Status Bar -->
+            <Border Grid.Row="0" Margin="0,0,0,24">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Active Window Info -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Background="{StaticResource SurfaceVariantBrush}"
+                                CornerRadius="16"
+                                Padding="14,6"
+                                Margin="0,0,10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Active: " Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                <TextBlock Text="{Binding ActiveProcessName}" FontWeight="SemiBold" FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceVariantBrush}"
+                                CornerRadius="16"
+                                Padding="14,6"
+                                Margin="0,0,10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Idle: " Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                <TextBlock Text="{Binding IdleSeconds, StringFormat='{}{0:F1}s'}" FontWeight="SemiBold" FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Audio Active Pill -->
+                        <Border Background="#2B82C1B8"
+                                CornerRadius="16"
+                                Padding="12,6"
+                                Margin="0,0,10,0">
+                            <TextBlock Text="🔊 Audio Active"
+                                       Foreground="{StaticResource AccentMintBrush}"
+                                       FontWeight="SemiBold"
+                                       FontSize="11"/>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Mode Badge -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Background="#2B8E97FD"
+                                BorderBrush="{StaticResource PrimaryBrush}"
+                                BorderThickness="1"
+                                CornerRadius="16"
+                                Padding="16,6">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="MODE: " FontSize="11" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding CurrentModeName}"
+                                           FontWeight="Bold"
+                                           FontSize="13"
+                                           Foreground="{StaticResource PrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ==================== 1. DASHBOARD VIEW ==================== -->
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- Hero Battery Card -->
+                    <Border Style="{StaticResource CardPanel}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Battery Gauge Display -->
+                            <StackPanel Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Width="130" Height="130"
+                                        CornerRadius="65"
+                                        Background="#158E97FD"
+                                        BorderBrush="{StaticResource PrimaryBrush}"
+                                        BorderThickness="4"
+                                        HorizontalAlignment="Center">
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding BatteryCapacityFormatted}"
+                                                   FontFamily="{StaticResource AppFont}"
+                                                   FontSize="34"
+                                                   FontWeight="Bold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                                   HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Stamina"
+                                                   FontSize="12"
+                                                   FontWeight="Medium"
+                                                   Foreground="{StaticResource TextMutedBrush}"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- Battery Analytics & Status -->
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="24,0,0,0">
+                                <TextBlock Text="Cognitive Battery Engine"
+                                           FontSize="18"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           Margin="0,0,0,6"/>
+                                <TextBlock Text="Adaptive stamina modeling active. Drain is scaled by fatigue accumulation and task context switches."
+                                           FontSize="13"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,16"/>
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Background="{StaticResource SurfaceVariantBrush}"
+                                            CornerRadius="10"
+                                            Padding="14,8"
+                                            Margin="0,0,12,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Consecutive Work" FontSize="11" Foreground="{StaticResource TextMutedBrush}"/>
+                                            <TextBlock Text="{Binding ConsecutiveWorkFormatted}" FontSize="15" FontWeight="Bold"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource SurfaceVariantBrush}"
+                                            CornerRadius="10"
+                                            Padding="14,8">
+                                        <StackPanel>
+                                            <TextBlock Text="Engine Status" FontSize="11" Foreground="{StaticResource TextMutedBrush}"/>
+                                            <TextBlock Text="{Binding StatusMessage}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AccentMintBrush}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Quick Sprint Actions -->
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center" Width="180">
+                                <Button Content="⚡ Focus Sprint (25m)"
+                                        Style="{StaticResource PillButton}"
+                                        Command="{Binding ExtendSprintCommand}"
+                                        CommandParameter="25"
+                                        Margin="0,0,0,10"/>
+
+                                <Button Content="+5m Extend"
+                                        Style="{StaticResource OutlineButton}"
+                                        Command="{Binding ExtendSprintCommand}"
+                                        CommandParameter="5"
+                                        Margin="0,0,0,10"/>
+
+                                <Button Content="Take Rest Break"
+                                        Style="{StaticResource OutlineButton}"
+                                        Command="{Binding TakeBreakCommand}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Two-Column Grid: Active Classification & Recent App Telemetry -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: Live Window Details -->
+                        <Border Grid.Column="0" Style="{StaticResource CardPanel}" Margin="0,0,12,16">
+                            <StackPanel>
+                                <TextBlock Text="Live Window Telemetry"
+                                           FontSize="16"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,16"/>
+
+                                <TextBlock Text="Current Caption:" FontSize="12" Foreground="{StaticResource TextMutedBrush}"/>
+                                <TextBlock Text="{Binding ActiveWindowTitle}"
+                                           FontSize="14"
+                                           FontWeight="Medium"
+                                           TextWrapping="Wrap"
+                                           Margin="0,2,0,16"/>
+
+                                <TextBlock Text="Process Executable:" FontSize="12" Foreground="{StaticResource TextMutedBrush}"/>
+                                <TextBlock Text="{Binding ActiveProcessName}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AccentIndigoBrush}"
+                                           Margin="0,2,0,16"/>
+
+                                <TextBlock Text="Manual Mode Override:" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Work" Style="{StaticResource OutlineButton}" Padding="12,6" Margin="0,0,6,0"
+                                            Command="{Binding SetModeCommand}" CommandParameter="Work"/>
+                                    <Button Content="Recharge" Style="{StaticResource OutlineButton}" Padding="12,6" Margin="0,0,6,0"
+                                            Command="{Binding SetModeCommand}" CommandParameter="Recharge"/>
+                                    <Button Content="Neutral" Style="{StaticResource OutlineButton}" Padding="12,6" Margin="0,0,6,0"
+                                            Command="{Binding SetModeCommand}" CommandParameter="Neutral"/>
+                                    <Button Content="Rest" Style="{StaticResource OutlineButton}" Padding="12,6"
+                                            Command="{Binding SetModeCommand}" CommandParameter="Rest"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Right: Today's App Usage Table -->
+                        <Border Grid.Column="1" Style="{StaticResource CardPanel}" Margin="12,0,0,16">
+                            <StackPanel>
+                                <TextBlock Text="Top Application Usage (Today)"
+                                           FontSize="16"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,16"/>
+
+                                <ItemsControl ItemsSource="{Binding RecentUsage}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderThickness="0,0,0,1"
+                                                    BorderBrush="{StaticResource BorderBrush}"
+                                                    Padding="0,8">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="{Binding Process}"
+                                                               FontWeight="Medium"
+                                                               FontSize="13"/>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Duration, StringFormat='{}{0:F0}s'}"
+                                                               Foreground="{StaticResource TextMutedBrush}"
+                                                               FontSize="12"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Guided Rest / Zen Space Teaser -->
+                    <Border Style="{StaticResource CardPanel}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="4-7-8 Restorative Breathing" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                                <TextBlock Text="{Binding BreathingPhaseText}"
+                                           FontSize="14"
+                                           Foreground="{StaticResource AccentMintBrush}"
+                                           FontWeight="SemiBold"/>
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="Open Zen Sanctuary"
+                                    Style="{StaticResource PillButton}"
+                                    Command="{Binding NavigateCommand}"
+                                    CommandParameter="zen"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

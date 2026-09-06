@@ -1,21 +1,21 @@
+"""
+MIND-FLOW Desktop Core Application and State Machine orchestrating active window tracking,
+heuristic stamina battery modeling, and background server execution.
+
+Author: ChaChan26 <minhharry2006@gmail.com>
+Copyright (c) 2026 ChaChan26. All rights reserved.
+"""
+
 import os
 import sys
-
-# Fast CLI handler for safe regex subprocesses to prevent importing heavy modules
-if len(sys.argv) > 1 and sys.argv[1] == "--eval-regex":
-    import re
-    import json
-    try:
-        data = json.loads(sys.stdin.read())
-        pattern = data.get("pattern", "")
-        text = data.get("text", "")
-        match = re.search(pattern, text)
-        print(json.dumps({"match": match is not None}))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
-    sys.exit(0)
 import io
 import subprocess
+import json
+
+# Prevent Edge WebView2 from placing renderer/utility sub-processes into Efficiency Mode / EcoQoS (which forces CPU downclocking)
+os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--disable-features=UseEcoQoSForBackgroundProcess --disable-background-timer-throttling"
+
+
 
 import shutil
 
@@ -70,8 +70,12 @@ import random
 import math
 import ctypes
 import socket
+
+def get_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
 import threading
-import tkinter as tk
 if sys.platform == "win32":
     import winsound
 from datetime import datetime, date
@@ -95,549 +99,24 @@ EYE_EXERCISES = [
 ]
 
 from backend.database import matches_keyword, matches_any_keyword, is_browser_process
+from backend.task_classifier import TaskClassifier
 
-if sys.platform == "win32":
-    class LASTINPUTINFO(ctypes.Structure):
-        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
-else:
-    LASTINPUTINFO = None
-
-# Event-driven Active Window Caching
-_active_window_lock = threading.Lock()
-_active_hwnd = None
-_active_title = "None"
-_active_process = "None"
-
-def get_active_window_title_direct(hwnd):
-    try:
-        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-        if length == 0:
-            return "None"
-        buf = ctypes.create_unicode_buffer(length + 1)
-        ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
-        return buf.value
-    except Exception as e:
-        print(f"Error reading active window title: {e}")
-        return "None"
-
-def get_active_process_name_direct(hwnd):
-    try:
-        pid = ctypes.c_ulong()
-        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-        if not h_process:
-            return "None"
-        try:
-            buf_size = ctypes.c_ulong(260)
-            buf = ctypes.create_unicode_buffer(buf_size.value)
-            if ctypes.windll.kernel32.QueryFullProcessImageNameW(h_process, 0, buf, ctypes.byref(buf_size)):
-                return os.path.basename(buf.value).lower()
-            return "None"
-        finally:
-            ctypes.windll.kernel32.CloseHandle(h_process)
-    except Exception as e:
-        print(f"Error reading active process name: {e}")
-        return "None"
-
-if sys.platform == "win32":
-    # Hook callback prototype
-    WinEventProcType = ctypes.WINFUNCTYPE(
-        None,
-        ctypes.c_void_p, # hWinEventHook
-        ctypes.c_ulong,  # event
-        ctypes.c_void_p, # hwnd
-        ctypes.c_long,   # idObject
-        ctypes.c_long,   # idChild
-        ctypes.c_ulong,  # dwEventThread
-        ctypes.c_ulong   # dwmsEventTime
-    )
-    
-    def win_event_proc(hWinEventHook, event, hwnd, idObject, idChild, dwEventThread, dwmsEventTime):
-        global _active_hwnd, _active_title, _active_process
-        if hwnd:
-            title = get_active_window_title_direct(hwnd)
-            process = get_active_process_name_direct(hwnd)
-            with _active_window_lock:
-                _active_hwnd = hwnd
-                _active_title = title
-                _active_process = process
-
-    _hook_callback = WinEventProcType(win_event_proc)
-
-    def start_win_event_listener():
-        hook = ctypes.windll.user32.SetWinEventHook(
-            0x0003, # EVENT_SYSTEM_FOREGROUND
-            0x0003, # EVENT_SYSTEM_FOREGROUND
-            0,
-            _hook_callback,
-            0,
-            0,
-            0 # WINEVENT_OUTOFCONTEXT
-        )
-        if not hook:
-            print("SetWinEventHook failed.")
-            return
-            
-        class MSG(ctypes.Structure):
-            _fields_ = [
-                ("hwnd", ctypes.c_void_p),
-                ("message", ctypes.c_uint),
-                ("wParam", ctypes.c_void_p),
-                ("lParam", ctypes.c_void_p),
-                ("time", ctypes.c_ulong),
-                ("pt", ctypes.c_long * 2),
-                ("lPrivate", ctypes.c_ulong)
-            ]
-            
-        msg = MSG()
-        while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) != 0:
-            ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-            ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
-        ctypes.windll.user32.UnhookWinEvent(hook)
-
-    # Initialize foreground window once on startup
-    try:
-        init_hwnd = ctypes.windll.user32.GetForegroundWindow()
-        if init_hwnd:
-            _active_hwnd = init_hwnd
-            _active_title = get_active_window_title_direct(init_hwnd)
-            _active_process = get_active_process_name_direct(init_hwnd)
-    except Exception:
-        pass
-
-def get_active_window_details():
-    """Retrieve both foreground window title and process name atomically under lock, with optimized fallbacks on macOS/Linux."""
-    # Support mock patch in test suite: if the individual functions are mocked, call them directly
-    if hasattr(get_active_window_title, '_mock_self') or hasattr(get_active_process_name, '_mock_self') or hasattr(get_active_window_title, 'called') or hasattr(get_active_process_name, 'called'):
-        return get_active_window_title(), get_active_process_name()
-
-    if sys.platform != "win32":
-        if sys.platform == "darwin":
-            try:
-                script = (
-                    'tell application "System Events"\n'
-                    '    set frontApp to first application process whose frontmost is true\n'
-                    '    set appName to name of frontApp\n'
-                    '    set winName to "None"\n'
-                    '    try\n'
-                    '        set winName to name of window 1 of frontApp\n'
-                    '    end try\n'
-                    '    return appName & "|||" & winName\n'
-                    'end tell'
-                )
-                output = subprocess.check_output(["osascript", "-e", script], stderr=subprocess.DEVNULL).decode('utf-8').strip()
-                if "|||" in output:
-                    process, title = output.split("|||", 1)
-                    return title.strip(), process.strip().lower()
-            except Exception:
-                pass
-            return "None", "none"
-        else:
-            try:
-                cmd = "xprop -id $(xprop -root _NET_ACTIVE_WINDOW | awk '{print $NF}') _NET_WM_NAME _NET_WM_PID"
-                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
-                title = "None"
-                pid = None
-                for line in output.splitlines():
-                    if "_NET_WM_NAME" in line:
-                        parts = line.split(" = ")
-                        if len(parts) > 1:
-                            title = parts[1].strip('"')
-                    elif "_NET_WM_PID" in line:
-                        parts = line.split(" = ")
-                        if len(parts) > 1:
-                            pid = parts[1].strip()
-                
-                process = "none"
-                if pid:
-                    try:
-                        with open(f"/proc/{pid}/comm", "r") as f:
-                            process = f.read().strip().lower()
-                    except Exception:
-                        pass
-                return title, process
-            except Exception:
-                pass
-            return "None", "none"
-
-    with _active_window_lock:
-        return _active_title, _active_process
-
-def get_active_window_title():
-    """Retrieve foreground window title securely using ctypes or cross-platform fallbacks."""
-    if sys.platform != "win32":
-        if sys.platform == "darwin":
-            try:
-                cmd = "osascript -e 'tell application \"System Events\" to tell (first process whose frontmost is true) to get name of window 1'"
-                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
-                if output:
-                    return output
-            except Exception:
-                pass
-            try:
-                cmd = "osascript -e 'tell application \"System Events\" to get name of first process whose frontmost is true'"
-                return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
-            except Exception:
-                return "None"
-        else:
-            try:
-                cmd = "xprop -id $(xprop -root _NET_ACTIVE_WINDOW | awk '{print $NF}') _NET_WM_NAME | cut -d '\"' -f 2"
-                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
-                return output if output else "None"
-            except Exception:
-                return "None"
-
-    with _active_window_lock:
-        return _active_title
-
-def get_active_process_name(hwnd=None):
-    """Retrieve foreground window process base executable name securely using ctypes or cross-platform fallbacks."""
-    if sys.platform != "win32":
-        if sys.platform == "darwin":
-            try:
-                cmd = "osascript -e 'tell application \"System Events\" to get name of first process whose frontmost is true'"
-                return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip().lower()
-            except Exception:
-                return "None"
-        else:
-            try:
-                cmd = "cat /proc/$(xprop -id $(xprop -root _NET_ACTIVE_WINDOW | awk '{print $NF}') _NET_WM_PID | awk '{print $NF}')/comm"
-                return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip().lower()
-            except Exception:
-                return "None"
-
-    with _active_window_lock:
-        return _active_process
-
-# --- COM GUIDs and Interface definitions for Core Audio Peak Detection ---
-if sys.platform == "win32":
-    import uuid
-    class GUID(ctypes.Structure):
-        _fields_ = [
-            ("Data1", ctypes.c_ulong),
-            ("Data2", ctypes.c_ushort),
-            ("Data3", ctypes.c_ushort),
-            ("Data4", ctypes.c_ubyte * 8)
-        ]
-        def __init__(self, name_str):
-            u = uuid.UUID(name_str)
-            self.Data1 = u.time_low
-            self.Data2 = u.time_mid
-            self.Data3 = u.time_hi_version
-            for i, b in enumerate(u.bytes[8:]):
-                self.Data4[i] = b
-
-    CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
-    IID_IMMDeviceEnumerator = GUID("{A95664D2-9614-4F35-A746-DE8DB63617E6}")
-    IID_IAudioMeterInformation = GUID("{C02216F6-8C67-4B5B-9D00-D008E73E0064}")
-
-    class IUnknown(ctypes.c_void_p):
-        pass
-
-    def com_method(cls, name, index, argtypes, restype=ctypes.HRESULT):
-        def method(self, *args):
-            vtable = ctypes.cast(self, ctypes.POINTER(ctypes.c_void_p))[0]
-            func_ptr = ctypes.cast(ctypes.c_void_p(vtable + index * ctypes.sizeof(ctypes.c_void_p)), ctypes.POINTER(ctypes.c_void_p))[0]
-            prototype = ctypes.WINFUNCTYPE(restype, *([ctypes.c_void_p] + argtypes))
-            func = prototype(func_ptr)
-            return func(self, *args)
-        setattr(cls, name, method)
-
-    com_method(IUnknown, "Release", 2, [], ctypes.c_ulong)
-
-    class IMMDeviceEnumerator(IUnknown):
-        pass
-    com_method(IMMDeviceEnumerator, "GetDefaultAudioEndpoint", 4, [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)])
-
-    class IMMDevice(IUnknown):
-        pass
-    com_method(IMMDevice, "Activate", 3, [ctypes.POINTER(GUID), ctypes.c_ulong, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)])
-
-    class IAudioMeterInformation(IUnknown):
-        pass
-    com_method(IAudioMeterInformation, "GetPeakValue", 3, [ctypes.POINTER(ctypes.c_float)])
-
-    def check_windows_audio_active():
-        try:
-            ctypes.windll.ole32.CoInitialize(None)
-            enumerator = ctypes.c_void_p()
-            hr = ctypes.windll.ole32.CoCreateInstance(
-                ctypes.byref(CLSID_MMDeviceEnumerator),
-                None,
-                1,
-                ctypes.byref(IID_IMMDeviceEnumerator),
-                ctypes.byref(enumerator)
-            )
-            if hr != 0:
-                ctypes.windll.ole32.CoUninitialize()
-                return False
-                
-            p_enumerator = IMMDeviceEnumerator(enumerator.value)
-            device = ctypes.c_void_p()
-            hr = p_enumerator.GetDefaultAudioEndpoint(0, 1, ctypes.byref(device))
-            if hr != 0:
-                p_enumerator.Release()
-                ctypes.windll.ole32.CoUninitialize()
-                return False
-                
-            p_device = IMMDevice(device.value)
-            meter = ctypes.c_void_p()
-            hr = p_device.Activate(ctypes.byref(IID_IAudioMeterInformation), 1, None, ctypes.byref(meter))
-            if hr != 0:
-                p_device.Release()
-                p_enumerator.Release()
-                ctypes.windll.ole32.CoUninitialize()
-                return False
-                
-            p_meter = IAudioMeterInformation(meter.value)
-            peak = ctypes.c_float()
-            hr = p_meter.GetPeakValue(ctypes.byref(peak))
-            
-            p_meter.Release()
-            p_device.Release()
-            p_enumerator.Release()
-            ctypes.windll.ole32.CoUninitialize()
-            
-            return hr == 0 and peak.value > 0.0005
-        except Exception:
-            return False
-else:
-    def check_windows_audio_active():
-        return False
-
-_last_audio_active_time = 0.0
-
-def is_audio_playing():
-    """Check if audio playback is currently active in the OS (to prevent false-positive idle states)."""
-    global _last_audio_active_time
-    active = False
-    if sys.platform == "win32":
-        active = check_windows_audio_active()
-    elif sys.platform == "darwin":
-        try:
-            output = subprocess.check_output(["pmset", "-g", "assertions"], stderr=subprocess.DEVNULL).decode('utf-8', errors='ignore')
-            for line in output.splitlines():
-                if ("PreventUserIdleSystemSleep" in line or "PreventUserIdleDisplaySleep" in line) and "1" in line:
-                    active = True
-                    break
-        except Exception:
-            pass
-    else:
-        try:
-            output = subprocess.getoutput("pactl list sink-inputs")
-            if "state: RUNNING" in output or "State: RUNNING" in output:
-                active = True
-        except Exception:
-            pass
-
-    current_time = time.time()
-    if active:
-        _last_audio_active_time = current_time
-        return True
-    
-    return (current_time - _last_audio_active_time) < 5.0
-
-def is_passive_viewing_active(active_process, active_title):
-    """Check if the user is engaged in passive viewing (meeting or video) with active audio."""
-    if not active_process or not active_title:
-        return False
-    
-    proc_lower = active_process.lower()
-    title_lower = active_title.lower()
-    
-    # Check if process is a known video conferencing or media app
-    media_apps = ["zoom.exe", "zoom", "teams.exe", "teams", "webex.exe", "webex", 
-                  "discord.exe", "discord", "skype.exe", "skype", "slack.exe", "slack", 
-                  "vlc.exe", "vlc", "wmplayer.exe", "quicktime"]
-    is_media_app = any(app in proc_lower for app in media_apps)
-    
-    # Check if it's a browser process playing media
-    is_browser = is_browser_process(active_process)
-    is_video_title = any(kw in title_lower for kw in [
-        "youtube", "netflix", "meet.google", "zoom", "teams", "webinar", "course", 
-        "tutorial", "lecture", "class", "udemy", "coursera", "video", "movie", "stream"
-    ])
-    
-    if (is_media_app or (is_browser and is_video_title)):
-        return is_audio_playing()
-            
-    return False
-
-def get_idle_seconds():
-    """Retrieve duration of hardware idle state (no mouse/keyboard) using ctypes or fallbacks."""
-    if sys.platform != "win32":
-        if sys.platform == "darwin":
-            try:
-                from ctypes import util
-                cg_path = util.find_library('CoreGraphics')
-                if cg_path:
-                    cg = ctypes.CDLL(cg_path)
-                    # kCGEventSourceStateHIDSystemState = 1, kCGAnyInputEventType = -1
-                    cg.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int, ctypes.c_int]
-                    cg.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
-                    return cg.CGEventSourceSecondsSinceLastEventType(1, -1)
-            except Exception:
-                pass
-            try:
-                cmd = "ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF/1000000000; exit}'"
-                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
-                return float(output) if output else 0.0
-            except Exception:
-                return 0.0
-        else:
-            try:
-                class XScreenSaverInfo(ctypes.Structure):
-                    _fields_ = [
-                        ('window', ctypes.c_ulong),
-                        ('state', ctypes.c_int),
-                        ('kind', ctypes.c_int),
-                        ('since', ctypes.c_ulong),
-                        ('idle', ctypes.c_ulong),
-                        ('event_mask', ctypes.c_ulong)
-                    ]
-                xlib = ctypes.cdll.LoadLibrary('libX11.so.6')
-                xss = ctypes.cdll.LoadLibrary('libXss.so.1')
-                
-                xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
-                xlib.XOpenDisplay.restype = ctypes.c_void_p
-                xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
-                xlib.XCloseDisplay.restype = ctypes.c_int
-                xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
-                xlib.XDefaultRootWindow.restype = ctypes.c_ulong
-                xlib.XFree.argtypes = [ctypes.c_void_p]
-                xlib.XFree.restype = ctypes.c_int
-                
-                xss.XScreenSaverAllocInfo.argtypes = []
-                xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(XScreenSaverInfo)
-                xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XScreenSaverInfo)]
-                xss.XScreenSaverQueryInfo.restype = ctypes.c_int
-                
-                import os
-                display_env = os.environ.get('DISPLAY', ':0.0').encode('utf-8')
-                display = xlib.XOpenDisplay(display_env)
-                if display:
-                    try:
-                        root = xlib.XDefaultRootWindow(display)
-                        info = xss.XScreenSaverAllocInfo()
-                        if info and xss.XScreenSaverQueryInfo(display, root, info):
-                            idle_ms = info.contents.idle
-                            xlib.XFree(info)
-                            return float(idle_ms) / 1000.0
-                    finally:
-                        xlib.XCloseDisplay(display)
-            except Exception:
-                pass
-            try:
-                output = subprocess.check_output("xprintidle", shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
-                return float(output) / 1000.0 if output else 0.0
-            except Exception:
-                return 0.0
-
-    try:
-        lii = LASTINPUTINFO()
-        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
-        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
-            return 0
-        millis = (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) & 0xFFFFFFFF
-        return max(0.0, millis / 1000.0)
-    except Exception as e:
-        print(f"Error reading idle seconds: {e}")
-        return 0
-
-import queue
-
-_beep_queue = queue.Queue()
-
-def _beep_worker():
-    while True:
-        sequence = _beep_queue.get()
-        if sequence is None:
-            break
-        if sys.platform != "win32":
-            for freq, duration in sequence:
-                sys.stdout.write('\a')
-                sys.stdout.flush()
-                time.sleep(duration / 1000.0)
-        else:
-            for freq, duration in sequence:
-                try:
-                    winsound.Beep(freq, duration)
-                except Exception:
-                    pass
-        _beep_queue.task_done()
-
-_beep_thread = threading.Thread(target=_beep_worker, daemon=True)
-_beep_thread.start()
-
-def play_beep_sequence(sequence):
-    """Play a sequence of beeps asynchronously using a queue-managed daemon thread."""
-    _beep_queue.put(sequence)
-
-# Win32 API Constants and Structures for Power Throttling (EcoQoS/Efficiency Mode)
-ProcessPowerThrottling = 4
-PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1
-PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
-
-class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
-    _fields_ = [
-        ("Version", ctypes.c_ulong),
-        ("ControlMask", ctypes.c_ulong),
-        ("StateMask", ctypes.c_ulong),
-    ]
-
-def disable_ecoqos_for_handle(handle):
-    """Disable EcoQoS (Power Throttling) for a given process handle to prevent CPU throttling on low clock."""
-    try:
-        state = PROCESS_POWER_THROTTLING_STATE()
-        state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION
-        state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED
-        state.StateMask = 0  # 0 to disable throttling
-        
-        result = ctypes.windll.kernel32.SetProcessInformation(
-            handle,
-            ProcessPowerThrottling,
-            ctypes.byref(state),
-            ctypes.sizeof(state)
-        )
-        return bool(result)
-    except Exception:
-        return False
-
-_parent_process_cache = None
-
-def disable_ecoqos_for_process_tree():
-    """Disable EcoQoS (Efficiency Mode) for the current Python process and all descendant processes recursively."""
-    if sys.platform != "win32":
-        return
-    try:
-        # Disable for current process
-        h_process = ctypes.windll.kernel32.GetCurrentProcess()
-        disable_ecoqos_for_handle(h_process)
-        
-        # Disable for all child and descendant processes
-        import os
-        import psutil
-        current_pid = os.getpid()
-        try:
-            parent = psutil.Process(current_pid)
-            for child in parent.children(recursive=True):
-                try:
-                    # PROCESS_SET_INFORMATION = 0x0200
-                    h_child = ctypes.windll.kernel32.OpenProcess(0x0200, False, child.pid)
-                    if h_child:
-                        disable_ecoqos_for_handle(h_child)
-                        ctypes.windll.kernel32.CloseHandle(h_child)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"Error disabling EcoQoS for process tree: {e}")
-
+from backend.tracker import (
+    get_active_window_details, get_active_window_title, get_active_process_name,
+    is_passive_viewing_active, get_idle_seconds, is_dashboard_window,
+    disable_ecoqos_for_process_tree, assign_self_to_job
+)
 
 # Lockout overlay removed
 
 from backend.server import shared_state, db, run_server, SHARED_API_TOKEN
+import collections
+
+from backend.nudge_engine import (
+    send_system_notification,
+    evaluate_proactive_nudges,
+    CognitiveNudgeEngine,
+)
 
 class CognitiveBattery:
     def __init__(self, capacity: float = 100.0, consecutive_work: float = 0.0):
@@ -655,14 +134,15 @@ class CognitiveBattery:
         self.fatigue_multiplier = 0.035     
         self.rest_recovery_per_minute = 2.5 
 
-    def process_tick(self, is_working: bool, elapsed_minutes: float, mode: str = None) -> tuple:
+    def process_tick(self, is_working: bool, elapsed_minutes: float, mode: str = None, context_switches_per_min: float = 0.0) -> tuple:
         if mode is None:
             mode = "work" if is_working else "rest"
             
         if mode == "work":
             self.consecutive_work_minutes += elapsed_minutes
             penalty = 1.0 + (self.consecutive_work_minutes * self.fatigue_multiplier)
-            drain = self.base_drain_per_minute * penalty * elapsed_minutes
+            switch_penalty = 1.0 + (0.15 * max(0.0, context_switches_per_min))
+            drain = self.base_drain_per_minute * penalty * switch_penalty * elapsed_minutes
             self.capacity = max(0.0, self.capacity - drain)
         elif mode == "neutral":
             # Neutral mode: preserve capacity and consecutive work minutes
@@ -675,9 +155,27 @@ class CognitiveBattery:
             
         return self.capacity, self.consecutive_work_minutes
 
-_blacklisted_patterns = set()
+_REGEX_CACHE_MAX_SIZE = 250
+_safe_regex_cache = {}
+_regex_cache_lock = threading.Lock()
 
-def safe_regex_search(pattern, text, timeout=0.1):
+def clear_app_regex_cache():
+    """Clear the in-memory safe regex pattern cache."""
+    with _regex_cache_lock:
+        _safe_regex_cache.clear()
+
+try:
+    from backend.database import register_cache_invalidation_listener
+    register_cache_invalidation_listener(clear_app_regex_cache)
+except Exception:
+    pass
+
+def safe_regex_search(pattern, text, timeout=None, **kwargs):
+    """Match a user-provided regex pattern against text using in-process cached compilation.
+    
+    Patterns are validated with is_safe_regex() to prevent catastrophic backtracking,
+    compiled once, and cached in-memory for fast subsequent lookups (<0.01ms per match).
+    """
     if not pattern:
         return None
         
@@ -685,48 +183,70 @@ def safe_regex_search(pattern, text, timeout=0.1):
     metacharacters = "*+?{}[]()|^$\\."
     if not any(c in pattern for c in metacharacters):
         return pattern.lower() in text.lower()
-        
-    if pattern in _blacklisted_patterns:
-        return None
-        
-    import subprocess
-    import sys
-    import os
-    import json
-    
-    # Run the same executable with --eval-regex
-    if getattr(sys, 'frozen', False):
-        args = [sys.executable, "--eval-regex"]
-    else:
-        app_path = os.path.abspath(__file__)
-        args = [sys.executable, app_path, "--eval-regex"]
-        
-    try:
-        input_data = json.dumps({"pattern": pattern, "text": text})
-        proc = subprocess.run(
-            args,
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        
-        if proc.returncode == 0:
-            result = json.loads(proc.stdout.strip())
-            if "error" in result:
-                return None
-            return True if result.get("match", False) else None
-        return None
-    except subprocess.TimeoutExpired:
-        _blacklisted_patterns.add(pattern)
-        print(f"[Warning] Custom regex pattern '{pattern}' timed out (possible ReDoS) and has been blacklisted.")
-        return None
-    except Exception as e:
-        print(f"Error in safe_regex_search subprocess: {e}")
-        return None
 
-def classify_activity_mode(active_process, active_title, work_keywords, recharge_keywords):
-    """Determine the classification (work, recharge, neutral) based on process, title, and heuristics."""
+    with _regex_cache_lock:
+        if pattern in _safe_regex_cache:
+            cached = _safe_regex_cache[pattern]
+            if cached is None:
+                # Previously rejected as unsafe
+                return None
+            return True if cached.search(text.lower()) else None
+
+        if len(_safe_regex_cache) >= _REGEX_CACHE_MAX_SIZE:
+            _safe_regex_cache.clear()
+
+        # Validate and compile new patterns
+        from backend.database import is_safe_regex
+        if not is_safe_regex(pattern):
+            _safe_regex_cache[pattern] = None
+            print(f"[Warning] Custom regex pattern '{pattern}' rejected by safety check (possible ReDoS) and has been blacklisted.")
+            return None
+
+        import re
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            _safe_regex_cache[pattern] = None
+            return None
+        
+        _safe_regex_cache[pattern] = compiled
+        
+        return True if compiled.search(text.lower()) else None
+
+# Module-level URL classification keyword constants
+DEFAULT_WORK_CONTEXT_WORDS = [
+    "tutorial", "course", "learn", "how to", "documentation", "reference", 
+    "coding", "programming", "developer", "lecture", "class", "webinar",
+    "study", "education", "research", "arxiv", "sciencedirect", "stack overflow", 
+    "github", "docs", "wiki", "wikipedia"
+]
+
+DEFAULT_NEUTRAL_WORK_SITES = [
+    "wikipedia.org", "wikipedia", "stackoverflow", "stack overflow", 
+    "github", "gitlab", "bitbucket", "docs.python", "docs.microsoft", 
+    "w3schools", "geeksforgeeks", "medium.com", "dev.to", "arxiv.org",
+    "sciencedirect.com", "google scholar", "chatgpt", "claude.ai"
+]
+
+DEFAULT_ENTERTAINMENT_SITES = [
+    "youtube.com", "youtube", "netflix", "crunchyroll", "bilibili", 
+    "soundcloud", "spotify", "twitch.tv", "twitch", "anime", "manga", 
+    "tập", "episode", "season", "kaguya", "webtoon", "fmoviesto"
+]
+
+def classify_activity_mode(active_process, active_title, work_keywords, recharge_keywords, custom_rules=None, neutral_keywords=None):
+    """Determine the classification (work, recharge, neutral) based on user rules, 3-Tier TaskClassifier and heuristics."""
+    if custom_rules is None:
+        try:
+            custom_rules = db.get_settings().get("custom_rules", [])
+        except Exception:
+            custom_rules = []
+    if neutral_keywords is None:
+        try:
+            neutral_keywords = db.get_settings().get("neutral_keywords", [])
+        except Exception:
+            neutral_keywords = []
+            
     if not active_process or not active_title:
         return "neutral"
         
@@ -734,8 +254,6 @@ def classify_activity_mode(active_process, active_title, work_keywords, recharge
     title_lower = active_title.lower()
     
     # 1. Custom User Regex Mappings
-    settings = db.get_settings()
-    custom_rules = settings.get("custom_rules", [])
     for rule in custom_rules:
         pattern = rule.get("pattern")
         category = rule.get("category")
@@ -746,253 +264,124 @@ def classify_activity_mode(active_process, active_title, work_keywords, recharge
             except Exception:
                 pass
 
-    # 2. Browser heuristics
+    # 2. Process-level keyword match (for non-browser applications)
+    if not is_browser_process(active_process):
+        proc_clean = proc_lower.replace(".exe", "")
+        if matches_any_keyword(work_keywords, proc_clean) or matches_any_keyword(work_keywords, proc_lower):
+            return "work"
+        if matches_any_keyword(recharge_keywords, proc_clean) or matches_any_keyword(recharge_keywords, proc_lower):
+            return "recharge"
+        if matches_any_keyword(neutral_keywords, proc_clean) or matches_any_keyword(neutral_keywords, proc_lower):
+            return "neutral"
+
+    # 3. Browser heuristics & keyword match
     if is_browser_process(active_process):
-        # Work keywords check
         is_work = matches_any_keyword(work_keywords, active_title)
         is_recharge = matches_any_keyword(recharge_keywords, active_title)
+        is_neutral = matches_any_keyword(neutral_keywords, active_title)
         
-        # Heuristic override for videos / articles (e.g. YouTube tutorial)
-        work_context_words = ["tutorial", "course", "learn", "how to", "documentation", "reference", 
-                              "coding", "programming", "developer", "lecture", "class", "webinar",
-                              "study", "education", "research", "arxiv", "sciencedirect", "stack overflow", 
-                              "github", "docs", "wiki", "wikipedia"]
+        if is_neutral:
+            return "neutral"
         
-        has_work_context = any(word in title_lower for word in work_context_words)
+        has_work_context = any(word in title_lower for word in DEFAULT_WORK_CONTEXT_WORDS)
         
         if is_recharge and ("youtube" in title_lower or "youtube" in proc_lower) and has_work_context:
             return "work"
             
         if not is_work and not is_recharge:
-            # Check for general reference or dev pages that fell into Neutral Blackhole
-            neutral_work_sites = ["wikipedia.org", "wikipedia", "stackoverflow", "stack overflow", 
-                                  "github", "gitlab", "bitbucket", "docs.python", "docs.microsoft", 
-                                  "w3schools", "geeksforgeeks", "medium.com", "dev.to", "arxiv.org",
-                                  "sciencedirect.com", "google scholar", "chatgpt", "claude.ai"]
-            if any(site in title_lower for site in neutral_work_sites):
+            if any(site in title_lower for site in DEFAULT_NEUTRAL_WORK_SITES):
                 return "work"
+
+            if any(site in title_lower for site in DEFAULT_ENTERTAINMENT_SITES) and not has_work_context:
+                return "recharge"
                 
         if is_work:
             return "work"
         elif is_recharge:
             return "recharge"
-        return "neutral"
-        
-    else:
-        # Non-browser process
-        # Check if process name or title matches work/recharge
-        is_work = matches_any_keyword(work_keywords, active_process) or matches_any_keyword(work_keywords, active_title)
-        is_recharge = matches_any_keyword(recharge_keywords, active_process) or matches_any_keyword(recharge_keywords, active_title)
-        
-        # Special check: Non-browser editor/dev processes
-        dev_processes = ["pycharm", "vscode", "code.exe", "code", "studio", "eclipse", "sublime", "xcode", "unity", "godot", "terminal", "powershell", "cmd.exe", "bash"]
-        if any(dp in proc_lower for dp in dev_processes):
-            return "work"
-            
-        if is_work:
-            return "work"
-        elif is_recharge:
-            return "recharge"
-        return "neutral"
-def trigger_fullscreen_break_lockout(duration_seconds):
-    """Spawn a fullscreen, topmost, frameless Tkinter overlay to enforce break friction.
-       Returns (bypassed, brain_dump_text).
+
+    # 4. 3-Tier TaskClassifier Evaluation Engine
+    cat = TaskClassifier.classify(active_process, active_title)
+    if cat == "rest":
+        return "recharge"
+    return cat
+
+def _execute_mode_transition(
+    prev_mode, new_mode, state_start_time, is_flow_session, flow_start_time,
+    idle_limit, is_idle_transition, db, shared_state, nudge_state,
+    workspace_mgr, battery
+):
+    """Execute a mode transition: log the ending session, reset timers, swap workspace files.
+
+    Called from two places in the state machine:
+      1. External sync (user clicked a mode button in the UI)
+      2. Automatic classifier-driven transition (activity changed)
+
+    Returns:
+        tuple: (new_current_mode, new_state_start_time, is_flow_session, flow_start_time, work_consecutive_seconds)
     """
-    import sys
-    try:
-        if 'unittest' in sys.modules or 'pytest' in sys.modules:
-            print("[Break Lockout] Test environment detected. Skipping Tkinter window.")
-            return True, ""
-        test_root = tk.Tk()
-        test_root.destroy()
-    except Exception as e:
-        print(f"[Break Lockout] GUI Display not available ({e}). Skipping Tkinter window.")
-        return True, ""
+    now = datetime.now()
 
-    bypassed_dict = {"status": True, "dump": ""}  # Use dict to mutate in closures
+    # Calculate flow state for ending work session
+    is_flow = False
+    flow_dur = 0.0
+    if prev_mode == "work" and is_flow_session:
+        is_flow = True
+        work_end = now
+        if is_idle_transition and flow_start_time:
+            from datetime import timedelta
+            work_end = max(state_start_time, now - timedelta(seconds=idle_limit))
+        if flow_start_time:
+            flow_dur = max(0.0, (work_end - flow_start_time).total_seconds())
 
-    try:
-        root = tk.Tk()
-        root.title("MIND-FLOW Break Lockout")
-        
-        # Frameless and topmost
-        root.overrideredirect(True)
-        root.attributes("-topmost", True)
-        
-        # Fullscreen geometry
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        root.geometry(f"{screen_width}x{screen_height}+0+0")
-        
-        # Focus input initially and keep root focused on startup
-        root.focus_force()
-        dump_text_widget.focus_set()
-        root.configure(bg="#0b0f19")
-        
-        time_left = tk.IntVar(value=int(duration_seconds))
-        
-        # Title Label
-        title_label = tk.Label(
-            root, 
-            text="TIME FOR A COGNITIVE BREAK", 
-            font=("Outfit", 28, "bold"), 
-            fg="#ff4a76", 
-            bg="#0b0f19"
-        )
-        title_label.pack(pady=(screen_height // 6, 20))
-        
-        # Random exercise/stretch select
-        import random
-        stretches = PHYSICAL_STRETCHES + EYE_EXERCISES
-        stretch_text = random.choice(stretches)
-        
-        exercise_label = tk.Label(
-            root, 
-            text=f"Focus Activity:\n{stretch_text}", 
-            font=("Inter", 16), 
-            fg="#e2e8f0", 
-            bg="#0b0f19",
-            justify="center",
-            wraplength=int(screen_width * 0.6)
-        )
-        exercise_label.pack(pady=15)
-        
-        # Timer Label
-        timer_label = tk.Label(
-            root, 
-            text=f"Break ending in {duration_seconds}s", 
-            font=("Outfit", 20, "bold"), 
-            fg="#38bdf8", 
-            bg="#0b0f19"
-        )
-        timer_label.pack(pady=15)
-        
-        # Accomplishment / Brain Dump Text Area
-        dump_frame = tk.Frame(root, bg="#0b0f19")
-        dump_label = tk.Label(
-            dump_frame,
-            text="What did you accomplish during this session? What's still open?",
-            font=("Inter", 12, "bold"),
-            fg="#94a3b8",
-            bg="#0b0f19"
-        )
-        dump_label.pack(pady=(0, 5))
-        
-        dump_text_widget = tk.Text(
-            dump_frame,
-            font=("Inter", 12),
-            width=50,
-            height=4,
-            bg="#1e293b",
-            fg="#ffffff",
-            insertbackground="#ffffff",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#475569",
-            highlightcolor="#38bdf8",
-            wrap="word"
-        )
-        dump_text_widget.pack(pady=5)
-        dump_frame.pack(pady=10)
-        
-        # Typing challenge setup
-        challenge_frame = tk.Frame(root, bg="#0b0f19")
-        
-        challenge_phrase = "i choose to skip my break"
-        challenge_instr = tk.Label(
-            challenge_frame,
-            text=f"To bypass, type: '{challenge_phrase}'",
-            font=("Inter", 12),
-            fg="#94a3b8",
-            bg="#0b0f19"
-        )
-        challenge_instr.pack(pady=5)
-        
-        challenge_entry = tk.Entry(
-            challenge_frame,
-            font=("Inter", 14),
-            width=30,
-            justify="center",
-            bg="#1e293b",
-            fg="#ffffff",
-            insertbackground="#ffffff",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#475569",
-            highlightcolor="#38bdf8"
-        )
-        challenge_entry.pack(pady=5)
-        
-        # Bypass button
-        def on_bypass():
-            if challenge_entry.get().strip().lower() == challenge_phrase:
-                bypassed_dict["status"] = True
-                bypassed_dict["dump"] = dump_text_widget.get("1.0", "end-1c").strip()
-                root.destroy()
-                
-        bypass_btn = tk.Button(
-            challenge_frame,
-            text="Confirm Bypass",
-            command=on_bypass,
-            font=("Outfit", 14, "bold"),
-            bg="#ff4a76",
-            fg="#ffffff",
-            activebackground="#e11d48",
-            activeforeground="#ffffff",
-            bd=0,
-            padx=20,
-            pady=10,
-            cursor="hand2"
-        )
-        
-        def check_typing(*args):
-            if challenge_entry.get().strip().lower() == challenge_phrase:
-                bypass_btn.pack(pady=10)
-            else:
-                bypass_btn.pack_forget()
-                
-        challenge_var = tk.StringVar()
-        challenge_var.trace_add("write", check_typing)
-        challenge_entry.config(textvariable=challenge_var)
-        
-        # Prevent manual window closing
-        root.protocol("WM_DELETE_WINDOW", lambda: None)
-        
-        # Main tick loop
-        def tick():
-            current_val = time_left.get()
-            if current_val <= 1:
-                bypassed_dict["status"] = False
-                bypassed_dict["dump"] = dump_text_widget.get("1.0", "end-1c").strip()
-                root.destroy()
-            else:
-                time_left.set(current_val - 1)
-                timer_label.config(text=f"Break ending in {current_val - 1}s")
-                root.attributes("-topmost", True)
-                root.lift()
-                
-                # Show bypass challenge after 5 seconds
-                if duration_seconds - current_val >= 5:
-                    challenge_frame.pack(pady=20)
-                root.after(1000, tick)
-                
-        root.after(1000, tick)
-        root.mainloop()
-    except Exception as e:
-        print(f"Error in Break Lockout GUI: {e}")
-        return True, ""
+    # Log the ending session (backdate if idle-triggered rest)
+    if is_idle_transition and prev_mode in ["work", "recharge", "neutral"]:
+        from datetime import timedelta
+        transition_time = max(state_start_time, now - timedelta(seconds=idle_limit))
+        db.log_session(prev_mode, state_start_time, transition_time, is_flow=is_flow, flow_duration=flow_dur, wait=False)
+        state_start_time = transition_time
+    else:
+        db.log_session(prev_mode, state_start_time, now, is_flow=is_flow, flow_duration=flow_dur, wait=False)
+        state_start_time = now
 
-    return bypassed_dict["status"], bypassed_dict["dump"]
+    # Update shared state
+    shared_state["mode_start_time"] = state_start_time
+    shared_state["session_extension_seconds"] = 0
+    shared_state["current_mode"] = new_mode
+    shared_state["elapsed_seconds"] = 0
+
+    # Reset accumulators when leaving work
+    if new_mode in ["rest", "recharge"]:
+        nudge_state["active_work_seconds"] = 0
+
+    nudge_state["distraction_dwell_start"] = None
+
+    # Swap workspace files asynchronously and serially
+    if workspace_mgr:
+        try:
+            from backend.thread_pools import workspace_executor
+            workspace_executor.submit(workspace_mgr.transition_workspace, prev_mode, new_mode)
+        except Exception as e:
+            print(f"Error transitioning workspace: {e}")
+
+    return new_mode, state_start_time, False, None, 0
 
 def main_state_machine(gui_process=None):
     """Background thread checking active windows and tracking idle state."""
     print("MIND-FLOW Core State Machine started.")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            # COINIT_MULTITHREADED = 0x2, matching IMMDevice/IMMDeviceEnumerator multi-threaded apartment model
+            ctypes.windll.ole32.CoInitializeEx(None, 2)
+        except Exception as e:
+            print(f"Error initializing COM in state machine: {e}")
 
     # Initialize workspace manager and clean up leftovers
     try:
         from backend.workspace_manager import WorkspaceManager
         workspace_mgr = WorkspaceManager(get_default_data_dir())
-        workspace_mgr.sweep_back_all()
+        workspace_mgr.sweep_back_all_async(timeout=5.0)
     except Exception as e:
         print(f"Error initializing WorkspaceManager: {e}")
         workspace_mgr = None
@@ -1034,18 +423,6 @@ def main_state_machine(gui_process=None):
     shared_state["last_app_title"] = None
     shared_state["app_accumulated_seconds"] = 0
     shared_state["last_hwnd"] = None
-    
-    # Caches to prevent scanning database collections every second
-    reflections_cache = {
-        "len": -1,
-        "latest_today": None,
-        "last_checked_date": None
-    }
-    sessions_cache = {
-        "len": -1,
-        "bypasses_today": 0,
-        "last_checked_date": None
-    }
 
     # Run initial EcoQoS disabling
     disable_ecoqos_for_process_tree()
@@ -1066,7 +443,6 @@ def main_state_machine(gui_process=None):
     shared_state['battery_consecutive_work'] = battery.consecutive_work_minutes
 
     ticks_since_flush = 0
-    ticks_since_ecoqos = 0
     tick_duration_seconds = 1.0
     tick_duration_minutes = tick_duration_seconds / 60.0
 
@@ -1079,16 +455,47 @@ def main_state_machine(gui_process=None):
             print("Autopilot: Flushed final battery state to database via atexit.")
         except Exception as e:
             print(f"Error flushing battery state on exit: {e}")
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.ole32.CoUninitialize()
+            except Exception:
+                pass
 
     last_tick_monotonic = time.monotonic()
     last_classified_process = None
     last_classified_title = None
     last_classified_mode = "neutral"
     last_settings = None
+    last_recovery_fetch_time = 0
+    cached_recovery_data = None
+    context_switch_deque = collections.deque(maxlen=30)
+    nudge_state = {
+        "last_nudges": {},
+        "distraction_dwell_start": None,
+        "active_work_seconds": 0,
+        "active_hydration_seconds": 0,
+        "manual_override_until": 0.0
+    }
 
+    try:
+        from backend import tracker
+        if tracker.start_event_listener():
+            print("[Tracker] Event-driven OS window listener active.")
+            import atexit
+    except Exception as e:
+        print(f"[Tracker] Warning: failed to start event listener: {e}")
+
+    main_state_machine._start_loop_time = time.time()
     while True:
         time.sleep(1.0)
         
+        if shared_state.get("lockout_end_time"):
+            state_start_time = shared_state.pop("lockout_end_time")
+            shared_state["mode_start_time"] = state_start_time
+            shared_state["elapsed_seconds"] = 0
+            last_tick_monotonic = time.monotonic()
+            
         now_monotonic = time.monotonic()
         elapsed_tick = now_monotonic - last_tick_monotonic
         last_tick_monotonic = now_monotonic
@@ -1108,7 +515,7 @@ def main_state_machine(gui_process=None):
                     if flow_start_time:
                         flow_dur = max(0.0, (transition_time - flow_start_time).total_seconds())
                 try:
-                    db.log_session(current_mode, state_start_time, transition_time, is_flow=is_flow, flow_duration=flow_dur)
+                    db.log_session(current_mode, state_start_time, transition_time, is_flow=is_flow, flow_duration=flow_dur, wait=False)
                 except Exception as e:
                     print(f"Error logging session on resume: {e}")
             
@@ -1117,8 +524,8 @@ def main_state_machine(gui_process=None):
                 battery.process_tick(is_working=False, elapsed_minutes=suspended_sec / 60.0, mode="rest")
                 shared_state['battery_capacity'] = battery.capacity
                 shared_state['battery_consecutive_work'] = battery.consecutive_work_minutes
-                db.flush_battery_state(battery.capacity, battery.consecutive_work_minutes)
-                db.save()
+                db.flush_battery_state(battery.capacity, battery.consecutive_work_minutes, wait=False)
+                db.save(wait=False)
             except Exception as e:
                 print(f"Error updating battery on resume: {e}")
                 
@@ -1136,30 +543,53 @@ def main_state_machine(gui_process=None):
             last_classified_process = None
             last_classified_title = None
             
+            try:
+                db.close_thread_connection()
+            except Exception:
+                pass
             continue
         
         # Check if standalone GUI process exited
         if gui_process and hasattr(gui_process, 'poll') and gui_process.poll() is not None:
-            print("MIND-FLOW dashboard window closed.")
-            
-            # Flush app tracking
-            last_proc = shared_state.get("last_app_process")
-            last_title = shared_state.get("last_app_title")
-            accum_sec = shared_state.get("app_accumulated_seconds", 0)
-            if last_proc and accum_sec > 0:
+            start_loop_time = getattr(main_state_machine, "_start_loop_time", None)
+            if start_loop_time and (time.time() - start_loop_time < 5.0) and not getattr(main_state_machine, "_fallback_opened", False):
+                main_state_machine._fallback_opened = True
+                print("[MIND-FLOW] Standalone window exited prematurely. Launching in default web browser...")
+                import webbrowser
+                from backend.server import SHARED_API_TOKEN
+                port_num = shared_state.get("server_port", 5000)
+                webbrowser.open(f"http://127.0.0.1:{port_num}/?token={SHARED_API_TOKEN}")
+                gui_process = None
+            else:
+                print("MIND-FLOW dashboard window closed.")
+                
+                # Flush app tracking
+                last_proc = shared_state.get("last_app_process")
+                last_title = shared_state.get("last_app_title")
+                accum_sec = shared_state.get("app_accumulated_seconds", 0)
+                if last_proc and accum_sec > 0:
+                    try:
+                        db.log_app_usage(last_proc, last_title, accum_sec, wait=False)
+                    except Exception as e:
+                        print(f"Error logging app usage on GUI close: {e}")
+                
+                if workspace_mgr:
+                    try:
+                        workspace_mgr.sweep_back_all_async(timeout=5.0)
+                    except Exception as e:
+                        print(f"Error sweeping workspace on GUI exit: {e}")
+                db.log_session(current_mode, state_start_time, datetime.now(), wait=False)
+                db.save()
                 try:
-                    db.log_app_usage(last_proc, last_title, accum_sec)
-                except Exception as e:
-                    print(f"Error logging app usage on GUI close: {e}")
-            
-            if workspace_mgr:
+                    db.flush_queue()
+                except Exception:
+                    pass
                 try:
-                    workspace_mgr.sweep_back_all()
-                except Exception as e:
-                    print(f"Error sweeping workspace on GUI exit: {e}")
-            db.log_session(current_mode, state_start_time, datetime.now())
-            db.save()
-            sys.exit(0)
+                    from backend import tracker
+                    tracker.stop_event_listener()
+                except Exception:
+                    pass
+                sys.exit(0)
         
         # If user deactivated companion tracking, bypass state machine checks and sweep back workspace
         if not shared_state["tracking_active"]:
@@ -1169,7 +599,7 @@ def main_state_machine(gui_process=None):
             accum_sec = shared_state.get("app_accumulated_seconds", 0)
             if last_proc and accum_sec > 0:
                 try:
-                    db.log_app_usage(last_proc, last_title, accum_sec)
+                    db.log_app_usage(last_proc, last_title, accum_sec, wait=False)
                 except Exception as e:
                     print(f"Error logging app usage on pause: {e}")
                 shared_state["last_app_process"] = None
@@ -1178,13 +608,13 @@ def main_state_machine(gui_process=None):
             
             if current_mode != "neutral":
                 print(f"Companion disabled: transitioning {current_mode} -> neutral")
-                db.log_session(current_mode, state_start_time, datetime.now())
+                db.log_session(current_mode, state_start_time, datetime.now(), wait=False)
                 current_mode = "neutral"
                 state_start_time = datetime.now()
                 shared_state["mode_start_time"] = state_start_time
                 if workspace_mgr:
                     try:
-                        workspace_mgr.sweep_back_all()
+                        workspace_mgr.sweep_back_all_async(timeout=5.0)
                     except Exception as e:
                         print(f"Error sweeping workspace on tracking disable: {e}")
             
@@ -1193,6 +623,10 @@ def main_state_machine(gui_process=None):
             shared_state["current_mode"] = "neutral"
             shared_state["elapsed_seconds"] = 0
             shared_state["idle_seconds"] = 0
+            try:
+                db.close_thread_connection()
+            except Exception:
+                pass
             continue
 
         # Get inputs
@@ -1235,44 +669,57 @@ def main_state_machine(gui_process=None):
         shared_state["active_process_name"] = active_process
         
         # Track last active external window and process (ignoring dashboard focus shifts)
-        title_lower = active_title.lower()
-        process_lower = active_process.lower()
-        is_dashboard = "mind-flow" in title_lower or "companion" in title_lower
-        is_invalid = active_title in ["None", "None Detected", "Companion Paused", "Offline"]
+        is_dashboard = is_dashboard_window(active_process, active_title)
+        is_invalid = active_title in ["None", "None Detected", "Companion Paused", "Offline", "Detecting..."]
         
         if not is_dashboard and not is_invalid:
             shared_state["last_external_window"] = active_title
             shared_state["last_external_process"] = active_process
 
         # App tracking logic
-        # We only track if user is active (idle_sec_val < 5) and the app is not Paused/None
-        if idle_sec_val < 5:
+        # We only track if user is active (idle_sec_val < 5) and the app is not Paused/None/Dashboard
+        if idle_sec_val < 5 and not is_dashboard:
             if active_process and active_process != "None" and active_process != "Paused":
                 last_proc = shared_state.get("last_app_process")
                 last_title = shared_state.get("last_app_title")
                 accum_sec = shared_state.get("app_accumulated_seconds", 0)
 
-                if active_process == last_proc:
-                    shared_state["app_accumulated_seconds"] = accum_sec + 1
-                    # Update window title if it's new and valid
-                    if active_title and active_title != "None" and active_title != "Paused":
+                is_valid_title = bool(active_title and active_title not in ["None", "Paused"])
+                title_changed = is_valid_title and (last_title is not None) and (active_title != last_title)
+
+                if active_process == last_proc and not title_changed:
+                    new_accum = accum_sec + 1
+                    if is_valid_title:
                         shared_state["last_app_title"] = active_title
+                    
+                    # Periodically flush every 10 seconds so analytics update continuously and never get lost
+                    if new_accum >= 10 and last_proc:
+                        try:
+                            target_flush_title = last_title if is_valid_title else active_title
+                            db.log_app_usage(last_proc, target_flush_title, new_accum, wait=False)
+                            shared_state["app_accumulated_seconds"] = 0
+                        except Exception as e:
+                            print(f"Error periodically flushing app usage: {e}")
+                    else:
+                        shared_state["app_accumulated_seconds"] = new_accum
                 else:
-                    # Application changed, log (buffered in db) previous
+                    # Application process OR window title changed: flush buffered usage for previous title
                     if last_proc and accum_sec > 0:
                         try:
-                            db.log_app_usage(last_proc, last_title, accum_sec)
+                            db.log_app_usage(last_proc, last_title, accum_sec, wait=False)
                         except Exception as e:
                             print(f"Error logging app usage on switch: {e}")
                         
-                        # 13 Cognitive Features: Log context switches in work mode
-                        if current_mode == "work" and last_proc and active_process:
+                        # 13 Cognitive Features: Log context switches in work mode ONLY when process name changes
+                        if current_mode == "work" and last_proc and active_process and active_process != last_proc:
+                            context_switch_deque.append(time.time())
                             try:
-                                db.log_context_switch(last_proc, active_process)
+                                db.log_context_switch(last_proc, active_process, wait=False)
                             except Exception as e:
                                 print(f"Error logging context switch: {e}")
+
                     shared_state["last_app_process"] = active_process
-                    shared_state["last_app_title"] = active_title
+                    shared_state["last_app_title"] = active_title if is_valid_title else "None"
                     shared_state["app_accumulated_seconds"] = 1
         else:
             # User went idle, flush accumulated time to buffer and save/flush to DB
@@ -1281,41 +728,67 @@ def main_state_machine(gui_process=None):
             accum_sec = shared_state.get("app_accumulated_seconds", 0)
             if last_proc and accum_sec > 0:
                 try:
-                    db.log_app_usage(last_proc, last_title, accum_sec)
+                    db.log_app_usage(last_proc, last_title, accum_sec, wait=False)
                 except Exception as e:
                     print(f"Error logging app usage on idle: {e}")
                 shared_state["last_app_process"] = None
                 shared_state["last_app_title"] = None
                 shared_state["app_accumulated_seconds"] = 0
             
-            # Explicitly commit app usage buffer to SQLite
-            try:
-                db.save()
-            except Exception as e:
-                print(f"Error saving DB on idle transition: {e}")
+                # Explicitly commit app usage buffer to SQLite
+                try:
+                    db.save(wait=False)
+                except Exception as e:
+                    print(f"Error saving DB on idle transition: {e}")
 
-        # Get settings from database dynamically
-        settings = db.get_settings()
+        # Get settings from database dynamically (cached for 5s to reduce CPU wakeups and SQLite locks)
+        now_sec = time.time()
+        if not hasattr(main_state_machine, "_last_settings_fetch") or (now_sec - main_state_machine._last_settings_fetch >= 5.0) or last_settings is None:
+            main_state_machine._last_settings_fetch = now_sec
+            try:
+                settings = db.get_settings()
+                adaptive = db.get_adaptive_times()
+            except Exception as e:
+                print(f"Error loading settings/adaptive: {e}")
+                settings = last_settings if last_settings else {"work_keywords": [], "recharge_keywords": [], "idle_timeout_seconds": 300, "custom_rules": []}
+                adaptive = getattr(main_state_machine, "_cached_adaptive", {"work_minutes": 25, "rest_seconds": 300})
+            main_state_machine._cached_settings = settings
+            main_state_machine._cached_adaptive = adaptive
+        else:
+            settings = main_state_machine._cached_settings
+            adaptive = main_state_machine._cached_adaptive
+
         if settings != last_settings:
+            # Only invalidate if keywords changed
+            if not last_settings or settings.get("work_keywords") != last_settings.get("work_keywords") or settings.get("recharge_keywords") != last_settings.get("recharge_keywords") or settings.get("custom_rules") != last_settings.get("custom_rules"):
+                _safe_regex_cache.clear()
             last_classified_process = None
             last_classified_title = None
             last_settings = settings
+            try:
+                from backend.database import clear_regex_caches
+                clear_regex_caches()
+            except Exception:
+                pass
             
-        adaptive = db.get_adaptive_times()
         work_keywords = settings["work_keywords"]
         recharge_keywords = settings["recharge_keywords"]
         idle_limit = settings["idle_timeout_seconds"]
         work_limit_sec = adaptive["work_minutes"] * 60
         
-        # 13 Cognitive Features: suggested work limits from morning readiness recovery score
-        try:
-            recovery_data = db.get_recovery_score()
-            if settings.get("adaptive_timers_enabled", True):
-                work_limit_sec = recovery_data["suggested_work_minutes"] * 60
-        except Exception as e:
-            print(f"Error applying recovery score limits: {e}")
+        # 13 Cognitive Features: suggested work limits from morning readiness recovery score (cached for 60s)
+        if now_sec - last_recovery_fetch_time >= 60.0 or cached_recovery_data is None:
+            try:
+                cached_recovery_data = db.get_recovery_score()
+                last_recovery_fetch_time = now_sec
+            except Exception as e:
+                print(f"Error applying recovery score limits: {e}")
+                
+        if settings.get("adaptive_timers_enabled", True) and cached_recovery_data:
+            work_limit_sec = cached_recovery_data.get("suggested_work_minutes", 25) * 60
             
         rest_limit_sec = adaptive["rest_seconds"]
+
 
 
         # Determine target mode
@@ -1326,117 +799,141 @@ def main_state_machine(gui_process=None):
             if active_process == last_classified_process and active_title == last_classified_title:
                 target_mode = last_classified_mode
             else:
-                target_mode = classify_activity_mode(active_process, active_title, work_keywords, recharge_keywords)
+                target_mode = classify_activity_mode(
+                    active_process, 
+                    active_title, 
+                    work_keywords, 
+                    recharge_keywords, 
+                    settings.get("custom_rules", []),
+                    settings.get("neutral_keywords", [])
+                )
                 last_classified_process = active_process
                 last_classified_title = active_title
                 last_classified_mode = target_mode
 
-        # Check if Mode transition occurred
-        if target_mode != current_mode:
-            now = datetime.now()
+        shared_state["active_category"] = target_mode
+
+        # ╔══════════════════════════════════════════════════════════════════════╗
+        # ║  MODE TRANSITION PIPELINE — Execution Order (every 1s tick)         ║
+        # ║                                                                      ║
+        # ║  1. CLASSIFY: target_mode = classify_activity_mode(active_window)    ║
+        # ║  2. EXTERNAL SYNC: Check if UI/API set shared_state["current_mode"]  ║
+        # ║     → If external change detected, adopt it + set 120s override lock ║
+        # ║  3. TRANSITION GUARDS (evaluated in order, any can suppress):        ║
+        # ║     a. Manual override lock: User clicked a mode button? Suppress    ║
+        # ║        auto-transitions for 120s (idle→rest always allowed).         ║
+        # ║     b. Distraction dwell: work→recharge held for 15-60s grace.       ║
+        # ║  4. EXECUTE TRANSITION: Log session, reset flow/timers, swap files.  ║
+        # ║                                                                      ║
+        # ║  Data flow: UI → POST /api/set_mode → shared_state["current_mode"]  ║
+        # ║             → Step 2 reads it → current_mode (local) updated         ║
+        # ║             → Step 3 prevents classifier from reverting it           ║
+        # ╚══════════════════════════════════════════════════════════════════════╝
+
+        # ── Step 2: External Sync ─────────────────────────────────────────────
+        # The Flask thread (POST /api/set_mode, POST /api/nudge/action) writes
+        # to shared_state["current_mode"]. If it differs from our local
+        # current_mode, the user (or a nudge action) requested a mode change.
+        # We adopt it here and set a pinned override lock so the classifier (Step 1)
+        # does not immediately revert the user's manual sprint choice.
+        external_mode = shared_state.get("current_mode")
+        if external_mode and external_mode != current_mode:
+            print(f"[State Machine] External mode transition detected: {current_mode} -> {external_mode}")
+            current_mode, state_start_time, is_flow_session, flow_start_time, work_consecutive_seconds = \
+                _execute_mode_transition(
+                    prev_mode=current_mode,
+                    new_mode=external_mode,
+                    state_start_time=state_start_time,
+                    is_flow_session=is_flow_session,
+                    flow_start_time=flow_start_time,
+                    idle_limit=idle_limit,
+                    is_idle_transition=False,
+                    db=db, shared_state=shared_state, nudge_state=nudge_state,
+                    workspace_mgr=workspace_mgr, battery=battery
+                )
+            # Lock out automatic classification for 120s or until unpinned
+            nudge_state["manual_override_until"] = now_sec + 120.0
+            if shared_state.get("pinned_mode"):
+                shared_state["pinned_mode"] = external_mode
+
+        # ── Step 3: Transition Guards ─────────────────────────────────────────
+        should_transition = (target_mode != current_mode)
+
+        # Guard 3a: Manual override & Pinned Mode lock (UI-initiated mode changes stick)
+        # Only idle→rest bypasses this lock (user shouldn't be stuck if they walk away)
+        pinned = shared_state.get("pinned_mode")
+        manual_override_active = (pinned is not None and pinned == current_mode) or (now_sec < nudge_state.get("manual_override_until", 0.0))
+        if should_transition and manual_override_active and target_mode != "rest":
+            should_transition = False
+
+        # Guard 3b: Distraction dwell grace period (work→recharge only)
+        # Prevents instant mode flip when briefly opening YouTube during a work sprint.
+        # Grace period: strict=15s, balanced=30s, gentle=60s
+        if should_transition and current_mode == "work" and target_mode == "recharge" and settings.get("enable_distraction_nudges", True):
+            proactivity = settings.get("proactivity_level", "balanced")
+            if proactivity != "disabled":
+                dwell_thresh = 15.0 if proactivity == "strict" else (60.0 if proactivity == "gentle" else 30.0)
+                dwell_start = nudge_state.get("distraction_dwell_start")
+                if dwell_start is None:
+                    nudge_state["distraction_dwell_start"] = now_sec
+                    should_transition = False
+                elif (now_sec - dwell_start) < dwell_thresh:
+                    should_transition = False
+                else:
+                    nudge_state["distraction_dwell_start"] = None
+        elif target_mode != "recharge" or current_mode != "work":
+            if nudge_state.get("distraction_dwell_start") is not None:
+                nudge_state["distraction_dwell_start"] = None
+
+        # ── Step 4: Execute Transition ────────────────────────────────────────
+        if should_transition:
             print(f"State transition: {current_mode} -> {target_mode}")
-            
-            prev_mode = current_mode
-
-            # 13 Cognitive Features: Flow state calculations for ending work session
-            is_flow = False
-            flow_dur = 0.0
-            if prev_mode == "work" and is_flow_session:
-                is_flow = True
-                work_end = now
-                if target_mode == "rest":
-                    from datetime import timedelta
-                    work_end = max(state_start_time, now - timedelta(seconds=idle_limit))
-                if flow_start_time:
-                    flow_dur = max(0.0, (work_end - flow_start_time).total_seconds())
-
-            if target_mode == "rest" and current_mode in ["work", "recharge", "neutral"]:
-                from datetime import timedelta
-                transition_time = max(state_start_time, now - timedelta(seconds=idle_limit))
-                db.log_session(current_mode, state_start_time, transition_time, is_flow=is_flow, flow_duration=flow_dur)
-                state_start_time = transition_time
-            else:
-                db.log_session(current_mode, state_start_time, now, is_flow=is_flow, flow_duration=flow_dur)
-                state_start_time = now
-            shared_state["mode_start_time"] = state_start_time
-
-            # Reset flow state for new mode
-            is_flow_session = False
-            flow_start_time = None
-            work_consecutive_seconds = 0
-
-            current_mode = target_mode
-            shared_state["current_mode"] = current_mode
-            shared_state["elapsed_seconds"] = 0
-
-            # Swapping/sweeping workspace files based on mode change
-            if workspace_mgr:
-                try:
-                    workspace_mgr.transition_workspace(prev_mode, target_mode)
-                except Exception as e:
-                    print(f"Error transitioning workspace: {e}")
-
-            # Flush app usage buffer and cognitive battery state to database on transition
+            current_mode, state_start_time, is_flow_session, flow_start_time, work_consecutive_seconds = \
+                _execute_mode_transition(
+                    prev_mode=current_mode,
+                    new_mode=target_mode,
+                    state_start_time=state_start_time,
+                    is_flow_session=is_flow_session,
+                    flow_start_time=flow_start_time,
+                    idle_limit=idle_limit,
+                    is_idle_transition=(target_mode == "rest"),
+                    db=db, shared_state=shared_state, nudge_state=nudge_state,
+                    workspace_mgr=workspace_mgr, battery=battery
+                )
             try:
-                db.flush_battery_state(battery.capacity, battery.consecutive_work_minutes)
-                db.save()
+                db.flush_battery_state(battery.capacity, battery.consecutive_work_minutes, wait=False)
+                db.save(wait=False)
             except Exception as e:
                 print(f"Error flushing database on transition: {e}")
         else:
             elapsed = (datetime.now() - state_start_time).total_seconds()
             shared_state["elapsed_seconds"] = int(elapsed)
 
-            if current_mode == "work" and elapsed >= work_limit_sec:
-                print(f"Hard focus ceiling limit reached ({work_limit_sec}s). Launching fullscreen break lockout.")
-                
-                # Play notification sound sequence asynchronously
-                play_beep_sequence([(800, 100), (0, 50), (800, 100), (0, 50), (1200, 300)])
-                
-                # Flush app usage before running the modal to get accurate metrics
-                last_proc = shared_state.get("last_app_process")
-                last_title = shared_state.get("last_app_title")
-                accum_sec = shared_state.get("app_accumulated_seconds", 0)
-                if last_proc and accum_sec > 0:
-                    try:
-                        db.log_app_usage(last_proc, last_title, accum_sec)
-                    except Exception as e:
-                        print(f"Error logging app usage on hard ceiling: {e}")
-                    shared_state["last_app_process"] = None
-                    shared_state["last_app_title"] = None
-                    shared_state["app_accumulated_seconds"] = 0
-
-                # Flow state calculations for ending work session on lockout
-                is_flow = False
+            effective_work_limit = work_limit_sec + (shared_state.get("session_extension_seconds", 0) or 0)
+            if current_mode == "work" and elapsed >= (effective_work_limit + 60.0):
+                # Work sprint exceeded limit — force transition to neutral
+                # Note: We use _execute_mode_transition which logs the session normally,
+                # but we also want a special brain_dump note, so log separately here.
+                is_flow_final = False
                 flow_dur = 0.0
                 if is_flow_session:
-                    is_flow = True
+                    is_flow_final = True
                     if flow_start_time:
                         flow_dur = max(0.0, (datetime.now() - flow_start_time).total_seconds())
 
-                start_lockout = time.time()
-                bypassed, user_dump = trigger_fullscreen_break_lockout(rest_limit_sec)
-                
-                # Clean up user_dump text
-                dump_text = user_dump.strip() if user_dump else None
-                if not dump_text:
-                    if bypassed:
-                        dump_text = "[Bypassed Break] Focus limit exceeded"
-                    else:
-                        dump_text = "[Break Completed] Focus limit reached and break completed"
+                db.log_session("work", state_start_time, datetime.now(), brain_dump="[End] Focus limit reached", bypassed=False, is_flow=is_flow_final, flow_duration=flow_dur, wait=False)
 
-                if bypassed:
-                    db.log_session("work", state_start_time, datetime.now(), brain_dump=dump_text, bypassed=True, is_flow=is_flow, flow_duration=flow_dur)
-                else:
-                    db.log_session("work", state_start_time, datetime.now(), brain_dump=dump_text, bypassed=False, is_flow=is_flow, flow_duration=flow_dur)
-                
-                # Reset sprint timer and flow variables for the next cycle
                 is_flow_session = False
                 flow_start_time = None
                 work_consecutive_seconds = 0
-                
+                shared_state["session_extension_seconds"] = 0
+
+                current_mode = "neutral"
+                shared_state["current_mode"] = current_mode
                 state_start_time = datetime.now()
-                shared_state["mode_start_time"] = state_start_time
                 shared_state["elapsed_seconds"] = 0
+
+
 
         # 13 Cognitive Features: Flow State Detection Heuristic
         if current_mode == "work" and idle_sec_val < 5:
@@ -1446,7 +943,7 @@ def main_state_machine(gui_process=None):
                 from datetime import timedelta
                 flow_start_time = datetime.now() - timedelta(seconds=900)
                 print("Autopilot: Deep Flow state detected! Sustained focus for 15+ minutes.")
-        elif idle_sec_val >= 5:
+        elif idle_sec_val >= 60:
             work_consecutive_seconds = 0
 
         # Update Battery Math (In-Memory)
@@ -1464,22 +961,38 @@ def main_state_machine(gui_process=None):
             ticks_since_flush += 1
             if ticks_since_flush >= 300:
                 try:
-                    db.flush_battery_state(battery.capacity, battery.consecutive_work_minutes)
-                    db.save()
+                    db.flush_battery_state(battery.capacity, battery.consecutive_work_minutes, wait=False)
+                    db.save(wait=False)
                 except Exception:
                     pass
                 ticks_since_flush = 0
-
-            # Run periodic EcoQoS unthrottling for the process tree every 15 seconds
-            ticks_since_ecoqos += 1
-            if ticks_since_ecoqos >= 15:
-                try:
-                    disable_ecoqos_for_process_tree()
-                except Exception:
-                    pass
-                ticks_since_ecoqos = 0
         except Exception as e:
             print(f"Error in CognitiveBattery tick: {e}")
+
+        # Proactive Cognitive Companion: In-memory nudge & intervention engine
+        try:
+            evaluate_proactive_nudges(
+                current_mode=current_mode,
+                target_mode=target_mode,
+                active_process=active_process,
+                active_title=active_title,
+                elapsed_seconds=shared_state.get("elapsed_seconds", 0),
+                work_limit_sec=work_limit_sec,
+                battery_cap=shared_state.get("battery_capacity", 100.0),
+                is_flow_session=is_flow_session,
+                idle_sec_val=idle_sec_val,
+                settings=settings,
+                context_switch_deque=context_switch_deque,
+                nudge_state=nudge_state,
+                shared_state=shared_state
+            )
+        except Exception as e:
+            print(f"Error evaluating proactive nudges: {e}")
+
+        try:
+            db.close_thread_connection()
+        except Exception:
+            pass
 
 def run_webview_gui(url):
     """Run a standalone pywebview Edge WebView2 window."""
@@ -1498,63 +1011,50 @@ def run_webview_gui(url):
         try:
             parent = psutil.Process(parent_pid)
         except Exception:
+            close_log_handles()
             os._exit(0)
-
-        last_db_check = 0
-        settings = None
-        adaptive = None
 
         while True:
             time.sleep(1.0)
             try:
                 if not parent.is_running() or parent.status() == psutil.STATUS_ZOMBIE:
+                    close_log_handles()
                     os._exit(0)
             except Exception:
+                close_log_handles()
                 os._exit(0)
-                
-            current_time = time.time()
-            if current_time - last_db_check > 60:
-                settings = db.get_settings()
-                adaptive = db.get_adaptive_times()
-                last_db_check = current_time
-
                 
     monitor_thread = threading.Thread(target=monitor_parent, daemon=True)
     monitor_thread.start()
     
-    # 2. Start periodic background EcoQoS disabling for child processes
-    def delayed_disable_throttling():
-        # Wait 5 seconds for child processes to spawn, run ONCE, then exit the thread.
-        time.sleep(5.0)
-        disable_ecoqos_for_process_tree()
-            
-    throttling_thread = threading.Thread(target=delayed_disable_throttling, daemon=True)
-    throttling_thread.start()
+    # 2. Start recurring background EcoQoS disabling for child processes (Edge WebView2)
+    disable_ecoqos_for_process_tree()
+
             
     # 3. WebView window setup
     # Set background color to #0b0f19 to avoid white flash
-    window = webview.create_window(
+    webview.create_window(
         "MIND-FLOW // Cognitive Companion Dashboard",
         url,
         width=1280,
         height=800,
         background_color="#0b0f19"
     )
-    webview.start(gui='edgechromium', debug=False)
+    is_debug = os.getenv("MINDFLOW_DEBUG", "0") == "1"
+    webview.start(gui='edgechromium', debug=is_debug)
 
-# Original pywebview standalone app launcher restored
-def launch_app_window(url):
+def launch_app_window(port):
     """Launch the dashboard url in a standalone pywebview GUI subprocess."""
-    import sys
-    import subprocess
-    import os
-    
     from backend.server import SHARED_API_TOKEN
+    
+    env = os.environ.copy()
+    env["MIND_FLOW_TOKEN"] = SHARED_API_TOKEN
+    env["MINDFLOW_DUCKDB_FILE"] = ":memory:"
     
     if getattr(sys, 'frozen', False):
         exe = sys.executable
         try:
-            return subprocess.Popen([exe, "--gui", SHARED_API_TOKEN])
+            return subprocess.Popen([exe, "--gui", str(port)], env=env)
         except Exception as e:
             print(f"Error launching standalone app GUI: {e}")
             return None
@@ -1562,7 +1062,7 @@ def launch_app_window(url):
         exe = sys.executable
         script = sys.argv[0]
         try:
-            return subprocess.Popen([exe, script, "--gui", SHARED_API_TOKEN])
+            return subprocess.Popen([exe, script, "--gui", str(port)], env=env)
         except Exception as e:
             print(f"Error launching standalone app GUI in dev: {e}")
             return None
@@ -1573,7 +1073,7 @@ def is_webview2_installed():
     try:
         import webview
     except ImportError:
-        pass
+        return False
     registry_found = False
     try:
         import winreg
@@ -1634,98 +1134,17 @@ def is_webview2_installed():
                 pass
     return False
 
-_job_handle_holder = None
-
-def assign_self_to_job():
-    if sys.platform != "win32":
-        return False
+import signal
+def sigterm_handler(signum, frame):
+    print("SIGTERM received, flushing db...")
     try:
-        import ctypes
-        from ctypes import wintypes
-        
-        kernel32 = ctypes.windll.kernel32
-        
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-        JobObjectExtendedLimitInformation = 9
-        
-        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ('PerProcessUserTimeLimit', ctypes.c_int64),
-                ('PerJobUserTimeLimit', ctypes.c_int64),
-                ('LimitFlags', wintypes.DWORD),
-                ('MinimumWorkingSetSize', ctypes.c_size_t),
-                ('MaximumWorkingSetSize', ctypes.c_size_t),
-                ('ActiveProcessLimit', wintypes.DWORD),
-                ('Affinity', ctypes.c_void_p),
-                ('PriorityClass', wintypes.DWORD),
-                ('SchedulingClass', wintypes.DWORD),
-            ]
-            
-        class IO_COUNTERS(ctypes.Structure):
-            _fields_ = [
-                ('ReadOperationCount', ctypes.c_ulonglong),
-                ('WriteOperationCount', ctypes.c_ulonglong),
-                ('OtherOperationCount', ctypes.c_ulonglong),
-                ('ReadTransferCount', ctypes.c_ulonglong),
-                ('WriteTransferCount', ctypes.c_ulonglong),
-                ('OtherTransferCount', ctypes.c_ulonglong),
-            ]
-            
-        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ('BasicLimitInformation', JOBOBJECT_BASIC_LIMIT_INFORMATION),
-                ('IoInfo', IO_COUNTERS),
-                ('ProcessMemoryLimit', ctypes.c_size_t),
-                ('JobMemoryLimit', ctypes.c_size_t),
-                ('PeakProcessMemoryUsed', ctypes.c_size_t),
-                ('PeakJobMemoryUsed', ctypes.c_size_t),
-            ]
-            
-        # Explicit argtypes and restype to prevent ctypes TypeErrors on Windows
-        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
-        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-        
-        kernel32.SetInformationJobObject.argtypes = [
-            ctypes.c_void_p, 
-            ctypes.c_int, 
-            ctypes.c_void_p, 
-            ctypes.c_ulong
-        ]
-        kernel32.SetInformationJobObject.restype = ctypes.c_int
-        
-        kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        kernel32.AssignProcessToJobObject.restype = ctypes.c_int
-        
-        kernel32.GetCurrentProcess.argtypes = []
-        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-            
-        h_job = kernel32.CreateJobObjectW(None, None)
-        if not h_job:
-            return False
-            
-        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        
-        ret = kernel32.SetInformationJobObject(
-            h_job,
-            JobObjectExtendedLimitInformation,
-            ctypes.byref(info),
-            ctypes.sizeof(info)
-        )
-        if not ret:
-            return False
-            
-        h_process = kernel32.GetCurrentProcess()
-        ret = kernel32.AssignProcessToJobObject(h_job, h_process)
-        if not ret:
-            return False
-            
-        global _job_handle_holder
-        _job_handle_holder = h_job
-        return True
+        db.flush_queue()
+        db.close()
     except Exception as e:
-        print(f"[MIND-FLOW] Warning: failed to assign to Job Object: {e}")
-        return False
+        print(f"Error flushing db on SIGTERM: {e}")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, sigterm_handler)
 
 if __name__ == "__main__":
     if sys.platform == "win32":
@@ -1740,16 +1159,47 @@ if __name__ == "__main__":
 
     # If --gui argument is passed, launch the pywebview standalone window process
     if len(sys.argv) > 1 and sys.argv[1] == "--gui":
-        token = sys.argv[2] if len(sys.argv) > 2 else ""
-        run_webview_gui(f"http://127.0.0.1:5000/?token={token}")
+        port = sys.argv[2] if len(sys.argv) > 2 else "5000"
+        token = os.environ.get("MIND_FLOW_TOKEN", "")
+        run_webview_gui(f"http://127.0.0.1:{port}/?token={token}")
+        try:
+            db.flush_queue()
+        except Exception:
+            pass
         sys.exit(0)
 
+    # Enforce single-instance execution on Windows (prevent multiple concurrent app.py processes)
+    _single_instance_mutex = None
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            ERROR_ALREADY_EXISTS = 183
+            _single_instance_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\MIND_FLOW_SINGLE_INSTANCE_MUTEX")
+            if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+                print("[MIND-FLOW] An active instance of MIND-FLOW is already running.")
+                hwnd = ctypes.windll.user32.FindWindowW(None, "MIND-FLOW // Cognitive Companion Dashboard")
+                if not hwnd:
+                    hwnd = ctypes.windll.user32.FindWindowW(None, "MIND-FLOW // Cognitive Companion")
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                sys.exit(0)
+        except Exception as e:
+            print(f"[MIND-FLOW] Single-instance mutex check error: {e}")
+
     # 1. Start Server in a separate daemon thread
-    server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
+    port = get_free_port()
+    shared_state["server_port"] = port
+    server_thread = threading.Thread(target=run_server, kwargs={"port": port}, daemon=True)
     server_thread.start()
     
     # Wait a brief moment for Flask to initialize
     time.sleep(0.5)
+    
+    # Print token and port for headless test scripts to capture
+    print(f"API Token: {SHARED_API_TOKEN}")
+    print(f"Server Port: {port}")
 
     # 2. Open dashboard in native app window (pywebview process) or default browser fallback
     if sys.platform == "win32" and not is_webview2_installed():
@@ -1758,19 +1208,20 @@ if __name__ == "__main__":
         print("https://developer.microsoft.com/en-us/microsoft-edge/webview2/\n")
         print("Launching the dashboard in your default web browser instead...")
         import webbrowser
-        webbrowser.open(f"http://127.0.0.1:5000/?token={SHARED_API_TOKEN}")
+        webbrowser.open(f"http://127.0.0.1:{port}/?token={SHARED_API_TOKEN}")
         gui_proc = None
     else:
         print("Launching Cognitive Dashboard in Standalone App Mode...")
-        gui_proc = launch_app_window(f"http://127.0.0.1:5000/?token={SHARED_API_TOKEN}")
+        gui_proc = launch_app_window(port)
 
     # 3. Start state machine in the main thread (blocks execution)
-    if sys.platform == "win32":
-        t_hook = threading.Thread(target=start_win_event_listener, daemon=True)
-        t_hook.start()
-        
     try:
         main_state_machine(gui_process=gui_proc)
     except KeyboardInterrupt:
         print("\nMIND-FLOW terminated by user.")
+        try:
+            db.flush_queue()
+            db.close()
+        except Exception as e:
+            print(f"Error flushing db on exit: {e}")
         sys.exit(0)

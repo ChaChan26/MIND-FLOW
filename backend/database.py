@@ -1,14 +1,26 @@
+"""
+Database abstraction layer for MIND-FLOW providing SQLite WAL-mode concurrency,
+session tracking, analytics persistence, and schema migrations.
+
+Author: ChaChan26 <minhharry2006@gmail.com>
+Copyright (c) 2026 ChaChan26. All rights reserved.
+"""
+
 import os
 import sys
 import json
 import re
 import tempfile
 import threading
+import queue
+import concurrent.futures
+import functools
 import copy
 import time
 import math
 import shutil
 import sqlite3
+import logging
 from datetime import datetime
 
 def get_default_data_dir():
@@ -49,10 +61,11 @@ def get_default_data_dir():
 DEFAULT_DATA_DIR = get_default_data_dir()
 DB_FILE = os.getenv("MINDFLOW_DB_FILE", os.path.join(DEFAULT_DATA_DIR, "mind_flow_data.db"))
 
+import threading
+_regex_lock = threading.RLock()
+_REGEX_CACHE_MAX_SIZE = 250
 _keyword_regex_cache = {}
 _combined_regex_cache = {}
-_regex_lock = threading.Lock()
-_simulated_disk = {}
 
 def matches_any_keyword(keywords_list, text):
     """Check if any keyword in keywords_list matches a target text respecting word boundaries."""
@@ -62,24 +75,27 @@ def matches_any_keyword(keywords_list, text):
     # Convert list to tuple to make it hashable for the cache key
     cache_key = tuple(keywords_list)
     with _regex_lock:
-        if cache_key not in _combined_regex_cache:
-            patterns = []
-            for kw in keywords_list:
-                if not isinstance(kw, str):
-                    continue
-                kw = kw.strip().lower()
-                if not kw:
-                    continue
-                escaped_kw = re.escape(kw)
-                left_boundary = r"(?<![a-zA-Z0-9])" if kw[0].isalnum() else ""
-                right_boundary = r"(?![a-zA-Z0-9])" if kw[-1].isalnum() else ""
-                patterns.append(f"(?:{left_boundary}{escaped_kw}{right_boundary})")
-            if patterns:
-                _combined_regex_cache[cache_key] = re.compile("|".join(patterns))
-            else:
-                _combined_regex_cache[cache_key] = None
-                
-        regex = _combined_regex_cache[cache_key]
+        regex = _combined_regex_cache.get(cache_key, "NOT_FOUND")
+        
+    if regex == "NOT_FOUND":
+        patterns = []
+        for kw in keywords_list:
+            if not isinstance(kw, str):
+                continue
+            kw = kw.strip().lower()
+            if not kw:
+                continue
+            escaped_kw = re.escape(kw)
+            left_boundary = r"(?<![a-zA-Z0-9])" if kw[0].isalnum() else ""
+            right_boundary = r"(?![a-zA-Z0-9])" if kw[-1].isalnum() else ""
+            patterns.append(f"(?:{left_boundary}{escaped_kw}{right_boundary})")
+        compiled = re.compile("|".join(patterns)) if patterns else None
+        with _regex_lock:
+            if len(_combined_regex_cache) >= _REGEX_CACHE_MAX_SIZE:
+                _combined_regex_cache.clear()
+            _combined_regex_cache[cache_key] = compiled
+            regex = compiled
+            
     if not regex:
         return False
     return bool(regex.search(text.lower()))
@@ -93,13 +109,20 @@ def matches_keyword(kw, text):
     if not kw:
         return False
     with _regex_lock:
-        if kw not in _keyword_regex_cache:
-            escaped_kw = re.escape(kw)
-            left_boundary = r"(?<![a-zA-Z0-9])" if kw and kw[0].isalnum() else ""
-            right_boundary = r"(?![a-zA-Z0-9])" if kw and kw[-1].isalnum() else ""
-            pattern = f"{left_boundary}{escaped_kw}{right_boundary}"
-            _keyword_regex_cache[kw] = re.compile(pattern)
-        regex = _keyword_regex_cache[kw]
+        regex = _keyword_regex_cache.get(kw, "NOT_FOUND")
+        
+    if regex == "NOT_FOUND":
+        escaped_kw = re.escape(kw)
+        left_boundary = r"(?<![a-zA-Z0-9])" if kw and kw[0].isalnum() else ""
+        right_boundary = r"(?![a-zA-Z0-9])" if kw and kw[-1].isalnum() else ""
+        pattern = f"{left_boundary}{escaped_kw}{right_boundary}"
+        compiled = re.compile(pattern)
+        with _regex_lock:
+            if len(_keyword_regex_cache) >= _REGEX_CACHE_MAX_SIZE:
+                _keyword_regex_cache.clear()
+            _keyword_regex_cache[kw] = compiled
+            regex = compiled
+            
     return bool(regex.search(text))
 
 DEFAULT_SETTINGS = {
@@ -112,6 +135,7 @@ DEFAULT_SETTINGS = {
         "steam", "vlc", "netflix", "youtube", "spotify", "discord", "twitch", 
         "crunchyroll", "anime", "epic games", "gog galaxy", "xbox"
     ],
+    "neutral_keywords": [],
     "work_duration_minutes": 45,
     "idle_timeout_seconds": 180,
     "adaptive_timers_enabled": True,
@@ -125,7 +149,15 @@ DEFAULT_SETTINGS = {
     "zen_level": "balanced",
     "daily_step_target": 10000,
     "daily_sleep_target": 8.0,
-    "custom_rules": []
+    "custom_rules": [],
+    "proactivity_level": "balanced",
+    "enable_desktop_toasts": True,
+    "enable_audio_chimes": True,
+    "enable_distraction_nudges": True,
+    "enable_thrashing_nudges": True,
+    "enable_hydration_nudges": True,
+    "enable_eyecare_nudges": True,
+    "nudge_cooldown_minutes": 5
 }
 
 DEFAULT_CIRCADIAN_CURVE = {
@@ -144,102 +176,234 @@ def is_browser_process(process):
                 "vivaldi.exe", "vivaldi", "arc.exe", "arc", "orion.exe", "orion"}
     return proc_lower in browsers or any(b in proc_lower for b in ["browser", "iexplore"])
 
-class FileLock:
-    def __init__(self, lock_path, timeout=3.0, stale_age=10.0):
-        self.lock_path = lock_path
-        self.timeout = timeout
-        self.stale_age = stale_age
-        self.acquired = False
+from backend.task_classifier import is_safe_regex
 
-    def __enter__(self):
-        start_time = time.time()
-        while True:
-            # Check for stale lock
-            if os.path.exists(self.lock_path):
-                try:
-                    mtime = os.path.getmtime(self.lock_path)
-                    if time.time() - mtime > self.stale_age:
-                        try:
-                            os.rmdir(self.lock_path)
-                        except OSError:
-                            pass
-                except OSError:
-                    pass
-            
-            try:
-                os.mkdir(self.lock_path)
-                self.acquired = True
-                return self
-            except FileExistsError:
-                if time.time() - start_time > self.timeout:
-                    raise TimeoutError(f"Could not acquire lock on {self.lock_path}: lock is held by another process")
-                time.sleep(0.05)
+_cache_invalidation_listeners = []
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.acquired:
-            try:
-                os.rmdir(self.lock_path)
-            except OSError:
-                pass
-            self.acquired = False
+def register_cache_invalidation_listener(callback):
+    """Register a callback to be invoked when settings change and caches need invalidation."""
+    if callback not in _cache_invalidation_listeners:
+        _cache_invalidation_listeners.append(callback)
 
-def is_safe_regex(pattern):
+def clear_regex_caches():
+    """Clear all global compiled regex caches in database and notify registered listeners."""
+    with _regex_lock:
+        _keyword_regex_cache.clear()
+        _combined_regex_cache.clear()
+    for listener in list(_cache_invalidation_listeners):
+        try:
+            listener()
+        except Exception:
+            pass
     try:
-        re.compile(pattern)
-    except re.error:
-        return False
-    if len(pattern) > 150:
-        return False
-    # Check for catastrophic backtracking patterns (nested repetitions like (a+)+ or (a*)* or (a|b)+)
-    if re.search(r'\([^)]*[\*\+\?][^)]*\)[*+?{]', pattern):
-        return False
-    return True
+        from backend.task_classifier import TaskClassifier
+        TaskClassifier.clear_cache()
+    except Exception:
+        pass
+
+def clear_analytics_cache():
+    """Module-level function to clear in-memory analytics cache in server module."""
+    try:
+        from backend.server import _analytics_cache, _analytics_cache_lock
+        with _analytics_cache_lock:
+            _analytics_cache.clear()
+    except Exception:
+        pass
+
+def _get_db_worker_logger():
+    logger = logging.getLogger("db_worker")
+    if not logger.handlers:
+        log_path = os.path.join(DEFAULT_DATA_DIR, "db_worker.log")
+        fh = logging.FileHandler(log_path, encoding="utf-8")
+        fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s'))
+        logger.addHandler(fh)
+        logger.setLevel(logging.WARNING)
+    return logger
+
+def _handle_async_future_exception(fut):
+    try:
+        exc = fut.exception()
+        if exc:
+            logger = _get_db_worker_logger()
+            logger.error(f"[ASYNC_FUTURE_EXCEPTION] Un-awaited DB write failed: {exc}", exc_info=exc)
+    except Exception:
+        pass
+
+_worker_spawn_lock = threading.Lock()
+
+def queued_write(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if getattr(self._thread_local, "is_worker", False):
+            return func(self, *args, **kwargs)
+        wait = kwargs.pop("wait", True)
+        future = concurrent.futures.Future()
+        if not hasattr(self, "_db_worker_thread") or not self._db_worker_thread.is_alive():
+            with _worker_spawn_lock:
+                if not hasattr(self, "_db_worker_thread") or not self._db_worker_thread.is_alive():
+                    self._db_worker_thread = threading.Thread(target=self._db_worker, daemon=True, name="DBWriteWorker")
+                    self._db_worker_thread.start()
+        if wait:
+            try:
+                self._write_queue.put((func, self, args, kwargs, future), block=True, timeout=5.0)
+            except queue.Full:
+                _get_db_worker_logger().error(f"[DB_QUEUE_FULL] Blocking DB task '{func.__name__}' timed out waiting for queue slot.")
+                raise queue.Full(f"DB write queue capacity reached (maxsize=1000) for task '{func.__name__}'")
+            return future.result()
+        else:
+            try:
+                self._write_queue.put_nowait((func, self, args, kwargs, future))
+            except queue.Full:
+                _get_db_worker_logger().warning(f"[DB_QUEUE_FULL] Dropping non-blocking DB task '{func.__name__}' due to queue capacity (maxsize=1000).")
+                future.set_exception(queue.Full("DB write queue capacity reached (maxsize=1000)"))
+                return future
+            future.add_done_callback(_handle_async_future_exception)
+            return future
+    return wrapper
 
 class MindFlowDB:
-    def __init__(self):
-        self.lock = threading.RLock()
-        self.filepath = DB_FILE
+    _settings_cache = None
+    _settings_lock = threading.RLock()
+
+    def __init__(self, db_path=None):
+        self.filepath = db_path if db_path else DB_FILE
         self._thread_local = threading.local()
         self._master_conn = None
         self.app_usage_buffer = {}
-        self.buffer_lock = self.lock
+        self.buffer_lock = threading.RLock()
+        self.write_counter = 0
+        self.analytics_write_counter = 0
         
+        self._write_queue = queue.Queue(maxsize=1000)
+        self._db_worker_thread = threading.Thread(target=self._db_worker, daemon=True, name="DBWriteWorker")
+        self._db_worker_thread.start()
+        
+        self._adaptive_cache = {
+            "last_settings": None,
+            "last_write_counter": -1,
+            "last_checked_date": None,
+            "last_check_time": 0.0,
+            "result": None
+        }
+        self._streak_cache = {
+            "last_write_counter": -1,
+            "last_checked_date": None,
+            "last_check_time": 0.0,
+            "result": None
+        }
+        self._recovery_cache = {
+            "last_write_counter": -1,
+            "last_checked_date": None,
+            "last_check_time": 0.0,
+            "result": None
+        }
+        self._status_cache = {
+            "last_write_counter": -1,
+            "last_checked_date": None,
+            "last_check_time": 0.0,
+            "result": None
+        }
+        self._achievements_cache = {
+            "last_write_counter": -1,
+            "last_check_time": 0.0,
+            "result": None
+        }
+
         if self.filepath == ":memory:":
             # Instantiate a persistent master connection to maintain the shared memory database lifecycle
             self._master_conn = sqlite3.connect("file::memory:?cache=shared", uri=True)
             
         self._init_db()
         self._migrate_legacy_json()
-        
-        self._adaptive_cache = {
-            "last_settings": None,
-            "last_sessions_len": -1,
-            "last_reflections_len": -1,
-            "last_checked_date": None,
-            "last_check_time": 0.0,
-            "result": None
-        }
-        self._status_cache = {
-            "last_sessions_len": -1,
-            "last_reflections_len": -1,
-            "last_checked_date": None,
-            "last_check_time": 0.0,
-            "result": None
-        }
-        self._achievements_cache = {
-            "last_sessions_len": -1,
-            "last_reflections_len": -1,
-            "last_hydration_len": -1,
-            "last_check_time": 0.0,
-            "result": None
-        }
+        self._merge_legacy_db()
+
+        from backend.columnar_analytics import ColumnarAnalyticsEngine
+        duckdb_path = ":memory:" if self.filepath == ":memory:" else None
+        self.columnar_engine = ColumnarAnalyticsEngine(db_path=duckdb_path, sqlite_db=self)
+
+    def clear_analytics_cache(self):
+        """Invalidate all internal database analytics caches and server response caches."""
+        self.analytics_write_counter += 1
+        if hasattr(self, "_adaptive_cache"):
+            self._adaptive_cache["last_write_counter"] = -1
+        if hasattr(self, "_streak_cache"):
+            self._streak_cache["last_write_counter"] = -1
+        if hasattr(self, "_recovery_cache"):
+            self._recovery_cache["last_write_counter"] = -1
+        if hasattr(self, "_status_cache"):
+            self._status_cache["last_write_counter"] = -1
+        if hasattr(self, "_achievements_cache"):
+            self._achievements_cache["last_write_counter"] = -1
+        clear_analytics_cache()
+
+    def _db_worker(self):
+        self._thread_local.is_worker = True
+        logger = _get_db_worker_logger()
+        while True:
+            try:
+                task = self._write_queue.get()
+                if task is None:
+                    self._write_queue.task_done()
+                    if self._write_queue.empty():
+                        break
+                    continue
+                func, obj, args, kwargs, future = task
+                try:
+                    res = None
+                    executed_successfully = False
+                    max_retries = 3
+                    initial_delay = 0.05
+
+                    for attempt in range(max_retries + 1):
+                        try:
+                            res = func(obj, *args, **kwargs)
+                            executed_successfully = True
+                            break
+                        except sqlite3.OperationalError as e:
+                            is_transient = "locked" in str(e).lower() or "busy" in str(e).lower()
+                            if is_transient and attempt < max_retries:
+                                delay = initial_delay * (2 ** attempt)
+                                func_name = getattr(func, "__name__", str(func))
+                                logger.warning(
+                                    f"[DB_WORKER_RETRY] sqlite3.OperationalError on {func_name} "
+                                    f"(attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying in {delay:.3f}s..."
+                                )
+                                self.close_thread_connection()
+                                time.sleep(delay)
+                                continue
+                            else:
+                                raise e
+                        except Exception as e:
+                            raise e
+
+                    if executed_successfully:
+                        try:
+                            future.set_result(res)
+                        except Exception as fe:
+                            logger.warning(f"[DB_WORKER] Failed to set future result: {fe}")
+                except Exception as e:
+                    logger.exception(f"[DB_WORKER_ERROR] Write task failed: {e}")
+                    try:
+                        future.set_exception(e)
+                    except Exception as fe:
+                        logger.warning(f"[DB_WORKER] Failed to set future exception: {fe}")
+                finally:
+                    self.close_thread_connection()
+                    self._thread_local.is_worker = True
+                    self._write_queue.task_done()
+            except Exception as e:
+                import traceback
+                print(f"[DB_WORKER_ERROR_CRITICAL] {e}\n{traceback.format_exc()}")
 
 
     def _get_conn(self):
         if self.filepath == ":memory:":
-            conn = sqlite3.connect("file::memory:?cache=shared", uri=True, timeout=10.0)
+            if not hasattr(self, "_master_conn") or self._master_conn is None:
+                self._master_conn = sqlite3.connect("file::memory:?cache=shared", uri=True)
+                self._init_db()
+            conn = sqlite3.connect("file::memory:?cache=shared", uri=True, timeout=10.0, isolation_level=None)
         else:
-            conn = sqlite3.connect(self.filepath, timeout=10.0)
+            conn = sqlite3.connect(self.filepath, timeout=10.0, isolation_level=None)
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
@@ -254,15 +418,79 @@ class MindFlowDB:
         if not hasattr(self._thread_local, "conn") or self._thread_local.conn is None:
             self._thread_local.conn = self._get_conn()
         conn = self._thread_local.conn
+        already_in_tx = getattr(conn, "in_transaction", False)
         try:
+            if not already_in_tx:
+                conn.execute("BEGIN DEFERRED")
             yield conn
-            conn.commit()
+            if not already_in_tx:
+                conn.execute("COMMIT")
         except Exception:
-            conn.rollback()
+            if not already_in_tx:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._thread_local.conn = None
             raise
 
+    @contextmanager
+    def write_transaction(self):
+        if not hasattr(self._thread_local, "conn") or self._thread_local.conn is None:
+            self._thread_local.conn = self._get_conn()
+        conn = self._thread_local.conn
+        already_in_tx = getattr(conn, "in_transaction", False)
+        try:
+            if not already_in_tx:
+                conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            if not already_in_tx:
+                conn.execute("COMMIT")
+                self.write_counter += 1
+        except Exception:
+            if not already_in_tx:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._thread_local.conn = None
+            raise
+
+    def close_thread_connection(self):
+        """Close the thread-local SQLite connection, allowing WAL checkpoint and freeing resources."""
+        conn = getattr(self._thread_local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            finally:
+                self._thread_local.conn = None
+
     def close(self):
-        with self.lock:
+        if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
+            try:
+                self.columnar_engine.close()
+            except Exception:
+                pass
+
+        if hasattr(self, "_write_queue"):
+            try:
+                self._write_queue.put(None, block=True, timeout=0.5)
+                if hasattr(self, "_db_worker_thread") and self._db_worker_thread.is_alive():
+                    self._db_worker_thread.join(timeout=2.0)
+            except Exception:
+                pass
+                
+        if True:  # self.lock removed for WAL concurrency
             if hasattr(self._thread_local, "conn") and self._thread_local.conn is not None:
                 try:
                     self._thread_local.conn.close()
@@ -271,14 +499,56 @@ class MindFlowDB:
                 self._thread_local.conn = None
             if self._master_conn is not None:
                 try:
+                    self._master_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:
+                    pass
+                try:
                     self._master_conn.close()
                 except Exception:
                     pass
                 self._master_conn = None
 
+    @staticmethod
+    def _apply_date_range(query: str, date_column: str, start_date=None, end_date=None):
+        """Append date range WHERE/AND clauses and return (query, params)."""
+        params = []
+        clauses = []
+        if start_date:
+            clauses.append(f"{date_column} >= ?")
+            params.append(start_date)
+        if end_date:
+            clauses.append(f"{date_column} <= ?")
+            params.append(end_date)
+        if clauses:
+            separator = " WHERE " if " WHERE " not in query.upper() else " AND "
+            query += separator + " AND ".join(clauses)
+        return query, params
+
+    def flush_queue(self, timeout=5.0):
+        """Wait for all pending async write tasks in the write queue to complete."""
+        try:
+            self.flush_app_usage()
+        except Exception:
+            pass
+        if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
+            try:
+                self.columnar_engine.flush()
+            except Exception:
+                pass
+        if hasattr(self, "_write_queue") and self._write_queue is not None:
+            try:
+                self._write_queue.join()
+            except Exception:
+                pass
+
     def close_thread_connection(self):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             if hasattr(self._thread_local, "conn") and self._thread_local.conn is not None:
+                try:
+                    if getattr(self._thread_local.conn, "in_transaction", False):
+                        self._thread_local.conn.execute("ROLLBACK")
+                except Exception:
+                    pass
                 try:
                     self._thread_local.conn.close()
                 except Exception:
@@ -287,7 +557,7 @@ class MindFlowDB:
 
 
     def _init_db(self):
-        with self.connection() as conn:
+        with self.write_transaction() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -355,6 +625,8 @@ class MindFlowDB:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_reflections_timestamp ON reflections(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_app_usage_date ON app_usage(date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_app_usage_analytics ON app_usage(date, process, duration)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_mode_start ON sessions(mode, start)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS battery_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -385,6 +657,7 @@ class MindFlowDB:
                     to_process TEXT
                 )
             """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_context_switches_ts ON context_switches(timestamp)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -393,6 +666,18 @@ class MindFlowDB:
                     created_at TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS focus_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    duration_minutes INTEGER,
+                    task_label TEXT,
+                    completed INTEGER,
+                    stamina_start REAL,
+                    stamina_end REAL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_ts ON focus_sessions(timestamp)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS gratitude_journal (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -429,7 +714,7 @@ class MindFlowDB:
             return
         legacy_json_path = self.filepath.replace(".db", ".json")
         if os.path.exists(legacy_json_path) and os.path.isfile(legacy_json_path):
-            with self.connection() as conn:
+            with self.write_transaction() as conn:
                 row = conn.execute("SELECT value FROM metadata WHERE key = 'migrated_from_json'").fetchone()
                 if row and row["value"] == "true":
                     return
@@ -439,7 +724,7 @@ class MindFlowDB:
                     legacy_data = json.load(f)
                 if not isinstance(legacy_data, dict):
                     legacy_data = {}
-                with self.connection() as conn:
+                with self.write_transaction() as conn:
                     settings = legacy_data.get("settings", {})
                     for k, v in settings.items():
                         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, json.dumps(v)))
@@ -518,6 +803,48 @@ class MindFlowDB:
             except Exception as e:
                 print(f"Error migrating legacy JSON database: {e}")
 
+    def _merge_legacy_db(self):
+        if self.filepath == ":memory:":
+            return
+        target_app_db = os.path.join(DEFAULT_DATA_DIR, "mind_flow_data.db")
+        if os.path.abspath(self.filepath) != os.path.abspath(target_app_db):
+            return
+        legacy_db_path = r"C:\MIND\mind_flow_data.db"
+        if os.path.exists(legacy_db_path) and os.path.abspath(legacy_db_path) != os.path.abspath(self.filepath):
+            try:
+                with self.write_transaction() as conn:
+                    row = conn.execute("SELECT value FROM metadata WHERE key = 'merged_legacy_db'").fetchone()
+                    if row and row["value"] == "true":
+                        return
+                src_conn = sqlite3.connect(legacy_db_path)
+                src_cur = src_conn.cursor()
+                with self.write_transaction() as conn:
+                    # Reflections
+                    src_refs = src_cur.execute("SELECT timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality FROM reflections").fetchall()
+                    dst_refs = set(r["timestamp"] for r in conn.execute("SELECT timestamp FROM reflections").fetchall())
+                    for r in src_refs:
+                        if r[0] not in dst_refs:
+                            conn.execute("INSERT INTO reflections (timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality) VALUES (?, ?, ?, ?, ?, ?, ?)", r)
+                            dst_refs.add(r[0])
+                    # Sessions
+                    src_sess = src_cur.execute("SELECT mode, start, end, duration, brain_dump, bypassed FROM sessions").fetchall()
+                    dst_sess = set(s["start"] for s in conn.execute("SELECT start FROM sessions").fetchall())
+                    for s in src_sess:
+                        if s[1] not in dst_sess:
+                            conn.execute("INSERT INTO sessions (mode, start, end, duration, brain_dump, bypassed) VALUES (?, ?, ?, ?, ?, ?)", s)
+                            dst_sess.add(s[1])
+                    # App Usage
+                    src_app = src_cur.execute("SELECT date, process, title, titles, duration FROM app_usage").fetchall()
+                    dst_app = set((a["date"], a["process"]) for a in conn.execute("SELECT date, process FROM app_usage").fetchall())
+                    for a in src_app:
+                        if (a[0], a[1]) not in dst_app:
+                            conn.execute("INSERT OR IGNORE INTO app_usage (date, process, title, titles, duration) VALUES (?, ?, ?, ?, ?)", a)
+                            dst_app.add((a[0], a[1]))
+                    conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('merged_legacy_db', 'true')")
+                src_conn.close()
+            except Exception as e:
+                print(f"[MIND-FLOW] Warning: Legacy SQLite database merge failed: {e}")
+
     def load(self):
         if self.filepath == ":memory:":
             return
@@ -542,11 +869,22 @@ class MindFlowDB:
                     pass
 
 
+    @queued_write
     def save(self, sync=False):
         self.flush_app_usage()
 
     def get_settings(self):
-        with self.lock:
+        with MindFlowDB._settings_lock:
+            if MindFlowDB._settings_cache is not None:
+                res = copy.deepcopy(MindFlowDB._settings_cache)
+                if "is_cloud_sync" not in res:
+                    try:
+                        from backend.workspace_manager import WorkspaceManager
+                        res["is_cloud_sync"] = WorkspaceManager(self.filepath if self.filepath != ":memory:" else DEFAULT_DATA_DIR).is_cloud_sync
+                    except Exception:
+                        res["is_cloud_sync"] = False
+                return res
+            
             settings = {}
             with self.connection() as conn:
                 for row in conn.execute("SELECT key, value FROM settings"):
@@ -554,21 +892,30 @@ class MindFlowDB:
             for k, v in DEFAULT_SETTINGS.items():
                 if k not in settings:
                     settings[k] = copy.deepcopy(v)
-            return settings
+            MindFlowDB._settings_cache = settings
+            res = copy.deepcopy(MindFlowDB._settings_cache)
+            if "is_cloud_sync" not in res:
+                try:
+                    from backend.workspace_manager import WorkspaceManager
+                    res["is_cloud_sync"] = WorkspaceManager(self.filepath if self.filepath != ":memory:" else DEFAULT_DATA_DIR).is_cloud_sync
+                except Exception:
+                    res["is_cloud_sync"] = False
+            return res
 
     def get_current_goal(self):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 row = conn.execute("SELECT value FROM metadata WHERE key = 'current_goal'").fetchone()
                 return row["value"] if row else ""
 
+    @queued_write
     def set_current_goal(self, goal):
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('current_goal', ?)", (str(goal).strip(),))
 
     def get_hydration(self):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             today_str = datetime.today().date().isoformat()
             with self.connection() as conn:
                 row = conn.execute("SELECT cups FROM hydration WHERE date = ?", (today_str,)).fetchone()
@@ -585,11 +932,12 @@ class MindFlowDB:
                 "increment": settings.get("hydration_increment", 1)
             }
 
+    @queued_write
     def increment_hydration(self, cups=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             today_str = datetime.today().date().isoformat()
             settings = self.get_settings()
-            with self.connection() as conn:
+            with self.write_transaction() as conn:
                 row = conn.execute("SELECT cups FROM hydration WHERE date = ?", (today_str,)).fetchone()
                 current_cups = row["cups"] if row else 0.0
                 if cups is not None:
@@ -619,27 +967,28 @@ class MindFlowDB:
             }
 
     def get_steps(self, date_str=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             if not date_str:
                 date_str = datetime.today().date().isoformat()
             with self.connection() as conn:
                 row = conn.execute("SELECT count FROM steps WHERE date = ?", (date_str,)).fetchone()
                 return row["count"] if row else 0
 
+    @queued_write
     def log_steps(self, count, date_str=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             if not date_str:
                 date_str = datetime.today().date().isoformat()
             try:
                 count_val = int(count)
             except (ValueError, TypeError):
                 count_val = 0
-            with self.connection() as conn:
+            with self.write_transaction() as conn:
                 conn.execute("INSERT OR REPLACE INTO steps (date, count) VALUES (?, ?)", (date_str, count_val))
             return count_val
 
     def get_sleep(self, date_str=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             if not date_str:
                 date_str = datetime.today().date().isoformat()
             with self.connection() as conn:
@@ -651,8 +1000,9 @@ class MindFlowDB:
                     }
                 return {"hours": 0.0, "quality": 3}
 
+    @queued_write
     def log_sleep(self, hours, quality, date_str=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             if not date_str:
                 date_str = datetime.today().date().isoformat()
             try:
@@ -663,24 +1013,14 @@ class MindFlowDB:
                 quality_val = int(quality)
             except (ValueError, TypeError):
                 quality_val = 3
-            with self.connection() as conn:
+            with self.write_transaction() as conn:
                 conn.execute("INSERT OR REPLACE INTO sleep (date, hours, quality) VALUES (?, ?, ?)", (date_str, hours_val, quality_val))
             return {"hours": hours_val, "quality": quality_val}
 
     def get_sleep_list(self, start_date=None, end_date=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             sleep = []
-            query = "SELECT date, hours, quality FROM sleep"
-            params = []
-            if start_date and end_date:
-                query += " WHERE date >= ? AND date <= ?"
-                params = [start_date, end_date]
-            elif start_date:
-                query += " WHERE date >= ?"
-                params = [start_date]
-            elif end_date:
-                query += " WHERE date <= ?"
-                params = [end_date]
+            query, params = self._apply_date_range("SELECT date, hours, quality FROM sleep", "date", start_date, end_date)
             query += " ORDER BY date ASC"
             with self.connection() as conn:
                 for row in conn.execute(query, params):
@@ -692,19 +1032,9 @@ class MindFlowDB:
             return sleep
 
     def get_steps_list(self, start_date=None, end_date=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             steps = []
-            query = "SELECT date, count FROM steps"
-            params = []
-            if start_date and end_date:
-                query += " WHERE date >= ? AND date <= ?"
-                params = [start_date, end_date]
-            elif start_date:
-                query += " WHERE date >= ?"
-                params = [start_date]
-            elif end_date:
-                query += " WHERE date <= ?"
-                params = [end_date]
+            query, params = self._apply_date_range("SELECT date, count FROM steps", "date", start_date, end_date)
             query += " ORDER BY date ASC"
             with self.connection() as conn:
                 for row in conn.execute(query, params):
@@ -714,10 +1044,13 @@ class MindFlowDB:
                     })
             return steps
 
+    @queued_write
     def update_settings(self, settings_dict):
-        with self.lock:
+        with MindFlowDB._settings_lock:
             settings = self.get_settings()
             for k, v in settings_dict.items():
+                if k == "enable_eye_care_nudges":
+                    k = "enable_eyecare_nudges"
                 if k in DEFAULT_SETTINGS:
                     if k in ["work_duration_minutes", "idle_timeout_seconds", "rest_duration_seconds"]:
                         try:
@@ -748,18 +1081,22 @@ class MindFlowDB:
                         val = str(v).strip().lower()
                         if val in ["cups", "ml", "oz"]:
                             settings[k] = val
-                    elif k in ["adaptive_timers_enabled", "eye_care_mode", "circadian_forecast_enabled"]:
+                    elif k in ["adaptive_timers_enabled", "eye_care_mode", "circadian_forecast_enabled", "enable_desktop_toasts", "enable_audio_chimes", "enable_distraction_nudges", "enable_thrashing_nudges", "enable_eyecare_nudges", "enable_hydration_nudges"]:
                         if isinstance(v, str):
                             settings[k] = v.lower() in ["true", "1", "yes"]
                         else:
                             settings[k] = bool(v)
+                    elif k == "proactivity_level":
+                        val = str(v).strip().lower()
+                        if val in ["disabled", "gentle", "balanced", "strict"]:
+                            settings[k] = val
                     elif k == "circadian_forecast_sensitivity":
                         val = str(v).strip().lower()
                         if val in ["low", "medium", "high"]:
                             settings[k] = val
                     elif k == "zen_level":
                         val = str(v).strip().lower()
-                        if val in ["tranquil", "balanced", "sprint"]:
+                        if val in ["tranquil", "balanced", "sprint", "whisper", "drift", "deep", "void"]:
                             settings[k] = val
                     elif k == "daily_step_target":
                         try:
@@ -788,21 +1125,146 @@ class MindFlowDB:
                     elif isinstance(v, list):
                         filtered = [str(x).strip().lower() for x in v if x]
                         settings[k] = filtered[:50]
-            with self.connection() as conn:
+            with self.write_transaction() as conn:
                 for k, v in settings.items():
                     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, json.dumps(v)))
+            self.clear_analytics_cache()
+            MindFlowDB._settings_cache = None
+            clear_regex_caches()
 
+    def get_app_rules(self):
+        settings = self.get_settings()
+        work_kw = settings.get("work_keywords", [])
+        recharge_kw = settings.get("recharge_keywords", [])
+        neutral_kw = settings.get("neutral_keywords", [])
+        rules = []
+        seen = set()
+        for kw in work_kw:
+            if kw and kw not in seen:
+                rules.append({"app_name": kw, "category": "work"})
+                seen.add(kw)
+        for kw in recharge_kw:
+            if kw and kw not in seen:
+                rules.append({"app_name": kw, "category": "recharge"})
+                seen.add(kw)
+        for kw in neutral_kw:
+            if kw and kw not in seen:
+                rules.append({"app_name": kw, "category": "neutral"})
+                seen.add(kw)
+        return rules
+
+    @queued_write
+    def recategorize_app(self, app_name, target_category):
+        name = str(app_name).strip().lower()
+        cat = str(target_category).strip().lower()
+        if not name or cat not in ["work", "recharge", "neutral"]:
+            return
+        
+        base_name = name[:-4] if name.endswith(".exe") else name
+        exe_name = f"{base_name}.exe"
+        targets_to_remove = {name, base_name, exe_name}
+
+        settings = self.get_settings()
+        work_kw = [x for x in settings.get("work_keywords", []) if str(x).strip().lower() not in targets_to_remove]
+        recharge_kw = [x for x in settings.get("recharge_keywords", []) if str(x).strip().lower() not in targets_to_remove]
+        neutral_kw = [x for x in settings.get("neutral_keywords", []) if str(x).strip().lower() not in targets_to_remove]
+        
+        # Deduplicate defensively across all lists
+        seen_all = set()
+        clean_work = []
+        for x in work_kw:
+            xl = str(x).strip().lower()
+            if xl and xl not in seen_all and xl not in targets_to_remove:
+                clean_work.append(x)
+                seen_all.add(xl)
+
+        clean_recharge = []
+        for x in recharge_kw:
+            xl = str(x).strip().lower()
+            if xl and xl not in seen_all and xl not in targets_to_remove:
+                clean_recharge.append(x)
+                seen_all.add(xl)
+
+        clean_neutral = []
+        for x in neutral_kw:
+            xl = str(x).strip().lower()
+            if xl and xl not in seen_all and xl not in targets_to_remove:
+                clean_neutral.append(x)
+                seen_all.add(xl)
+
+        if cat == "work":
+            clean_work.append(name)
+        elif cat == "recharge":
+            clean_recharge.append(name)
+        elif cat == "neutral":
+            clean_neutral.append(name)
+            
+        self.update_settings({
+            "work_keywords": clean_work,
+            "recharge_keywords": clean_recharge,
+            "neutral_keywords": clean_neutral
+        })
+        self.clear_analytics_cache()
+
+    @queued_write
+    def delete_app_rule(self, app_name):
+        name = str(app_name).strip().lower()
+        if not name:
+            return
+        base_name = name[:-4] if name.endswith(".exe") else name
+        exe_name = f"{base_name}.exe"
+        targets_to_remove = {name, base_name, exe_name}
+
+        settings = self.get_settings()
+        work_kw = [x for x in settings.get("work_keywords", []) if str(x).strip().lower() not in targets_to_remove]
+        recharge_kw = [x for x in settings.get("recharge_keywords", []) if str(x).strip().lower() not in targets_to_remove]
+        neutral_kw = [x for x in settings.get("neutral_keywords", []) if str(x).strip().lower() not in targets_to_remove]
+        self.update_settings({
+            "work_keywords": work_kw,
+            "recharge_keywords": recharge_kw,
+            "neutral_keywords": neutral_kw
+        })
+        self.clear_analytics_cache()
+
+    def get_recent_apps(self, limit=30):
+        with self.connection() as conn:
+            rows = conn.execute("""
+                SELECT DISTINCT process, title
+                FROM app_usage
+                WHERE process IS NOT NULL AND process != '' AND process != 'None'
+                ORDER BY date DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+            apps = []
+            seen = set()
+            for row in rows:
+                proc = row["process"]
+                proc_lower = proc.lower()
+                if proc_lower not in seen:
+                    seen.add(proc_lower)
+                    disp = proc.replace(".exe", "").replace(".EXE", "")
+                    disp = disp.capitalize() if len(disp) > 0 else disp
+                    apps.append({
+                        "process": proc,
+                        "display_name": disp,
+                        "last_title": row["title"] or ""
+                    })
+            return apps
+
+    @queued_write
     def log_session(self, mode, start_time, end_time, brain_dump=None, bypassed=False, is_flow=False, flow_duration=0.0):
         duration = (end_time - start_time).total_seconds()
         if duration < 5:
             return
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("""
                     INSERT INTO sessions (mode, start, end, duration, brain_dump, bypassed, is_flow, flow_duration)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (mode, start_time.isoformat(), end_time.isoformat(), duration, brain_dump, 1 if bypassed else 0, 1 if is_flow else 0, flow_duration))
 
+            self.clear_analytics_cache()
+    @queued_write
     def add_reflection(self, energy_level, friction_level, summary, mood=None, sleep_hours=None, sleep_quality=None):
         try:
             val = float(energy_level)
@@ -822,13 +1284,14 @@ class MindFlowDB:
             sleep_quality_val = int(sleep_quality) if sleep_quality is not None else None
         except (ValueError, TypeError):
             sleep_quality_val = None
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             timestamp = datetime.now().isoformat()
-            with self.connection() as conn:
+            with self.write_transaction() as conn:
                 conn.execute("""
                     INSERT INTO reflections (timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (timestamp, energy_val, friction_val, str(summary).strip(), str(mood).strip() if mood else None, sleep_hours_val, sleep_quality_val))
+            self.clear_analytics_cache()
             return {
                 "timestamp": timestamp,
                 "energy_level": energy_val,
@@ -840,19 +1303,9 @@ class MindFlowDB:
             }
 
     def get_reflections(self, start_date=None, end_date=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             reflections = []
-            query = "SELECT timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality FROM reflections"
-            params = []
-            if start_date and end_date:
-                query += " WHERE date(timestamp) >= ? AND date(timestamp) <= ?"
-                params = [start_date, end_date]
-            elif start_date:
-                query += " WHERE date(timestamp) >= ?"
-                params = [start_date]
-            elif end_date:
-                query += " WHERE date(timestamp) <= ?"
-                params = [end_date]
+            query, params = self._apply_date_range("SELECT timestamp, energy_level, friction_level, summary, mood, sleep_hours, sleep_quality FROM reflections", "date(timestamp)", start_date, end_date)
             query += " ORDER BY id ASC"
             with self.connection() as conn:
                 for row in conn.execute(query, params):
@@ -868,19 +1321,9 @@ class MindFlowDB:
             return reflections
 
     def get_sessions(self, start_date=None, end_date=None):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             sessions = []
-            query = "SELECT mode, start, end, duration, brain_dump, bypassed, is_flow, flow_duration FROM sessions"
-            params = []
-            if start_date and end_date:
-                query += " WHERE date(start) >= ? AND date(start) <= ?"
-                params = [start_date, end_date]
-            elif start_date:
-                query += " WHERE date(start) >= ?"
-                params = [start_date]
-            elif end_date:
-                query += " WHERE date(start) <= ?"
-                params = [end_date]
+            query, params = self._apply_date_range("SELECT mode, start, end, duration, brain_dump, bypassed, is_flow, flow_duration FROM sessions", "date(start)", start_date, end_date)
             query += " ORDER BY id ASC"
             with self.connection() as conn:
                 for row in conn.execute(query, params):
@@ -896,20 +1339,74 @@ class MindFlowDB:
                     })
             return sessions
 
-    def log_app_usage(self, process, title, duration):
+    @queued_write
+    def log_app_usage(self, process, title, duration, category=None):
         if not process or process == "None":
             return
         with self.buffer_lock:
             key = (process, title)
             self.app_usage_buffer[key] = self.app_usage_buffer.get(key, 0) + duration
 
+        if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
+            try:
+                cat = category or self.categorize_app(process, title)
+                self.columnar_engine.append_window_log(time.time(), process, title, cat, duration)
+            except Exception:
+                pass
+
+    def categorize_app(self, process, title):
+        settings = self.get_settings()
+        proc_title = f"{process or ''} {title or ''}".strip().lower()
+
+        custom_rules = settings.get("custom_rules", [])
+        for rule in custom_rules:
+            pat = rule.get("pattern")
+            cat = rule.get("category")
+            if pat and cat and matches_keyword(pat, proc_title):
+                return cat.lower()
+
+        if matches_any_keyword(settings.get("work_keywords", []), proc_title):
+            return "work"
+        elif matches_any_keyword(settings.get("recharge_keywords", []), proc_title):
+            return "recharge"
+        elif matches_any_keyword(settings.get("neutral_keywords", []), proc_title):
+            return "neutral"
+        return "neutral"
+
+    def get_daily_productivity_trends(self, days=7):
+        if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
+            return self.columnar_engine.get_daily_productivity_trends(days)
+        return []
+
+    def get_category_breakdown(self, start_ts=None, end_ts=None):
+        if start_ts is None:
+            end_ts = time.time()
+            start_ts = end_ts - (86400 * 7)
+        if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
+            return self.columnar_engine.get_category_breakdown(start_ts, end_ts)
+        return {"work": 0.0, "rest": 0.0, "recharge": 0.0, "neutral": 0.0}
+
+    def get_fatigue_duration_analytics(self, days=30):
+        if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
+            return self.columnar_engine.get_fatigue_duration_analytics(days)
+        return {
+            "total_work_seconds": 0.0,
+            "total_rest_seconds": 0.0,
+            "avg_daily_work_seconds": 0.0,
+            "longest_continuous_work_seconds": 0.0,
+            "fatigue_risk_score": 0.0,
+            "hourly_distribution": [0.0] * 24,
+            "analysis_period_days": days
+        }
+
+    @queued_write
     def flush_app_usage(self):
         with self.buffer_lock:
             if not self.app_usage_buffer:
                 return
             today_str = datetime.today().date().isoformat()
-            with self.lock:
-                with self.connection() as conn:
+            if True:  # self.lock removed for WAL concurrency
+                with self.write_transaction() as conn:
                     for (process, title), duration in self.app_usage_buffer.items():
                         row = conn.execute("SELECT titles, duration FROM app_usage WHERE date = ? AND process = ?", (today_str, process)).fetchone()
                         if row:
@@ -930,24 +1427,22 @@ class MindFlowDB:
                                 INSERT INTO app_usage (date, process, title, titles, duration)
                                 VALUES (?, ?, ?, ?, ?)
                             """, (today_str, process, title if title else "None", json.dumps(titles), duration))
-                    self.app_usage_buffer.clear()
+                    # Do not clear the global status/analytics cache on routine 10s app usage ticks
+                    # to prevent cache thrashing on 1Hz /api/status polls.
+            self.app_usage_buffer.clear()
+            try:
+                with self.connection() as conn:
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+            except Exception:
+                pass
+
 
     def get_app_usage(self, start_date=None, end_date=None):
         self.flush_app_usage()
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             usage = []
-            query = "SELECT date, process, title, titles, duration FROM app_usage"
-            params = []
-            if start_date and end_date:
-                query += " WHERE date >= ? AND date <= ?"
-                params = [start_date, end_date]
-            elif start_date:
-                query += " WHERE date >= ?"
-                params = [start_date]
-            elif end_date:
-                query += " WHERE date <= ?"
-                params = [end_date]
-            query += " ORDER BY rowid ASC"
+            query, params = self._apply_date_range("SELECT date, process, title, titles, duration FROM app_usage", "date", start_date, end_date)
+            query += " ORDER BY date ASC, rowid ASC"
             with self.connection() as conn:
                 for row in conn.execute(query, params):
                     usage.append({
@@ -1077,12 +1572,12 @@ class MindFlowDB:
                         sleep_modifier += (sleep_quality - 3) * 0.1
                 sleep_modifier = max(-1.5, min(0.5, sleep_modifier))
             hourly_ratings = {i: [] for i in range(24)}
-            cursor = conn.execute("""
+            rows = conn.execute("""
                 SELECT timestamp, energy_level 
                 FROM reflections 
                 WHERE timestamp >= ? AND timestamp <= ?
-            """, (thirty_days_ago, now.isoformat()))
-            for r in cursor:
+            """, (thirty_days_ago, now.isoformat())).fetchall()
+            for r in rows:
                 try:
                     r_dt = datetime.fromisoformat(r["timestamp"])
                     if r_dt.tzinfo is not None:
@@ -1179,18 +1674,14 @@ class MindFlowDB:
         from datetime import timedelta
         today_date = datetime.today().date()
         today_str = today_date.isoformat()
-        with self.connection() as conn:
-            sessions_cnt = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-            reflections_cnt = conn.execute("SELECT COUNT(*) FROM reflections").fetchone()[0]
         settings = self.get_settings()
         now_time = time.time()
         cache = self._adaptive_cache
+        write_cnt = self.analytics_write_counter
         if (cache["result"] is not None and
             cache["last_settings"] == settings and
-            cache["last_sessions_len"] == sessions_cnt and
-            cache["last_reflections_len"] == reflections_cnt and
-            cache["last_checked_date"] == today_date and
-            (now_time - cache["last_check_time"]) < 10.0):
+            cache["last_write_counter"] == write_cnt and
+            cache["last_checked_date"] == today_date):
             return cache["result"]
         zen_lvl = settings.get("zen_level", "balanced")
         if zen_lvl == "tranquil":
@@ -1211,8 +1702,7 @@ class MindFlowDB:
                 "reason": "Autopilot Off"
             }
             cache["last_settings"] = settings
-            cache["last_sessions_len"] = sessions_cnt
-            cache["last_reflections_len"] = reflections_cnt
+            cache["last_write_counter"] = write_cnt
             cache["last_checked_date"] = today_date
             cache["last_check_time"] = now_time
             cache["result"] = result
@@ -1332,8 +1822,7 @@ class MindFlowDB:
             "reason": reason_str
         }
         cache["last_settings"] = settings
-        cache["last_sessions_len"] = sessions_cnt
-        cache["last_reflections_len"] = reflections_cnt
+        cache["last_write_counter"] = write_cnt
         cache["last_checked_date"] = today_date
         cache["last_check_time"] = now_time
         cache["result"] = result
@@ -1344,16 +1833,13 @@ class MindFlowDB:
         today_date = datetime.today().date()
         today_str = today_date.isoformat()
         now_time = time.time()
-        with self.connection() as conn:
-            sessions_cnt = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-            reflections_cnt = conn.execute("SELECT COUNT(*) FROM reflections").fetchone()[0]
         cache = self._status_cache
+        write_cnt = self.analytics_write_counter
         if (cache["result"] is not None and
-            cache["last_sessions_len"] == sessions_cnt and
-            cache["last_reflections_len"] == reflections_cnt and
-            cache["last_checked_date"] == today_date and
-            (now_time - cache.get("last_check_time", 0.0)) < 10.0):
+            cache["last_write_counter"] == write_cnt and
+            cache["last_checked_date"] == today_date):
             return cache["result"]
+
         with self.connection() as conn:
             row_energy = conn.execute("""
                 SELECT energy_level 
@@ -1440,15 +1926,14 @@ class MindFlowDB:
             "forecast_fatigue_alert": forecast_fatigue_alert,
             "circadian_forecast": forecast
         }
-        cache["last_sessions_len"] = sessions_cnt
-        cache["last_reflections_len"] = reflections_cnt
+        cache["last_write_counter"] = write_cnt
         cache["last_checked_date"] = today_date
         cache["last_check_time"] = now_time
         cache["result"] = result
         return result
 
     def get_battery_state(self) -> dict:
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 row = conn.execute(
                     "SELECT current_capacity, consecutive_work_minutes FROM battery_state WHERE id = 1"
@@ -1458,9 +1943,10 @@ class MindFlowDB:
                 else:
                     return {"capacity": 100.0, "consecutive_work": 0.0}
 
+    @queued_write
     def flush_battery_state(self, capacity: float, consecutive_work: float):
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("""
                     UPDATE battery_state
                     SET current_capacity = ?, consecutive_work_minutes = ?, last_updated = CURRENT_TIMESTAMP
@@ -1469,8 +1955,17 @@ class MindFlowDB:
 
     # Streaks & Achievements
     def get_streak_info(self):
+        import time
         from datetime import datetime, date, timedelta
-        with self.lock:
+        today_date = date.today()
+        now_time = time.time()
+        cache = self._streak_cache
+        if (cache["result"] is not None and
+            cache["last_write_counter"] == self.analytics_write_counter and
+            cache["last_checked_date"] == today_date):
+            return cache["result"]
+            
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 rows = conn.execute("""
                     SELECT DISTINCT SUBSTR(start, 1, 10) as date_str 
@@ -1487,11 +1982,21 @@ class MindFlowDB:
                         pass
                 
                 if not dates:
-                    return {"current_streak": 0, "longest_streak": 0}
+                    res = {"current_streak": 0, "longest_streak": 0}
+                    cache["result"] = res
+                    cache["last_write_counter"] = self.analytics_write_counter
+                    cache["last_checked_date"] = today_date
+                    cache["last_check_time"] = now_time
+                    return res
                 
                 unique_dates = sorted(list(set(dates)))
                 if not unique_dates:
-                    return {"current_streak": 0, "longest_streak": 0}
+                    res = {"current_streak": 0, "longest_streak": 0}
+                    cache["result"] = res
+                    cache["last_write_counter"] = self.analytics_write_counter
+                    cache["last_checked_date"] = today_date
+                    cache["last_check_time"] = now_time
+                    return res
                 
                 longest = 0
                 temp_streak = 1
@@ -1522,117 +2027,236 @@ class MindFlowDB:
                             else:
                                 break
                 
-                return {"current_streak": current, "longest_streak": max(longest, current)}
+                res = {"current_streak": current, "longest_streak": max(longest, current)}
+                cache["result"] = res
+                cache["last_write_counter"] = self.analytics_write_counter
+                cache["last_checked_date"] = today_date
+                cache["last_check_time"] = now_time
+                return res
 
+    def get_focus_streaks(self, days=30):
+        from datetime import date, timedelta
+        try:
+            days = int(days) if days is not None else 30
+        except (ValueError, TypeError):
+            days = 30
+        days = min(max(days, 1), 365)
+
+        streak_info = self.get_streak_info()
+        today = date.today()
+        start_date = today - timedelta(days=days - 1)
+
+        with self.connection() as conn:
+            rows = conn.execute("""
+                SELECT SUBSTR(start, 1, 10) as date_str, COUNT(*) as session_count, SUM(duration) as total_duration
+                FROM sessions
+                WHERE mode = 'work' AND duration > 0 AND SUBSTR(start, 1, 10) >= ?
+                GROUP BY date_str
+            """, (start_date.isoformat(),)).fetchall()
+
+        history_map = {r["date_str"]: {"sessions": r["session_count"], "duration_minutes": round(r["total_duration"] / 60.0, 1)} for r in rows}
+
+        history = []
+        total_focus_days = 0
+        for i in range(days):
+            cur_date = start_date + timedelta(days=i)
+            cur_str = cur_date.isoformat()
+            data = history_map.get(cur_str, {"sessions": 0, "duration_minutes": 0.0})
+            has_focus = data["sessions"] > 0
+            if has_focus:
+                total_focus_days += 1
+            history.append({
+                "date": cur_str,
+                "has_focus": has_focus,
+                "sessions": data["sessions"],
+                "duration_minutes": data["duration_minutes"]
+            })
+
+        return {
+            "current_streak": streak_info.get("current_streak", 0),
+            "longest_streak": streak_info.get("longest_streak", 0),
+            "total_focus_days": total_focus_days,
+            "history": history
+        }
+
+    @queued_write
     def award_achievement(self, name, description):
         from datetime import datetime
-        with self.lock:
-            with self.connection() as conn:
-                try:
-                    conn.execute("""
-                        INSERT OR IGNORE INTO achievements (name, description, awarded_at)
-                        VALUES (?, ?, ?)
-                    """, (name, description, datetime.now().isoformat()))
-                except Exception:
-                    pass
-
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
+                conn.execute("INSERT OR IGNORE INTO achievements (name, description, awarded_at) VALUES (?, ?, ?)",
+                             (name, description, datetime.now().isoformat()))
+        if hasattr(self, "_achievements_cache") and self._achievements_cache:
+            self._achievements_cache["last_write_counter"] = -1
     def get_achievements(self):
         from datetime import date, datetime, timedelta
-        with self.lock:
-            now = time.time()
-            with self.connection() as conn:
-                sess_cnt = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                ref_cnt = conn.execute("SELECT COUNT(*) FROM reflections").fetchone()[0]
-                hyd_cnt = conn.execute("SELECT COUNT(*) FROM hydration").fetchone()[0]
-                
-            # If nothing changed in DB and cache is under 5 seconds old, return cached result
-            if (self._achievements_cache["result"] is not None and 
-                (now - self._achievements_cache["last_check_time"]) < 5.0 and
-                self._achievements_cache["last_sessions_len"] == sess_cnt and
-                self._achievements_cache["last_reflections_len"] == ref_cnt and
-                self._achievements_cache["last_hydration_len"] == hyd_cnt):
-                return self._achievements_cache["result"]
+        now = time.time()
+        cache = self._achievements_cache
+        write_cnt = self.analytics_write_counter
+        if (cache["result"] is not None and 
+            cache.get("last_write_counter", -1) == write_cnt ):
+            return cache["result"]
 
-            streak_info = self.get_streak_info()
-            if streak_info["current_streak"] >= 7:
-                self.award_achievement("Shield Guardian", "Maintain a 7-day focus tracking streak.")
-            
-            with self.connection() as conn:
-                row = conn.execute("SELECT COUNT(*) FROM sessions WHERE mode = 'work'").fetchone()
-                if row and row[0] >= 1:
-                    self.award_achievement("First Step", "Log your first deep work focus session.")
-                
-                settings = self.get_settings()
-                target_cups = settings.get("hydration_target", 8.0)
-                
-                hyd_rows = conn.execute("SELECT date, cups FROM hydration WHERE cups >= ? ORDER BY date DESC", (target_cups,)).fetchall()
-                if len(hyd_rows) >= 3:
-                    hyd_dates = sorted([date.fromisoformat(r["date"]) for r in hyd_rows])
-                    has_hero = False
-                    for i in range(2, len(hyd_dates)):
-                        if (hyd_dates[i] - hyd_dates[i-1] == timedelta(days=1) and 
-                            hyd_dates[i-1] - hyd_dates[i-2] == timedelta(days=1)):
-                            has_hero = True
-                            break
-                    if has_hero:
-                        self.award_achievement("Hydration Hero", "Meet your daily hydration target 3 days in a row.")
-                
-                bypass_rows = conn.execute("""
-                    SELECT date(start) as d, SUM(bypassed) as bcnt 
-                    FROM sessions 
+        settings = self.get_settings()
+        target_cups = settings.get("hydration_target", 8.0)
+
+        # 1. Perform all reads in a single connection block and close it immediately.
+        with self.connection() as conn:
+            work_row = conn.execute("SELECT COUNT(*) FROM sessions WHERE mode = 'work'").fetchone()
+            work_count = work_row[0] if work_row else 0
+
+            hyd_rows = conn.execute("SELECT date, cups FROM hydration WHERE cups >= ? ORDER BY date DESC", (target_cups,)).fetchall()
+            hyd_dates_raw = [r["date"] for r in hyd_rows]
+
+            bypass_rows = conn.execute("""
+                SELECT date(start) as d, SUM(bypassed) as bcnt 
+                FROM sessions 
+                GROUP BY d
+            """).fetchall()
+            bypass_map = {r["d"]: r["bcnt"] for r in bypass_rows}
+
+            sess_dates_rows = conn.execute("SELECT DISTINCT date(start) as d FROM sessions").fetchall()
+            sess_dates_raw = [r["d"] for r in sess_dates_rows]
+
+            ref_rows = conn.execute("SELECT timestamp FROM reflections ORDER BY timestamp DESC").fetchall()
+            ref_timestamps = [r["timestamp"] for r in ref_rows]
+
+            # Night Owl & Early Bird: check session start times
+            time_rows = conn.execute("""
+                SELECT SUBSTR(start, 12, 2) as hour_str
+                FROM sessions
+                WHERE mode = 'work' AND duration > 0
+            """).fetchall()
+
+            # Flow Architect: count flow sessions
+            flow_row = conn.execute("SELECT COUNT(*) FROM sessions WHERE is_flow = 1").fetchone()
+            flow_count = flow_row[0] if flow_row else 0
+
+            # Marathon Runner: check for 2+ hour focus days
+            marathon_row = conn.execute("""
+                SELECT MAX(daily_total) FROM (
+                    SELECT date(start) as d, SUM(duration) as daily_total
+                    FROM sessions
+                    WHERE mode = 'work'
                     GROUP BY d
-                """).fetchall()
-                bypass_map = {r["d"]: r["bcnt"] for r in bypass_rows}
-                
-                sess_dates = sorted(list(set([r["d"] for r in conn.execute("SELECT DISTINCT date(start) as d FROM sessions").fetchall()])))
-                has_perfect_week = False
-                temp_consec = 0
-                for i in range(len(sess_dates)):
-                    d = sess_dates[i]
-                    if bypass_map.get(d, 0) == 0:
-                        if i > 0 and (date.fromisoformat(sess_dates[i]) - date.fromisoformat(sess_dates[i-1]) == timedelta(days=1)):
-                            temp_consec += 1
-                        else:
-                            temp_consec = 1
-                    else:
-                        temp_consec = 0
-                    if temp_consec >= 7:
-                        has_perfect_week = True
-                        break
-                if has_perfect_week:
-                    self.award_achievement("Zero Bypass Week", "Complete a 7-day focus streak without skipping any breaks.")
-                
-                ref_rows = conn.execute("SELECT timestamp FROM reflections ORDER BY timestamp DESC").fetchall()
-                ref_dates = []
-                for r in ref_rows:
-                    try:
-                        ref_dates.append(datetime.fromisoformat(r["timestamp"]))
-                    except Exception:
-                        pass
-                
-                has_mindful = False
-                j = 0
-                for i in range(len(ref_dates)):
-                    while j < len(ref_dates) and ref_dates[i] - ref_dates[j] <= timedelta(days=7):
-                        j += 1
-                    if (j - i) >= 5:
-                        has_mindful = True
-                        break
-                if has_mindful:
-                    self.award_achievement("Mindfulness Master", "Log 5 or more state reflections within a single week.")
+                )
+            """).fetchone()
+            max_daily_focus = marathon_row[0] if marathon_row and marathon_row[0] else 0
 
-                cursor = conn.execute("SELECT name, description, awarded_at FROM achievements ORDER BY id ASC")
-                res = [dict(row) for row in cursor]
-                
-            # Update cache
-            self._achievements_cache = {
-                "last_sessions_len": sess_cnt,
-                "last_reflections_len": ref_cnt,
-                "last_hydration_len": hyd_cnt,
-                "last_check_time": now,
-                "result": res
-            }
-            return res
+        # 2. Run logic and award achievements in memory (asynchronous non-blocking writes)
+        streak_info = self.get_streak_info()
+        if streak_info["current_streak"] >= 7:
+            self.award_achievement("Shield Guardian", "Maintain a 7-day focus tracking streak.", wait=False)
+
+        if work_count >= 1:
+            self.award_achievement("First Step", "Log your first deep work focus session.", wait=False)
+
+        if len(hyd_dates_raw) >= 3:
+            hyd_dates = []
+            for d_str in hyd_dates_raw:
+                try:
+                    hyd_dates.append(date.fromisoformat(d_str))
+                except Exception:
+                    pass
+            hyd_dates = sorted(list(set(hyd_dates)))
+            has_hero = False
+            for i in range(2, len(hyd_dates)):
+                if (hyd_dates[i] - hyd_dates[i-1] == timedelta(days=1) and 
+                    hyd_dates[i-1] - hyd_dates[i-2] == timedelta(days=1)):
+                    has_hero = True
+                    break
+            if has_hero:
+                self.award_achievement("Hydration Hero", "Meet your daily hydration target 3 days in a row.", wait=False)
+
+        sess_dates = []
+        for d_str in sess_dates_raw:
+            try:
+                sess_dates.append(date.fromisoformat(d_str))
+            except Exception:
+                pass
+        sess_dates = sorted(list(set(sess_dates)))
+        has_perfect_week = False
+        temp_consec = 0
+        for i in range(len(sess_dates)):
+            d_str = sess_dates[i].isoformat()
+            if bypass_map.get(d_str, 0) == 0:
+                if i > 0 and (sess_dates[i] - sess_dates[i-1] == timedelta(days=1)):
+                    temp_consec += 1
+                else:
+                    temp_consec = 1
+            else:
+                temp_consec = 0
+            if temp_consec >= 7:
+                has_perfect_week = True
+                break
+        if has_perfect_week:
+            self.award_achievement("Zero Bypass Week", "Complete a 7-day focus streak without skipping any breaks.", wait=False)
+
+        ref_dates = []
+        for ts in ref_timestamps:
+            try:
+                ref_dates.append(datetime.fromisoformat(ts))
+            except Exception:
+                pass
+
+        has_mindful = False
+        j = 0
+        for i in range(len(ref_dates)):
+            while j < len(ref_dates) and ref_dates[i] - ref_dates[j] <= timedelta(days=7):
+                j += 1
+            if (j - i) >= 5:
+                has_mindful = True
+                break
+        if has_mindful:
+            self.award_achievement("Mindfulness Master", "Log 5 or more state reflections within a single week.", wait=False)
+
+        # Night Owl: work session after 10 PM
+        has_night = False
+        for tr in time_rows:
+            try:
+                h = int(tr["hour_str"])
+                if h >= 22:
+                    has_night = True
+                    break
+            except Exception:
+                pass
+        if has_night:
+            self.award_achievement("Night Owl", "Complete a deep focus session after 10 PM.", wait=False)
+
+        # Early Bird: work session before 8 AM
+        has_early = False
+        for tr in time_rows:
+            try:
+                h = int(tr["hour_str"])
+                if h < 8:
+                    has_early = True
+                    break
+            except Exception:
+                pass
+        if has_early:
+            self.award_achievement("Early Bird", "Complete a deep focus session before 8 AM.", wait=False)
+
+        # Flow Architect: 3+ flow states
+        if flow_count >= 3:
+            self.award_achievement("Flow Architect", "Enter a flow state 3 separate times.", wait=False)
+
+        # Century Club: 100+ work sessions
+        if work_count >= 100:
+            self.award_achievement("Century Club", "Log 100 deep work focus sessions.", wait=False)
+
+        # Marathon Runner: 2+ hours focus in one day
+        if max_daily_focus >= 7200:
+            self.award_achievement("Marathon Runner", "Accumulate 2 or more hours of deep focus in a single day.", wait=False)
+
+        # 3. Fetch final accomplishments list
+        with self.connection() as conn:
+            cursor = conn.execute("SELECT name, description, awarded_at FROM achievements ORDER BY id ASC")
+            res = [dict(row) for row in cursor]
+
+        cache["last_write_counter"] = write_cnt
+        cache["last_check_time"] = now
+        cache["result"] = res
+        return res
 
     # Daily Focus Score (0 - 100)
     def calculate_focus_score(self, date_str=None):
@@ -1640,7 +2264,9 @@ class MindFlowDB:
         if date_str is None:
             date_str = date.today().isoformat()
         
-        with self.lock:
+        settings = self.get_settings()
+        
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 ref_rows = conn.execute("""
                     SELECT energy_level, friction_level 
@@ -1659,7 +2285,6 @@ class MindFlowDB:
                 friction_score = ((5.0 - avg_friction) / 5.0) * 20.0
                 
                 hyd_row = conn.execute("SELECT cups FROM hydration WHERE date = ?", (date_str,)).fetchone()
-                settings = self.get_settings()
                 target_cups = settings.get("hydration_target", 8.0)
                 current_cups = hyd_row["cups"] if hyd_row else 0.0
                 hydration_score = min(1.0, current_cups / max(1.0, target_cups)) * 15.0
@@ -1688,7 +2313,7 @@ class MindFlowDB:
 
     def get_focus_score_history(self, days=7):
         from datetime import date, timedelta, datetime
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             today = date.today()
             start_date = (today - timedelta(days=days - 1))
             start_date_str = start_date.isoformat()
@@ -1775,30 +2400,35 @@ class MindFlowDB:
             return history
 
     # Context Switch Tracker
+    @queued_write
     def log_context_switch(self, from_process, to_process):
         from datetime import datetime
         if not from_process or from_process == "None": from_process = "Idle"
         if not to_process or to_process == "None": to_process = "Idle"
         if from_process == to_process:
             return
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("""
                     INSERT INTO context_switches (timestamp, from_process, to_process)
                     VALUES (?, ?, ?)
                 """, (datetime.now().isoformat(), from_process, to_process))
+            self.clear_analytics_cache()
 
-    def get_context_switches(self, date_str=None):
+    def get_context_switches(self, date_str=None, limit=200):
         from datetime import date
         if date_str is None:
             date_str = date.today().isoformat()
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
-                rows = conn.execute("""
-                    SELECT timestamp, from_process, to_process 
-                    FROM context_switches 
-                    WHERE timestamp LIKE ?
-                """, (date_str + "%",)).fetchall()
+                query = "SELECT id, timestamp, from_process, to_process FROM context_switches WHERE timestamp LIKE ?"
+                params = [date_str + "%"]
+                if limit:
+                    query += " ORDER BY id ASC LIMIT ?"
+                    params.append(limit)
+                else:
+                    query += " ORDER BY id ASC"
+                rows = conn.execute(query, params).fetchall()
                 return [dict(r) for r in rows]
 
     def get_context_switches_hourly(self, date_str=None):
@@ -1817,31 +2447,34 @@ class MindFlowDB:
 
     # Tasks (Micro-Planner)
     def get_tasks(self):
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 rows = conn.execute("SELECT id, text, completed, created_at FROM tasks ORDER BY id ASC").fetchall()
                 return [dict(r) for r in rows]
 
+    @queued_write
     def add_task(self, text):
         from datetime import datetime
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 cursor = conn.execute("""
                     INSERT INTO tasks (text, completed, created_at)
                     VALUES (?, 0, ?)
                 """, (text, datetime.now().isoformat()))
                 new_id = cursor.lastrowid
-                return {"id": new_id, "text": text, "completed": 0}
+            return {"id": new_id, "text": text, "completed": 0}
 
+    @queued_write
     def update_task(self, task_id, completed):
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("UPDATE tasks SET completed = ? WHERE id = ?", (completed, task_id))
                 return True
 
+    @queued_write
     def delete_task(self, task_id):
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
                 return True
 
@@ -1850,7 +2483,7 @@ class MindFlowDB:
         from datetime import date
         if date_str is None:
             date_str = date.today().isoformat()
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 row = conn.execute("""
                     SELECT date, entry_1, entry_2, entry_3 
@@ -1859,9 +2492,10 @@ class MindFlowDB:
                 """, (date_str,)).fetchone()
                 return dict(row) if row else None
 
+    @queued_write
     def add_gratitude(self, date_str, entry_1, entry_2, entry_3):
-        with self.lock:
-            with self.connection() as conn:
+        if True:  # self.lock removed for WAL concurrency
+            with self.write_transaction() as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO gratitude_journal (date, entry_1, entry_2, entry_3)
                     VALUES (?, ?, ?, ?)
@@ -1870,11 +2504,20 @@ class MindFlowDB:
 
     # Recovery Score (Morning Readiness)
     def get_recovery_score(self):
+        import time
         from datetime import date, timedelta
-        today_str = date.today().isoformat()
-        yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+        today_date = date.today()
+        now_time = time.time()
+        cache = self._recovery_cache
+        if (cache["result"] is not None and
+            cache["last_write_counter"] == self.analytics_write_counter and
+            cache["last_checked_date"] == today_date):
+            return cache["result"]
+            
+        today_str = today_date.isoformat()
+        yesterday_str = (today_date - timedelta(days=1)).isoformat()
         
-        with self.lock:
+        if True:  # self.lock removed for WAL concurrency
             with self.connection() as conn:
                 sleep_row = conn.execute("SELECT hours, quality FROM sleep WHERE date = ?", (today_str,)).fetchone()
                 if sleep_row:
@@ -1913,11 +2556,71 @@ class MindFlowDB:
                 else:
                     suggested_work = 15
                 
-                return {
+                res = {
                     "recovery_score": total_recovery,
                     "suggested_work_minutes": suggested_work,
                     "has_sleep_logged": has_sleep
                 }
+                cache["result"] = res
+                cache["last_write_counter"] = self.analytics_write_counter
+                cache["last_checked_date"] = today_date
+                cache["last_check_time"] = now_time
+                return res
+
+    @queued_write
+    def save_calendar_events(self, events):
+        """Atomically update calendar_events via queue worker."""
+        with self.write_transaction() as conn:
+            conn.execute("DELETE FROM calendar_events")
+            for ev in events:
+                conn.execute("""
+                    INSERT INTO calendar_events (title, start_time, end_time)
+                    VALUES (?, ?, ?)
+                """, (ev.get("title", ""), ev.get("start_time", ""), ev.get("end_time", "")))
+
+    @queued_write
+    def log_focus_session(self, duration_minutes, task_label="", completed=1, stamina_start=100.0, stamina_end=100.0):
+        """Log a focus session to SQLite via queue worker."""
+        timestamp = datetime.now().isoformat()
+        with self.write_transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO focus_sessions (timestamp, duration_minutes, task_label, completed, stamina_start, stamina_end)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (timestamp, int(duration_minutes), str(task_label or ""), int(completed), float(stamina_start), float(stamina_end))
+            )
+        self.clear_analytics_cache()
+        return True
+
+    def get_focus_session_stats(self, days=7):
+        """Retrieve aggregated focus session statistics for the last N days."""
+        with self.connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT 
+                    COUNT(*) as total_sessions,
+                    COALESCE(SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END), 0) as completed_sessions,
+                    COALESCE(SUM(CASE WHEN completed = 1 THEN duration_minutes ELSE 0 END), 0) as total_focus_minutes,
+                    COALESCE(AVG(CASE WHEN completed = 1 THEN duration_minutes ELSE NULL END), 0) as avg_duration
+                FROM focus_sessions
+                WHERE timestamp >= datetime('now', '-' || ? || ' days')
+                """,
+                (int(days),)
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"total_sessions": 0, "completed_sessions": 0, "total_focus_minutes": 0, "avg_duration": 0.0}
+            return {
+                "total_sessions": row["total_sessions"],
+                "completed_sessions": row["completed_sessions"],
+                "total_focus_minutes": row["total_focus_minutes"],
+                "avg_duration": round(row["avg_duration"], 1)
+            }
+
+Database = MindFlowDB
+db = MindFlowDB()
+
 
 
 

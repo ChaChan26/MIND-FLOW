@@ -1,3 +1,10 @@
+"""
+MIND-FLOW Desktop application packaging pipeline automating Vite build and PyInstaller bundle creation.
+
+Author: ChaChan26 <minhharry2006@gmail.com>
+Copyright (c) 2026 ChaChan26. All rights reserved.
+"""
+
 import os
 import subprocess
 import sys
@@ -5,6 +12,16 @@ import sys
 def build_exe():
     print("MIND-FLOW packaging automation starting...")
     
+    # 0. Build React frontend & sync static assets
+    ui_dir = os.path.abspath("Cognitive Productivity Tracker UI")
+    if os.path.exists(ui_dir):
+        print("Building React UI frontend assets...")
+        try:
+            subprocess.check_call(["npm.cmd" if sys.platform == "win32" else "npm", "run", "build"], cwd=ui_dir)
+            print("Frontend UI build & asset deployment completed.")
+        except Exception as e:
+            print(f"Warning: UI build step encountered issue: {e}")
+
     # 1. Ensure pyinstaller is installed
     try:
         import PyInstaller

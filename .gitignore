@@ -8,6 +8,12 @@ build/
 dist/
 *.spec
 
+# .NET / Visual Studio build outputs
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+
 # Local log files
 *.log
 app_stderr.log
@@ -27,3 +33,14 @@ mind_flow_data.db
 mind_flow_data.json.bak
 scratch/
 templates/index.html.bak
+
+# Workspace developer rules & agent metadata
+.agents/
+.serena/
+.gemini/
+.claude/
+.cursor/
+skill-observations/
+.venv/
+*.zip
+backups/

@@ -1,26 +1,43 @@
-import { useState, useEffect, useCallback } from "react";
+/**
+ * Main application shell managing global state initialization, sidebar navigation, keyboard shortcuts, and theme contexts.
+ *
+ * Author: ChaChan26 <minhharry2006@gmail.com>
+ * Copyright (c) 2026 ChaChan26. All rights reserved.
+ */
+
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard, BarChart2, Leaf, Settings2,
-  ShieldAlert, ShieldCheck, ShieldOff, RefreshCw, PanelLeftClose, PanelLeft,
+  ShieldAlert, ShieldCheck, ShieldOff, RefreshCw, PanelLeftClose, PanelLeft, Trophy,
+  Search, Keyboard, Sparkles, Activity
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Dashboard } from "./components/Dashboard";
-import { Analytics } from "./components/Analytics";
-import { ZenSpace } from "./components/ZenSpace";
-import { Preferences, THEMES, ThemeId } from "./components/Preferences";
+
+const Analytics = React.lazy(() => import("./components/Analytics").then(m => ({ default: m.Analytics })));
+const ZenSpace = React.lazy(() => import("./components/ZenSpace").then(m => ({ default: m.ZenSpace })));
+const Achievements = React.lazy(() => import("./components/Achievements").then(m => ({ default: m.Achievements })));
+const Preferences = React.lazy(() => import("./components/Preferences").then(m => ({ default: m.Preferences })));
 import { BreakOverlay } from "./components/BreakOverlay";
-import { useStaminaEngine, AppMode } from "./hooks/useStaminaEngine";
+import { ConstellationBg } from "./components/ConstellationBg";
+import { Onboarding } from "./components/Onboarding";
+import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutGuide } from "./components/ShortcutGuide";
+import { CompanionMiniHud } from "./components/CompanionMiniHud";
+import { useStaminaStore, useStaminaEngineInit, AppMode } from "./hooks/useStaminaEngine";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 
-type Screen = "dashboard" | "analytics" | "zen" | "preferences";
+type Screen = "dashboard" | "analytics" | "zen" | "achievements" | "preferences";
 
 export type AppTally = { work: number; recharge: number; neutral: number };
 
 const NAV: { id: Screen; label: string; Icon: typeof LayoutDashboard; hint: string; key: string }[] = [
-  { id: "dashboard",   label: "Zen Hub",     Icon: LayoutDashboard, hint: "Focus dashboard",  key: "1" },
-  { id: "analytics",   label: "Energy Map",  Icon: BarChart2,       hint: "Weekly trends",    key: "2" },
-  { id: "zen",         label: "Zen Space",   Icon: Leaf,            hint: "Sensory recovery", key: "3" },
-  { id: "preferences", label: "Preferences", Icon: Settings2,       hint: "Config & rules",   key: "4" },
+  { id: "dashboard",    label: "Home",              Icon: LayoutDashboard, hint: "Focus dashboard",    key: "1" },
+  { id: "zen",          label: "Meditate",          Icon: Leaf,            hint: "Sensory recovery",   key: "2" },
+  { id: "analytics",    label: "Analytics & Energy", Icon: BarChart2,       hint: "Weekly trends",      key: "3" },
+  { id: "achievements", label: "Achievements",       Icon: Trophy,          hint: "Badges & milestones", key: "4" },
+  { id: "preferences",  label: "Settings & Config", Icon: Settings2,       hint: "Config & rules",     key: "5" },
 ];
 
 function fmtElapsed(ms: number) {
@@ -30,23 +47,77 @@ function fmtElapsed(ms: number) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function shieldConfig(mode: AppMode, battery: number, primary: string) {
-  if (mode === "rest")     return { label: "Shield Resting",    color: "#C5A882", bg: "rgba(197,168,130,0.12)", Icon: ShieldOff };
-  if (mode === "recharge") return { label: "Shield Recharging", color: "#7A9BAA", bg: "rgba(122,155,170,0.12)", Icon: RefreshCw };
-  if (battery > 55) return { label: "Shield Active",  color: primary,   bg: `${primary}1E`,            Icon: ShieldCheck };
-  if (battery > 25) return { label: "Shield Partial", color: "#C5A882", bg: "rgba(197,168,130,0.12)",  Icon: ShieldAlert };
-  return               { label: "Shield Critical", color: "#C17B6B", bg: "rgba(193,123,107,0.12)", Icon: ShieldAlert };
+function shieldConfig(mode: AppMode, battery: number) {
+  if (mode === "rest")     return { label: "Shield Resting",    color: "var(--accent-3)", bg: "color-mix(in srgb, var(--accent-3) 12%, transparent)", Icon: ShieldOff };
+  if (mode === "recharge") return { label: "Shield Recharging", color: "var(--accent-4)", bg: "color-mix(in srgb, var(--accent-4) 12%, transparent)", Icon: RefreshCw };
+  if (battery > 55) return { label: "Shield Active",  color: "var(--primary)",   bg: "color-mix(in srgb, var(--primary) 12%, transparent)",  Icon: ShieldCheck };
+  if (battery > 25) return { label: "Shield Partial", color: "var(--secondary)", bg: "color-mix(in srgb, var(--secondary) 12%, transparent)",Icon: ShieldAlert };
+  return               { label: "Shield Critical", color: "var(--accent-1)", bg: "color-mix(in srgb, var(--accent-1) 12%, transparent)", Icon: ShieldAlert };
+}
+
+function SessionTimer({ start, color }: { start: number, color: string }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const update = () => setElapsed(Date.now() - start);
+    update();
+    const intervalId = setInterval(update, 1000);
+    return () => clearInterval(intervalId);
+  }, [start]);
+  return <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.6rem", color, marginTop: 2 }}>Today · {fmtElapsed(elapsed)}</div>;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  state = { hasError: false, error: null };
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
+  componentDidCatch(error: Error) { console.error("UI ErrorBoundary caught error:", error); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, color: "var(--destructive)", fontFamily: "var(--font-sans)" }}>
+          <h3>Something went wrong rendering this view.</h3>
+          <pre style={{ fontSize: "0.8rem", color: "var(--secondary)", background: "rgba(0,0,0,0.2)", padding: 12, borderRadius: "var(--radii-sm)", whiteSpace: "pre-wrap" }}>
+            {this.state.error?.stack || String(this.state.error)}
+          </pre>
+          <button onClick={() => this.setState({ hasError: false, error: null })} style={{ padding: "8px 16px", borderRadius: "var(--radii-sm)", background: "var(--primary)", color: "var(--primary-foreground)", border: "none", cursor: "pointer", marginTop: 12 }}>
+            Reload Component
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function App() {
-  const [screen, setScreen]           = useLocalStorage<Screen>("mindflow_screen", "dashboard");
+  const initialScreen = (() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("screen");
+      if (p && ["dashboard", "zen", "analytics", "achievements", "preferences"].includes(p)) return p as Screen;
+    } catch (e) {}
+    return "dashboard" as Screen;
+  })();
+  const [screen, setScreen]           = useLocalStorage<Screen>("mindflow_screen", initialScreen);
   const [manualBreak, setManualBreak] = useState(false);
   const [hoveredNav, setHoveredNav]   = useState<Screen | null>(null);
   const [collapsed, setCollapsed]     = useLocalStorage("mindflow_sidebar_collapsed", false);
+  const [eyeCare, setEyeCare]         = useLocalStorage("mindflow_eyecare", false);
+  const [autoSwap, setAutoSwap]       = useLocalStorage("mindflow_autoswap", false);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useLocalStorage("mindflow_onboarded", false);
+
+  // Command Palette & Shortcut Guide modals
+  const [cmdOpen, setCmdOpen]           = useState(false);
+  const [guideOpen, setGuideOpen]       = useState(false);
+  const [miniHudOpen, setMiniHudOpen]   = useLocalStorage("mindflow_mini_hud", false);
+
+  // Apply global eye care filter
+  useEffect(() => {
+    document.body.style.filter = eyeCare ? "sepia(0.2) brightness(0.88) saturate(0.85)" : "";
+    return () => { document.body.style.filter = ""; };
+  }, [eyeCare]);
 
   // ── Theme — persisted ──────────────────────────────────────────────────────
-  const [activeTheme, setActiveTheme] = useLocalStorage<ThemeId>("mindflow_theme", "zenith");
-  const theme = THEMES[activeTheme];
+  const [activeTheme, setActiveTheme] = useLocalStorage<ThemeId>("mindflow_theme_v2", "silentmoon");
+  const theme = THEMES[activeTheme] || THEMES.silentmoon;
 
   const handleSetTheme = (id: ThemeId) => {
     setActiveTheme(id);
@@ -60,23 +131,13 @@ export default function App() {
 
   // ── Session timer ──────────────────────────────────────────────────────────
   const [sessionStart] = useState(() => Date.now());
-  const [sessionElapsed, setSessionElapsed] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setSessionElapsed(Date.now() - sessionStart), 1000);
-    return () => clearInterval(id);
-  }, [sessionStart]);
 
   // ── App classification tally ────────────────────────────────────────────────
-  const [appTally, setAppTally] = useState<AppTally>({ work: 0, recharge: 0, neutral: 0 });
-  const engine = useStaminaEngine();
-  useEffect(() => {
-    const cls = engine.classifiedApp;
-    const id = setInterval(() => setAppTally(prev => ({ ...prev, [cls]: prev[cls] + 1 })), 1000);
-    return () => clearInterval(id);
-  }, [engine.classifiedApp]);
-
-  const { battery, mode } = engine;
-  const shield = shieldConfig(mode, battery, theme.primary);
+  useStaminaEngineInit();
+  const battery = useStaminaStore(s => s.battery);
+  const mode = useStaminaStore(s => s.mode);
+  const setMode = useStaminaStore(s => s.setMode);
+  const shield = shieldConfig(mode, battery);
   const ShieldIcon = shield.Icon;
   const showBreak = mode === "rest" || manualBreak;
 
@@ -85,27 +146,58 @@ export default function App() {
     toast("Break started", { description: "Step away — your shield is holding.", icon: "🧘" });
   }, []);
 
-  const handleBreakDismiss = () => {
-    if (mode === "rest") engine.setMode("work");
+  const handleBreakDismiss = useCallback(() => {
+    if (mode === "rest") setMode("work");
     setManualBreak(false);
-  };
+  }, [mode, setMode]);
 
   // ── Keyboard shortcuts ──────────────────────────────────────────────────────
   useEffect(() => {
+    const isInputActive = (target: HTMLElement | null): boolean => {
+      if (!target) return false;
+      const tag = target.tagName;
+      const role = target.getAttribute?.("role");
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target.isContentEditable ||
+        role === "textbox"
+      );
+    };
+
     const onKey = (e: KeyboardEvent) => {
-      // ignore when typing in a field
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      // Ctrl+K / Cmd+K Command Palette trigger
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdOpen(prev => !prev);
+        return;
+      }
+
+      // ignore single-key shortcuts when typing in a field
+      if (isInputActive(e.target as HTMLElement)) return;
+
+      if (e.key === "?") {
+        e.preventDefault();
+        setGuideOpen(prev => !prev);
+        return;
+      }
+
+      if (e.key === "Escape" && !collapsed) {
+        setCollapsed(true);
+        return;
+      }
+
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       const nav = NAV.find(n => n.key === e.key);
       if (nav) { setScreen(nav.id); return; }
       if (e.key.toLowerCase() === "b") { triggerBreak(); return; }
+      if (e.key.toLowerCase() === "h") { setMiniHudOpen(h => !h); return; }
       if (e.key === "[") setCollapsed(c => !c);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setScreen, triggerBreak, setCollapsed]);
+  }, [setScreen, triggerBreak, setCollapsed, collapsed, setMiniHudOpen]);
 
   // Toast when battery hits critical
   const [warnedCritical, setWarnedCritical] = useState(false);
@@ -119,79 +211,147 @@ export default function App() {
 
   const batterySegments = 5;
   const filledSegments  = Math.round((battery / 100) * batterySegments);
-  const sidebarW = collapsed ? 72 : 212;
+  const RAIL_WIDTH = 68;
+  const DRAWER_WIDTH = 236;
+
+  if (!hasCompletedOnboarding) {
+    return <Onboarding onComplete={() => setHasCompletedOnboarding(true)} />;
+  }
 
   return (
-    <div className="size-full flex" style={{ fontFamily: "'DM Sans', sans-serif", background: theme.pageBg, color: theme.fg, transition: "background 0.4s ease" }}>
+    <div className="size-full flex" style={{ fontFamily: "'Nunito', sans-serif", background: theme.pageBg, color: theme.fg, transition: "background 0.4s ease" }}>
       <Toaster
         position="bottom-right"
         toastOptions={{
           style: {
             background: theme.cardBg, color: theme.fg,
             border: `1px solid ${theme.border}`,
-            fontFamily: "'DM Sans', sans-serif", borderRadius: "14px",
+            fontFamily: "'Nunito', sans-serif", borderRadius: "14px",
           },
         }}
       />
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      {/* ── Docked Desktop Sidebar ── */}
       <aside
-        className="flex flex-col py-7 shrink-0"
+        className="flex flex-col select-none overflow-hidden h-screen"
         style={{
-          width: sidebarW, paddingLeft: collapsed ? 10 : 16, paddingRight: collapsed ? 10 : 16, gap: 4,
-          background: theme.cardBg, borderRight: `1px solid ${theme.border}`,
-          boxShadow: "2px 0 24px rgba(0,0,0,0.05)",
-          transition: "width 0.28s cubic-bezier(0.4,0,0.2,1), background 0.4s ease, padding 0.28s",
+          width: collapsed ? RAIL_WIDTH : DRAWER_WIDTH,
+          flexShrink: 0,
+          paddingLeft: 10,
+          paddingRight: 10,
+          paddingTop: 18,
+          paddingBottom: 16,
+          gap: 4,
+          background: theme.cardBg, 
+          borderRight: `1px solid ${theme.border}`,
+          boxShadow: collapsed ? "2px 0 12px rgba(0,0,0,0.02)" : "4px 0 20px rgba(0,0,0,0.04)",
+          transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)",
+          zIndex: 30,
         }}
       >
-        {/* Logo + collapse toggle */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", paddingLeft: collapsed ? 0 : 6, paddingBottom: 18, paddingTop: 2 }}>
-          {collapsed ? (
-            <div style={{ width: 34, height: 34, borderRadius: 9, background: theme.primary, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontSize: 15, color: "#FDFCF9" }}>⬡</span>
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 10px", paddingBottom: 14 }}>
+          <div style={{ width: 24, height: 24, borderRadius: 7, background: theme.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ fontSize: 13, color: "var(--primary-foreground)" }}>⬡</span>
+          </div>
+          <div
+            className="flex-1 min-w-0 overflow-hidden"
+            style={{
+              opacity: collapsed ? 0 : 1,
+              maxWidth: collapsed ? 0 : 160,
+              marginLeft: collapsed ? 0 : 12,
+              pointerEvents: collapsed ? "none" : "auto",
+              transform: collapsed ? "translateX(-6px)" : "translateX(0)",
+              transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), transform 0.18s ease, margin-left 0.22s ease",
+            }}
+          >
+            <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.95rem", fontWeight: 700, color: theme.fg, letterSpacing: "-0.01em", lineHeight: 1.1, whiteSpace: "nowrap" }}>
+              MIND-FLOW <span style={{ fontSize: "0.5rem", background: "var(--primary)", color: "var(--card)", padding: "1px 4px", borderRadius: "4px", verticalAlign: "middle" }}>V2</span>
             </div>
-          ) : (
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 10, background: `${theme.primary}14`, border: `1px solid ${theme.primary}28` }}>
-              <div style={{ width: 22, height: 22, borderRadius: 7, background: theme.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: "#FDFCF9" }}>⬡</span>
-              </div>
-              <div>
-                <div style={{ fontFamily: "'Lora', serif", fontSize: "1rem", fontWeight: 600, color: theme.fg, letterSpacing: "-0.01em", lineHeight: 1 }}>MIND-FLOW</div>
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.52rem", color: theme.primary, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 1 }}>Cognitive Shield</div>
-              </div>
-            </div>
-          )}
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.5rem", color: theme.primary, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 2, whiteSpace: "nowrap" }}>Cognitive Shield</div>
+          </div>
         </div>
 
-        {/* Shield Status */}
-        {!collapsed ? (
-          <div style={{ paddingLeft: 6, paddingRight: 6, marginBottom: 12 }}>
-            <div className="rounded-xl px-3 py-2.5 flex flex-col gap-1.5" style={{ background: shield.bg, border: `1px solid ${shield.color}33` }}>
-              <div className="flex items-center gap-1.5">
-                <ShieldIcon size={11} style={{ color: shield.color }} />
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: shield.color, letterSpacing: "0.1em", textTransform: "uppercase" }}>{shield.label}</span>
+        {/* Shield Status (Fixed vertical container with smooth height animation) */}
+        <div style={{ padding: "0 2px", marginBottom: 6 }}>
+          <div
+            title={`${shield.label} · ${Math.round(battery)}%`}
+            className="rounded-xl flex items-center"
+            style={{
+              background: shield.bg,
+              border: `1px solid color-mix(in srgb, ${shield.color} 20%, transparent)`,
+              height: collapsed ? 38 : 52,
+              padding: collapsed ? "0 10px" : "8px 10px",
+              overflow: "hidden",
+              transition: "height 0.22s cubic-bezier(0.4,0,0.2,1), padding 0.22s ease",
+            }}
+          >
+            <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <ShieldIcon size={collapsed ? 14 : 12} style={{ color: shield.color }} />
+            </div>
+            <div
+              className="flex flex-col gap-1 flex-1 min-w-0 overflow-hidden"
+              style={{
+                opacity: collapsed ? 0 : 1,
+                maxWidth: collapsed ? 0 : 160,
+                marginLeft: collapsed ? 0 : 10,
+                pointerEvents: collapsed ? "none" : "auto",
+                transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), margin-left 0.22s ease",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.56rem", color: shield.color, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{shield.label}</span>
+                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", color: shield.color, fontWeight: 700 }}>{Math.round(battery)}%</span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="flex gap-0.5 flex-1">
-                  {Array.from({ length: batterySegments }).map((_, i) => (
-                    <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i < filledSegments ? shield.color : `${shield.color}28`, transition: "background 0.5s ease" }} />
-                  ))}
-                </div>
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.65rem", color: shield.color }}>{Math.round(battery)}%</span>
+              <div className="flex gap-0.5 w-full">
+                {Array.from({ length: batterySegments }).map((_, i) => (
+                  <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i < filledSegments ? shield.color : `color-mix(in srgb, ${shield.color} 20%, transparent)`, transition: "background 0.5s ease" }} />
+                ))}
               </div>
             </div>
           </div>
-        ) : (
-          <div title={`${shield.label} · ${Math.round(battery)}%`} style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: shield.bg, border: `1px solid ${shield.color}33`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <ShieldIcon size={13} style={{ color: shield.color }} />
-              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.5rem", color: shield.color, marginTop: 1 }}>{Math.round(battery)}</span>
-            </div>
-          </div>
-        )}
+        </div>
 
-        {/* Nav */}
-        <nav className="flex flex-col flex-1" style={{ gap: 3 }}>
+        {/* Theme Quick Switcher (Smooth height collapse to prevent nav buttons jumping) */}
+        <div
+          style={{
+            maxHeight: collapsed ? 0 : 64,
+            opacity: collapsed ? 0 : 1,
+            overflow: "hidden",
+            marginBottom: collapsed ? 0 : 8,
+            padding: "0 2px",
+            pointerEvents: collapsed ? "none" : "auto",
+            transition: "max-height 0.22s cubic-bezier(0.4,0,0.2,1), opacity 0.18s ease, margin-bottom 0.22s ease",
+          }}
+        >
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.52rem", color: theme.mutedFg, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Palette</span>
+            <span style={{ fontSize: "0.5rem", color: theme.primary, fontWeight: 600 }}>{theme.name}</span>
+          </div>
+          <div style={{ display: "flex", gap: 4, padding: "4px 6px", borderRadius: 10, background: theme.muted, border: `1px solid ${theme.border}`, justifyContent: "space-between", alignItems: "center" }}>
+            {(["silentmoon", "zenith", "cosmic", "ocean", "forest", "solar"] as ThemeId[]).map((tId) => {
+              const tConf = THEMES[tId];
+              const isSel = activeTheme === tId;
+              return (
+                <button
+                  key={tId}
+                  onClick={() => handleSetTheme(tId)}
+                  title={`${tConf.name} (${tConf.sub})`}
+                  style={{
+                    width: 16, height: 16, borderRadius: "50%",
+                    border: isSel ? `2px solid ${theme.fg}` : "1px solid transparent",
+                    background: tConf.primary, cursor: "pointer", padding: 0,
+                    transform: isSel ? "scale(1.2)" : "scale(0.95)",
+                    boxShadow: isSel ? `0 2px 8px ${tConf.primary}66` : "none"
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Nav Items */}
+        <nav className="flex flex-col flex-1 overflow-y-auto custom-scrollbar" style={{ gap: 3 }}>
           {NAV.map(({ id, label, Icon, hint, key }) => {
             const active  = screen === id;
             const hovered = hoveredNav === id;
@@ -202,110 +362,287 @@ export default function App() {
                 onMouseEnter={() => setHoveredNav(id)}
                 onMouseLeave={() => setHoveredNav(null)}
                 title={collapsed ? `${label} (${key})` : undefined}
-                className="flex items-center rounded-xl text-left transition-all duration-200"
+                className="flex items-center w-full rounded-xl text-left transition-colors duration-150"
                 style={{
-                  gap: collapsed ? 0 : 12,
-                  justifyContent: collapsed ? "center" : "flex-start",
-                  padding: collapsed ? "11px 0" : "10px 12px",
-                  paddingLeft: collapsed ? 0 : active ? 14 : 12,
+                  height: 40,
+                  padding: "0 10px",
+                  justifyContent: "flex-start",
+                  boxSizing: "border-box",
                   background: active ? theme.navActiveBg : hovered ? `${theme.muted}88` : "transparent",
                   boxShadow: active && !collapsed ? `inset 3px 0 0 ${theme.navActiveAccent}` : "none",
+                  cursor: "pointer",
+                  border: "none",
                 }}
               >
-                <Icon size={16} strokeWidth={active ? 2 : 1.5} style={{ color: active ? theme.navActiveAccent : hovered ? theme.fg : theme.mutedFg, transition: "color 0.2s", flexShrink: 0 }} />
-                {!collapsed && (
-                  <div className="flex-1 min-w-0">
-                    <div style={{ fontSize: "0.85rem", fontWeight: active ? 500 : 400, color: active ? theme.fg : hovered ? theme.fg : theme.mutedFg, transition: "color 0.2s" }}>{label}</div>
-                    <div style={{ fontSize: "0.6rem", color: theme.mutedFg, maxHeight: hovered && !active ? 14 : 0, overflow: "hidden", transition: "max-height 0.2s ease", fontFamily: "'DM Mono', monospace", letterSpacing: "0.04em" }}>{hint}</div>
+                <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon size={16} strokeWidth={active ? 2 : 1.5} style={{ color: active ? theme.navActiveAccent : hovered ? theme.fg : theme.mutedFg, transition: "color 0.2s" }} />
+                </div>
+                <div
+                  className="flex-1 min-w-0 flex items-center justify-between overflow-hidden"
+                  style={{
+                    opacity: collapsed ? 0 : 1,
+                    maxWidth: collapsed ? 0 : 160,
+                    marginLeft: collapsed ? 0 : 12,
+                    pointerEvents: collapsed ? "none" : "auto",
+                    transform: collapsed ? "translateX(-4px)" : "translateX(0)",
+                    transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), transform 0.18s ease, margin-left 0.22s ease",
+                  }}
+                >
+                  <div className="flex flex-col min-w-0">
+                    <span style={{ fontSize: "0.82rem", fontWeight: active ? 600 : 400, color: active ? theme.fg : hovered ? theme.fg : theme.mutedFg, lineHeight: 1.2, whiteSpace: "nowrap" }}>{label}</span>
+                    {hovered && !active && <span style={{ fontSize: "0.56rem", color: theme.mutedFg, whiteSpace: "nowrap" }}>{hint}</span>}
                   </div>
-                )}
-                {!collapsed && (
                   <kbd style={{
-                    fontFamily: "'DM Mono', monospace", fontSize: "0.58rem",
+                    fontFamily: "'DM Mono', monospace", fontSize: "0.56rem",
                     color: active ? theme.navActiveAccent : theme.mutedFg,
                     background: active ? `${theme.navActiveAccent}1A` : `${theme.muted}`,
-                    border: `1px solid ${theme.border}`, borderRadius: 5,
-                    padding: "1px 5px", lineHeight: 1.4, flexShrink: 0,
-                    opacity: hovered || active ? 1 : 0.5, transition: "opacity 0.2s",
+                    border: `1px solid ${theme.border}`, borderRadius: 4,
+                    padding: "1px 4px", lineHeight: 1.3, flexShrink: 0,
                   }}>{key}</kbd>
-                )}
+                </div>
               </button>
             );
           })}
         </nav>
 
-        {/* Force Break */}
-        <button
-          onClick={triggerBreak}
-          title={collapsed ? "Force Break (B)" : undefined}
-          className="flex items-center rounded-xl transition-all duration-200 mt-2 hover:opacity-90 active:scale-[0.97]"
-          style={{
-            gap: collapsed ? 0 : 12, justifyContent: "center",
-            padding: collapsed ? "11px 0" : "10px 12px",
-            background: "rgba(193,123,107,0.08)", color: "#C17B6B", border: "1px solid rgba(193,123,107,0.2)",
-          }}
-        >
-          <ShieldAlert size={15} strokeWidth={1.5} />
-          {!collapsed && <span style={{ fontSize: "0.82rem", flex: 1, textAlign: "left" }}>Force Break</span>}
-          {!collapsed && <kbd style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.58rem", color: "#C17B6B", background: "rgba(193,123,107,0.1)", border: "1px solid rgba(193,123,107,0.25)", borderRadius: 5, padding: "1px 5px", lineHeight: 1.4 }}>B</kbd>}
-        </button>
+        {/* Action Buttons with Fixed Left Alignment */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: "auto", paddingTop: 8 }}>
+          {/* Force Break */}
+          <button
+            onClick={triggerBreak}
+            title={collapsed ? "Force Break (B)" : undefined}
+            className="flex items-center w-full rounded-xl transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+            style={{
+              height: 38,
+              padding: "0 10px",
+              justifyContent: "flex-start",
+              background: "color-mix(in srgb, var(--destructive) 8%, transparent)",
+              color: "var(--destructive)",
+              border: "1px solid color-mix(in srgb, var(--destructive) 20%, transparent)",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <ShieldAlert size={15} strokeWidth={1.5} />
+            </div>
+            <div
+              className="flex-1 min-w-0 flex items-center justify-between overflow-hidden"
+              style={{
+                opacity: collapsed ? 0 : 1,
+                maxWidth: collapsed ? 0 : 160,
+                marginLeft: collapsed ? 0 : 12,
+                pointerEvents: collapsed ? "none" : "auto",
+                transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), margin-left 0.22s ease",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}>Force Break</span>
+              <kbd style={{ fontFamily: "var(--font-mono)", fontSize: "0.56rem", color: "var(--destructive)", background: "color-mix(in srgb, var(--destructive) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--destructive) 25%, transparent)", borderRadius: 4, padding: "1px 4px" }}>B</kbd>
+            </div>
+          </button>
 
-        {/* Collapse toggle + Session */}
-        <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${theme.border}` }}>
+          {/* Mini HUD Toggle Button */}
+          <button
+            onClick={() => setMiniHudOpen(prev => !prev)}
+            title={collapsed ? "Floating Mini-HUD (H)" : undefined}
+            className="flex items-center w-full rounded-xl transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+            style={{
+              height: 38,
+              padding: "0 10px",
+              justifyContent: "flex-start",
+              background: miniHudOpen ? "var(--primary-alpha-20)" : "var(--muted)",
+              color: miniHudOpen ? "var(--primary)" : "var(--foreground)",
+              border: `1px solid ${miniHudOpen ? "var(--primary)" : "var(--border)"}`,
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Sparkles size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+            </div>
+            <div
+              className="flex-1 min-w-0 flex items-center justify-between overflow-hidden"
+              style={{
+                opacity: collapsed ? 0 : 1,
+                maxWidth: collapsed ? 0 : 160,
+                marginLeft: collapsed ? 0 : 12,
+                pointerEvents: collapsed ? "none" : "auto",
+                transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), margin-left 0.22s ease",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}>Companion HUD</span>
+              <kbd style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.56rem", color: "var(--primary)", background: "var(--primary-alpha-12)", border: "1px solid var(--primary-alpha-20)", borderRadius: 4, padding: "1px 4px" }}>H</kbd>
+            </div>
+          </button>
+
+          {/* Commands */}
+          <button
+            onClick={() => setCmdOpen(true)}
+            title={collapsed ? "Command Palette (Ctrl+K)" : undefined}
+            className="flex items-center w-full rounded-xl transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+            style={{
+              height: 38,
+              padding: "0 10px",
+              justifyContent: "flex-start",
+              background: "color-mix(in srgb, var(--primary) 10%, transparent)",
+              color: "var(--primary)",
+              border: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Search size={14} />
+            </div>
+            <div
+              className="flex-1 min-w-0 flex items-center justify-between overflow-hidden"
+              style={{
+                opacity: collapsed ? 0 : 1,
+                maxWidth: collapsed ? 0 : 160,
+                marginLeft: collapsed ? 0 : 12,
+                pointerEvents: collapsed ? "none" : "auto",
+                transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), margin-left 0.22s ease",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}>Commands</span>
+              <kbd style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.54rem", background: "color-mix(in srgb, var(--primary) 16%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 28%, transparent)", borderRadius: 4, padding: "1px 4px" }}>⌘K</kbd>
+            </div>
+          </button>
+
+          {/* Shortcuts Cheat Sheet */}
+          <button
+            onClick={() => setGuideOpen(true)}
+            title={collapsed ? "Shortcuts (?)" : undefined}
+            className="flex items-center w-full rounded-xl transition-all duration-150 hover:opacity-90"
+            style={{
+              height: 32,
+              padding: "0 10px",
+              justifyContent: "flex-start",
+              background: "transparent",
+              color: theme.mutedFg,
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Keyboard size={14} />
+            </div>
+            <div
+              className="flex-1 min-w-0 overflow-hidden"
+              style={{
+                opacity: collapsed ? 0 : 1,
+                maxWidth: collapsed ? 0 : 160,
+                marginLeft: collapsed ? 0 : 12,
+                pointerEvents: collapsed ? "none" : "auto",
+                transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), margin-left 0.22s ease",
+              }}
+            >
+              <span style={{ fontSize: "0.74rem", whiteSpace: "nowrap" }}>Shortcuts Sheet</span>
+            </div>
+          </button>
+        </div>
+
+        {/* Collapse Toggle & Session Section (Fixed Left Icon Baseline) */}
+        <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="flex items-center rounded-lg transition-all duration-200 hover:opacity-80 w-full"
-            style={{ gap: collapsed ? 0 : 8, justifyContent: collapsed ? "center" : "flex-start", padding: collapsed ? "8px 0" : "6px 8px", background: "transparent", border: "none", cursor: "pointer", marginBottom: collapsed ? 0 : 4 }}
-            title={collapsed ? "Expand ([)" : "Collapse ([)"}
+            className="flex items-center w-full rounded-xl transition-all duration-150 hover:opacity-80 active:scale-[0.98]"
+            style={{
+              height: 36,
+              padding: "0 10px",
+              justifyContent: "flex-start",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: theme.mutedFg,
+            }}
+            title={collapsed ? "Expand Navigation ([)" : "Collapse Navigation ([)"}
           >
-            {collapsed ? <PanelLeft size={14} style={{ color: theme.mutedFg }} /> : <PanelLeftClose size={14} style={{ color: theme.mutedFg }} />}
-            {!collapsed && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: theme.mutedFg, letterSpacing: "0.04em" }}>Collapse</span>}
-          </button>
-          {!collapsed && (
-            <div style={{ paddingLeft: 8 }}>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: theme.mutedFg, letterSpacing: "0.06em", textTransform: "uppercase" }}>Session #142</div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.6rem", color: theme.primary, marginTop: 2 }}>Today · {fmtElapsed(sessionElapsed)}</div>
+            <div style={{ width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {collapsed ? <PanelLeft size={16} style={{ color: theme.primary }} /> : <PanelLeftClose size={16} style={{ color: theme.mutedFg }} />}
             </div>
-          )}
+            <div
+              className="flex-1 min-w-0 flex items-center justify-between overflow-hidden"
+              style={{
+                opacity: collapsed ? 0 : 1,
+                maxWidth: collapsed ? 0 : 160,
+                marginLeft: collapsed ? 0 : 12,
+                pointerEvents: collapsed ? "none" : "auto",
+                transition: "opacity 0.18s ease, max-width 0.22s cubic-bezier(0.4,0,0.2,1), margin-left 0.22s ease",
+              }}
+            >
+              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.62rem", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>Collapse Sidebar</span>
+              <kbd style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.54rem", border: `1px solid ${theme.border}`, borderRadius: 4, padding: "1px 4px" }}>[</kbd>
+            </div>
+          </button>
+
+          <div
+            style={{
+              maxHeight: collapsed ? 0 : 44,
+              opacity: collapsed ? 0 : 1,
+              overflow: "hidden",
+              padding: "0 10px",
+              transition: "max-height 0.22s cubic-bezier(0.4,0,0.2,1), opacity 0.18s ease",
+            }}
+          >
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.56rem", color: theme.mutedFg, letterSpacing: "0.06em", textTransform: "uppercase" }}>Session #142</div>
+            <SessionTimer start={sessionStart} color={theme.primary} />
+          </div>
         </div>
       </aside>
 
       {/* ── Main ─────────────────────────────────────────────────────────── */}
-      <main className="flex-1 min-w-0 overflow-hidden relative">
-        {screen === "dashboard" && (
-          <Dashboard
-            battery={engine.battery} mode={engine.mode}
-            timerSeconds={engine.timerSeconds} timerMax={engine.timerMax}
-            activeApp={engine.activeApp} classifiedApp={engine.classifiedApp}
-            autopilot={engine.autopilot} energy={engine.energy} friction={engine.friction}
-            sleep={engine.sleep} hydration={engine.hydration} fatigue={engine.fatigue}
-            adaptedWorkSecs={engine.adaptedWorkSecs} adaptedRestSecs={engine.adaptedRestSecs}
-            onSetMode={engine.setMode} onSetEnergy={engine.setEnergy} onSetFriction={engine.setFriction}
-            onSetSleep={engine.setSleep} onSetHydration={engine.setHydration}
-            onOverrideClassify={engine.overrideClassify}
-          />
-        )}
-        {screen === "analytics" && <Analytics appTally={appTally} />}
-        {screen === "zen"       && <ZenSpace />}
-        {screen === "preferences" && (
-          <Preferences
-            autopilot={engine.autopilot} workKw={engine.workKw} rechargeKw={engine.rechargeKw}
-            fatigue={engine.fatigue} adaptedWorkSecs={engine.adaptedWorkSecs}
-            activeTheme={activeTheme}
-            onSetAutopilot={engine.setAutopilot} onSetWorkKw={engine.setWorkKw}
-            onSetRechargeKw={engine.setRechargeKw} onSetTheme={handleSetTheme}
-          />
-        )}
+      <main className="flex-1 min-w-0 overflow-hidden relative custom-scrollbar ambient-mesh-bg">
+        <ConstellationBg color={theme.primary} density={28} />
+        <ErrorBoundary>
+          <motion.div key={screen} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="h-full">
+            <React.Suspense fallback={<div className="flex items-center justify-center h-full text-muted opacity-70">Loading...</div>}>
+              {screen === "dashboard" && (
+                <Dashboard />
+              )}
+              {screen === "analytics" && <Analytics />}
+              {screen === "zen"       && <ZenSpace eyeCare={eyeCare} onSetEyeCare={setEyeCare} />}
+              {screen === "achievements" && <Achievements />}
+              {screen === "preferences" && (
+                <Preferences
+                  activeTheme={activeTheme}
+                  eyeCare={eyeCare} onSetEyeCare={setEyeCare}
+                  autoSwap={autoSwap} onSetAutoSwap={setAutoSwap}
+                  onSetTheme={handleSetTheme}
+                />
+              )}
+            </React.Suspense>
+          </motion.div>
+        </ErrorBoundary>
       </main>
 
       {showBreak && (
         <BreakOverlay
           onDismiss={handleBreakDismiss}
           isRestMode={mode === "rest"}
-          restSecondsRemaining={mode === "rest" ? engine.timerSeconds : undefined}
-          restSecondsMax={mode === "rest" ? engine.adaptedRestSecs : undefined}
         />
       )}
+
+      {/* ── Command Palette & Shortcut Guide Modals ───────────────────────── */}
+      <CommandPalette
+        isOpen={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        onNavigate={(sc) => setScreen(sc)}
+        onToggleEyeCare={() => setEyeCare(prev => !prev)}
+        eyeCareEnabled={eyeCare}
+        onTriggerBreak={triggerBreak}
+        onSetTheme={handleSetTheme}
+        activeTheme={activeTheme}
+      />
+
+      <ShortcutGuide
+        isOpen={guideOpen}
+        onClose={() => setGuideOpen(false)}
+      />
+
+      {/* Floating Mini HUD */}
+      <CompanionMiniHud
+        isOpen={miniHudOpen}
+        onToggle={() => setMiniHudOpen(false)}
+        onExpand={() => setMiniHudOpen(false)}
+      />
     </div>
   );
 }

@@ -1,0 +1,28 @@
+/* theme.css */
+:root {
+  --font-sans: 'Nunito', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-xxl: 3rem;
+  
+  --radii-sm: 0.5rem;
+  --radii-md: 0.75rem;
+  --radii-lg: 1.25rem;
+  --radii-xl: 1.5rem;
+  --radii-full: 9999px;
+  
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.02);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.05);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
+  --shadow-dark-md: 0 4px 12px rgba(0,0,0,0.2);
+  --shadow-dark-lg: 0 8px 24px rgba(0,0,0,0.4);
+}
