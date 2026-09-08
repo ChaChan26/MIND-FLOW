@@ -314,6 +314,84 @@ namespace MindFlow.Data.Database
             return result?.ToString();
         }
 
+        public async Task LogContextSwitchAsync(string fromProcess, string toProcess, DateTime? timestamp = null)
+        {
+            DateTime ts = timestamp ?? DateTime.UtcNow;
+            await QueueWriteAsync(async conn =>
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    INSERT INTO context_switches (timestamp, from_process, to_process)
+                    VALUES (@ts, @from, @to);
+                ";
+                cmd.Parameters.AddWithValue("@ts", ts.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@from", fromProcess);
+                cmd.Parameters.AddWithValue("@to", toProcess);
+                await cmd.ExecuteNonQueryAsync();
+            });
+        }
+
+        public async Task<int> GetTodayContextSwitchCountAsync()
+        {
+            string today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM context_switches WHERE DATE(timestamp) = @today;";
+            cmd.Parameters.AddWithValue("@today", today);
+            var result = await cmd.ExecuteScalarAsync();
+            return result != null && result != DBNull.Value ? Convert.ToInt32(result) : 0;
+        }
+
+        public async Task<List<HourlyProductivityRecord>> GetTodayHourlyProductivityAsync()
+        {
+            var results = new List<HourlyProductivityRecord>();
+            string today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT 
+                    CAST(strftime('%H', start) AS INTEGER) AS hour_val,
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'work' THEN duration ELSE 0 END) / 60.0, 1) AS work_mins,
+                    ROUND(SUM(CASE WHEN LOWER(mode) IN ('recharge', 'rest') THEN duration ELSE 0 END) / 60.0, 1) AS recharge_mins,
+                    ROUND(SUM(flow_duration) / 60.0, 1) AS flow_mins
+                FROM sessions
+                WHERE DATE(start) = @today
+                GROUP BY hour_val
+                ORDER BY hour_val ASC;
+            ";
+            cmd.Parameters.AddWithValue("@today", today);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new HourlyProductivityRecord
+                {
+                    Hour = reader.GetInt32(0),
+                    WorkMinutes = reader.GetDouble(1),
+                    RechargeMinutes = reader.GetDouble(2),
+                    FlowMinutes = reader.GetDouble(3)
+                });
+            }
+
+            return results;
+        }
+
+        public async Task FlushAsync()
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            await _writeChannel.Writer.WriteAsync(conn =>
+            {
+                tcs.SetResult(true);
+                return Task.CompletedTask;
+            }, _cts.Token);
+            await tcs.Task;
+        }
+
         public void Dispose()
         {
             _cts.Cancel();

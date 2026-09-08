@@ -25,11 +25,11 @@
 | `src/app/App.tsx` | ChaChan26 | React UI root shell, keyboard navigation, theme provider |
 | `src/app/components/*` | ChaChan26 | Dashboard, Analytics, FocusTimer, ZenSpace, Achievements, Preferences, BreakOverlay |
 | `src/app/types/*` | ChaChan26 | Type contracts, design system themes, Recharts definitions |
-| `native/src/MindFlow.Core/*` | ChaChan26 | Native C# domain engine: Cognitive Battery, 3-tier classifier, CRDT, Mode engine |
-| `native/src/MindFlow.Win32/*` | ChaChan26 | Native C# Win32 OS telemetry: WinEvent hooks, GetLastInputInfo, Core Audio COM, EcoQoS |
-| `native/src/MindFlow.Data/*` | ChaChan26 | Native C# SQLite WAL persistence engine with serialized retry queue |
-| `native/src/MindFlow.Desktop/*` | ChaChan26 | Native WPF MVVM desktop UI adhering to Silent Moon design system tokens |
-| `native/tests/*` | ChaChan26 | Native xUnit test suite validating engine math, classification, and CRDTs |
+| `native/src/MindFlow.Core/*` | ChaChan26 | Native C# domain engine: Cognitive Battery, 3-tier classifier, CRDT, Mode engine, Focus sprint timer, Context switch telemetry |
+| `native/src/MindFlow.Win32/*` | ChaChan26 | Native C# Win32 OS telemetry: WinEvent hooks, GetLastInputInfo, Core Audio COM, EcoQoS, Shell_NotifyIcon tray, Autostart manager |
+| `native/src/MindFlow.Data/*` | ChaChan26 | Native C# SQLite WAL persistence engine with serialized retry queue, flush semantics, and time-series aggregation |
+| `native/src/MindFlow.Desktop/*` | ChaChan26 | Native WPF MVVM desktop UI adhering to Silent Moon design system tokens with multi-screen view triggers and tray minimize |
+| `native/tests/*` | ChaChan26 | Native xUnit test suite validating engine math, classification, CRDTs, focus sprint state machine, switching friction, and WAL persistence |
 | `tests/*` | ChaChan26 | Hermetic unit & integration test suites with BaseMindFlowTestCase |
 
 ---

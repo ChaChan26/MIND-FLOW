@@ -44,4 +44,12 @@ namespace MindFlow.Data.Models
         public string FromProcess { get; set; } = string.Empty;
         public string ToProcess { get; set; } = string.Empty;
     }
+
+    public class HourlyProductivityRecord
+    {
+        public int Hour { get; set; }
+        public double WorkMinutes { get; set; }
+        public double RechargeMinutes { get; set; }
+        public double FlowMinutes { get; set; }
+    }
 }

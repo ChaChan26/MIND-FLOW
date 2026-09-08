@@ -14,7 +14,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MindFlow.Core.Battery;
 using MindFlow.Core.Classification;
+using MindFlow.Core.Focus;
 using MindFlow.Core.State;
+using MindFlow.Core.Telemetry;
 using MindFlow.Data.Database;
 using MindFlow.Data.Models;
 using MindFlow.Win32.Audio;
@@ -32,6 +34,8 @@ namespace MindFlow.Desktop.ViewModels
         private readonly WinEventTracker _winTracker;
         private readonly ComAudioMeter _audioMeter;
         private readonly MindFlowDb _db;
+        private readonly ContextSwitchTracker _switchTracker;
+        private readonly FocusTimerEngine _focusTimer;
         private readonly DispatcherTimer _tickTimer;
         private readonly DispatcherTimer _zenTimer;
 
@@ -78,7 +82,29 @@ namespace MindFlow.Desktop.ViewModels
         [ObservableProperty]
         private string _statusMessage = "Tracking active";
 
+        [ObservableProperty]
+        private string _timerFormatted = "25:00";
+
+        [ObservableProperty]
+        private double _timerProgress = 0.0;
+
+        [ObservableProperty]
+        private bool _isTimerRunning = false;
+
+        [ObservableProperty]
+        private string _timerSessionLabel = "Sprint";
+
+        [ObservableProperty]
+        private int _totalContextSwitches = 0;
+
+        [ObservableProperty]
+        private string _switchFrictionText = "Low (Deep Focus)";
+
+        [ObservableProperty]
+        private double _switchRatePerMin = 0.0;
+
         public ObservableCollection<AppUsageRecord> RecentUsage { get; } = new();
+        public ObservableCollection<HourlyProductivityRecord> HourlyTrends { get; } = new();
 
         public MainViewModel()
         {
@@ -89,6 +115,17 @@ namespace MindFlow.Desktop.ViewModels
             _audioMeter = new ComAudioMeter();
             _winTracker = new WinEventTracker();
             _db = new MindFlowDb();
+            _switchTracker = new ContextSwitchTracker();
+            _focusTimer = new FocusTimerEngine();
+
+            _focusTimer.SessionCompleted += OnFocusTimerCompleted;
+            _focusTimer.TickUpdated += (s, e) =>
+            {
+                TimerFormatted = _focusTimer.FormattedTime;
+                TimerProgress = _focusTimer.Progress;
+                IsTimerRunning = _focusTimer.IsRunning;
+                TimerSessionLabel = _focusTimer.IsSprint ? "Sprint" : "Break";
+            };
 
             // 2. Disable Windows 11 EcoQoS Power Throttling
             EcoQosManager.DisableEcoQosForCurrentProcess();
@@ -130,6 +167,12 @@ namespace MindFlow.Desktop.ViewModels
                 BatteryCapacityFormatted = $"{Math.Round(_battery.Capacity)}%";
                 ConsecutiveWorkFormatted = $"{Math.Round(_battery.ConsecutiveWorkMinutes)}m";
 
+                int switchesToday = await _db.GetTodayContextSwitchCountAsync();
+                _switchTracker.Reset(switchesToday);
+                TotalContextSwitches = switchesToday;
+                SwitchFrictionText = _switchTracker.FrictionLevelFormatted;
+                SwitchRatePerMin = Math.Round(_switchTracker.SwitchesPerMinute, 2);
+
                 await RefreshRecentUsageAsync();
             }
             catch (Exception ex)
@@ -140,8 +183,20 @@ namespace MindFlow.Desktop.ViewModels
 
         private void OnActiveWindowChanged(object? sender, WindowDetails details)
         {
+            string oldProc = ActiveProcessName;
             ActiveProcessName = details.ProcessName;
             ActiveWindowTitle = string.IsNullOrWhiteSpace(details.Title) ? details.ProcessName : details.Title;
+
+            if (!string.IsNullOrWhiteSpace(oldProc) && oldProc != "Desktop" && oldProc != "Unknown")
+            {
+                if (_switchTracker.RecordSwitch(oldProc, ActiveProcessName))
+                {
+                    _ = _db.LogContextSwitchAsync(oldProc, ActiveProcessName, DateTime.UtcNow);
+                    TotalContextSwitches = _switchTracker.TotalSwitchesToday;
+                    SwitchFrictionText = _switchTracker.FrictionLevelFormatted;
+                    SwitchRatePerMin = Math.Round(_switchTracker.SwitchesPerMinute, 2);
+                }
+            }
         }
 
         private void OnModeEngineChanged(object? sender, ModeChangedEventArgs e)
@@ -167,7 +222,10 @@ namespace MindFlow.Desktop.ViewModels
 
             double elapsedMinutes = deltaSeconds / 60.0;
 
-            // 1. Read Hardware Idle
+            // 1. Advance Focus Timer Engine
+            _focusTimer.ProcessTick(deltaSeconds);
+
+            // 2. Read Hardware Idle
             double rawIdle = IdleTracker.GetIdleSeconds();
             bool audioPlaying = _audioMeter.IsAudioPlaying(threshold: 0.015f);
             IsAudioActive = audioPlaying;
@@ -176,27 +234,27 @@ namespace MindFlow.Desktop.ViewModels
             double effectiveIdle = audioPlaying ? 0.0 : rawIdle;
             IdleSeconds = Math.Round(effectiveIdle, 1);
 
-            // 2. Classify Current Active Window
+            // 3. Classify Current Active Window
             var classifiedMode = _classifier.Classify(ActiveProcessName, ActiveWindowTitle);
 
-            // 3. Advance Mode State Engine
+            // 4. Advance Mode State Engine
             _modeEngine.EvaluateTick(classifiedMode, effectiveIdle, deltaSeconds);
             CurrentModeName = _modeEngine.CurrentMode.ToString();
             IsFlowActive = _modeEngine.IsCurrentFlowSession;
 
-            // 4. Advance Cognitive Battery Math
-            var (cap, workMins) = _battery.ProcessTick(_modeEngine.CurrentMode, elapsedMinutes);
+            // 5. Advance Cognitive Battery Math (with context switch penalty)
+            var (cap, workMins) = _battery.ProcessTick(_modeEngine.CurrentMode, elapsedMinutes, _switchTracker.SwitchesPerMinute);
             BatteryCapacity = Math.Round(cap, 1);
             BatteryCapacityFormatted = $"{Math.Round(cap)}%";
             ConsecutiveWorkFormatted = $"{Math.Round(workMins)}m";
 
-            // 5. Aggregate App Usage
+            // 6. Aggregate App Usage
             if (!string.IsNullOrWhiteSpace(ActiveProcessName) && ActiveProcessName != "Unknown")
             {
                 _ = _db.LogAppUsageAsync(ActiveProcessName, ActiveWindowTitle, deltaSeconds);
             }
 
-            // 6. Periodic Battery Flush to SQLite (every 30 ticks = 30s)
+            // 7. Periodic Battery Flush to SQLite (every 30 ticks = 30s)
             _dbFlushCounter++;
             if (_dbFlushCounter >= 30)
             {
@@ -215,6 +273,13 @@ namespace MindFlow.Desktop.ViewModels
                 foreach (var item in usage)
                 {
                     RecentUsage.Add(item);
+                }
+
+                var hourly = await _db.GetTodayHourlyProductivityAsync();
+                HourlyTrends.Clear();
+                foreach (var item in hourly)
+                {
+                    HourlyTrends.Add(item);
                 }
             }
             catch { }
@@ -240,6 +305,72 @@ namespace MindFlow.Desktop.ViewModels
                 BreathingPhaseText = "Exhale smoothly...";
                 BreathingScale = 1.35 - (0.35 * ((exhaleStep + 1) / 8.0));
             }
+        }
+
+        private void OnFocusTimerCompleted(object? sender, FocusTimerCompletedEventArgs e)
+        {
+            try
+            {
+                System.Media.SystemSounds.Asterisk.Play();
+            }
+            catch { }
+
+            if (e.SessionType == FocusSessionType.Sprint)
+            {
+                StatusMessage = $"Sprint finished ({e.TotalMinutes}m). Take a restorative break!";
+                TakeBreak();
+            }
+            else
+            {
+                StatusMessage = "Break completed. Ready for next focus sprint!";
+                SetMode("Work");
+            }
+        }
+
+        [RelayCommand]
+        public void StartSprint(string? minutesStr)
+        {
+            int mins = 25;
+            if (int.TryParse(minutesStr, out int val) && val > 0) mins = val;
+
+            _focusTimer.StartSprint(mins);
+            _modeEngine.SetManualMode(ActivityMode.Work, overrideDurationSeconds: mins * 60);
+            CurrentModeName = "Work";
+            StatusMessage = $"Focus sprint started ({mins}m)";
+        }
+
+        [RelayCommand]
+        public void StartBreakTimer(string? minutesStr)
+        {
+            int mins = 5;
+            if (int.TryParse(minutesStr, out int val) && val > 0) mins = val;
+
+            _focusTimer.StartBreak(mins);
+            _modeEngine.SetManualMode(ActivityMode.Rest, overrideDurationSeconds: mins * 60);
+            CurrentModeName = "Rest";
+            StatusMessage = $"Rest break started ({mins}m)";
+        }
+
+        [RelayCommand]
+        public void ToggleTimer()
+        {
+            if (_focusTimer.IsRunning)
+            {
+                _focusTimer.Pause();
+                StatusMessage = "Focus timer paused";
+            }
+            else
+            {
+                _focusTimer.Resume();
+                StatusMessage = "Focus timer resumed";
+            }
+        }
+
+        [RelayCommand]
+        public void ResetTimer()
+        {
+            _focusTimer.Reset();
+            StatusMessage = "Focus timer reset";
         }
 
         [RelayCommand]
