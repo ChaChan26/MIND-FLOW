@@ -52,4 +52,15 @@ namespace MindFlow.Data.Models
         public double RechargeMinutes { get; set; }
         public double FlowMinutes { get; set; }
     }
+
+    public class FocusSessionRecord
+    {
+        public long Id { get; set; }
+        public string Timestamp { get; set; } = string.Empty;
+        public int DurationMinutes { get; set; }
+        public string TaskLabel { get; set; } = "Focus Sprint";
+        public int Completed { get; set; } = 1;
+        public double StaminaStart { get; set; } = 100.0;
+        public double StaminaEnd { get; set; } = 100.0;
+    }
 }

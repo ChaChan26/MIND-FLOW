@@ -129,6 +129,37 @@ namespace MindFlow.Data.Database
                     created_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS focus_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    duration_minutes INTEGER,
+                    task_label TEXT,
+                    completed INTEGER,
+                    stamina_start REAL,
+                    stamina_end REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_focus_sessions_ts ON focus_sessions(timestamp);
+
+                CREATE TABLE IF NOT EXISTS gratitude_journal (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT UNIQUE,
+                    entry_1 TEXT,
+                    entry_2 TEXT,
+                    entry_3 TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS calendar_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT,
+                    start_time TEXT,
+                    end_time TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS hydration (date TEXT PRIMARY KEY, cups REAL);
                 CREATE TABLE IF NOT EXISTS steps (date TEXT PRIMARY KEY, count INTEGER);
                 CREATE TABLE IF NOT EXISTS sleep (date TEXT PRIMARY KEY, hours REAL, quality INTEGER);
@@ -379,6 +410,74 @@ namespace MindFlow.Data.Database
             }
 
             return results;
+        }
+
+        public async Task LogFocusSessionAsync(int durationMinutes, string taskLabel = "Focus Sprint", bool completed = true, double staminaStart = 100.0, double staminaEnd = 100.0, DateTime? timestamp = null)
+        {
+            DateTime ts = timestamp ?? DateTime.UtcNow;
+            await QueueWriteAsync(async conn =>
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    INSERT INTO focus_sessions (timestamp, duration_minutes, task_label, completed, stamina_start, stamina_end)
+                    VALUES (@ts, @dur, @task, @comp, @start, @end);
+                ";
+                cmd.Parameters.AddWithValue("@ts", ts.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@dur", durationMinutes);
+                cmd.Parameters.AddWithValue("@task", taskLabel);
+                cmd.Parameters.AddWithValue("@comp", completed ? 1 : 0);
+                cmd.Parameters.AddWithValue("@start", staminaStart);
+                cmd.Parameters.AddWithValue("@end", staminaEnd);
+                await cmd.ExecuteNonQueryAsync();
+            });
+        }
+
+        public async Task<List<FocusSessionRecord>> GetTodayFocusSessionsAsync()
+        {
+            var results = new List<FocusSessionRecord>();
+            string today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT id, timestamp, duration_minutes, task_label, completed, stamina_start, stamina_end
+                FROM focus_sessions
+                WHERE DATE(timestamp) = @today
+                ORDER BY timestamp DESC;
+            ";
+            cmd.Parameters.AddWithValue("@today", today);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new FocusSessionRecord
+                {
+                    Id = reader.GetInt64(0),
+                    Timestamp = reader.GetString(1),
+                    DurationMinutes = reader.GetInt32(2),
+                    TaskLabel = reader.IsDBNull(3) ? "Focus Sprint" : reader.GetString(3),
+                    Completed = reader.GetInt32(4),
+                    StaminaStart = reader.IsDBNull(5) ? 100.0 : reader.GetDouble(5),
+                    StaminaEnd = reader.IsDBNull(6) ? 100.0 : reader.GetDouble(6)
+                });
+            }
+
+            return results;
+        }
+
+        public async Task<int> GetTodayFocusMinutesAsync()
+        {
+            string today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE DATE(timestamp) = @today AND completed = 1;";
+            cmd.Parameters.AddWithValue("@today", today);
+            var result = await cmd.ExecuteScalarAsync();
+            return result != null && result != DBNull.Value ? Convert.ToInt32(result) : 0;
         }
 
         public async Task FlushAsync()

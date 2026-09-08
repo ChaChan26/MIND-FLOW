@@ -106,5 +106,24 @@ namespace MindFlow.Tests
             Assert.Equal(5.0, record.RechargeMinutes, precision: 1);
             Assert.Equal(25.0, record.FlowMinutes, precision: 1);
         }
+
+        [Fact]
+        public async Task Database_FocusSession_LogsAndRetrieves()
+        {
+            int initialMinutes = await _db.GetTodayFocusMinutesAsync();
+            Assert.Equal(0, initialMinutes);
+
+            await _db.LogFocusSessionAsync(25, "Deep Work", true, 95.0, 75.0);
+            await _db.LogFocusSessionAsync(50, "Architecture Planning", true, 80.0, 50.0);
+            await _db.FlushAsync();
+
+            var sessions = await _db.GetTodayFocusSessionsAsync();
+            Assert.Equal(2, sessions.Count);
+            Assert.Equal("Architecture Planning", sessions[0].TaskLabel);
+            Assert.Equal(50, sessions[0].DurationMinutes);
+
+            int totalMinutes = await _db.GetTodayFocusMinutesAsync();
+            Assert.Equal(75, totalMinutes);
+        }
     }
 }

@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using MindFlow.Desktop.ViewModels;
+using MindFlow.Win32.Hotkeys;
 using MindFlow.Win32.Power;
 using MindFlow.Win32.Tray;
 
@@ -19,6 +20,7 @@ namespace MindFlow.Desktop
     public partial class MainWindow : Window
     {
         private TrayIconManager? _trayManager;
+        private HotkeyManager? _hotkeyManager;
         private bool _isExplicitExit = false;
         private bool _firstMinimizeNotice = true;
 
@@ -39,6 +41,42 @@ namespace MindFlow.Desktop
             _trayManager.TrayClicked += OnTrayIconClicked;
             _trayManager.TrayRightClicked += OnTrayIconRightClicked;
 
+            _hotkeyManager = new HotkeyManager(hwnd);
+            // Win + Alt + F: Toggle Focus Sprint (Start / Pause / Resume)
+            _hotkeyManager.Register(KeyModifiers.Windows | KeyModifiers.Alt, 0x46, () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    (DataContext as MainViewModel)?.ToggleTimer();
+                });
+            });
+
+            // Win + Alt + Z: Toggle Zen Sanctuary
+            _hotkeyManager.Register(KeyModifiers.Windows | KeyModifiers.Alt, 0x5A, () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    RestoreAndActivate();
+                    (DataContext as MainViewModel)?.Navigate("zen");
+                });
+            });
+
+            // Win + Alt + D: Show Focus HUD Dashboard
+            _hotkeyManager.Register(KeyModifiers.Windows | KeyModifiers.Alt, 0x44, () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    RestoreAndActivate();
+                    (DataContext as MainViewModel)?.Navigate("dashboard");
+                });
+            });
+
+            // Win + Alt + Escape: Hide to Notification Tray
+            _hotkeyManager.Register(KeyModifiers.Windows | KeyModifiers.Alt, 0x1B, () =>
+            {
+                Dispatcher.Invoke(Hide);
+            });
+
             if (DataContext is MainViewModel vm)
             {
                 vm.PropertyChanged += (s, args) =>
@@ -58,7 +96,16 @@ namespace MindFlow.Desktop
         {
             if (_trayManager != null)
             {
-                return _trayManager.ProcessWindowMessage(hwnd, msg, wParam, lParam, ref handled);
+                var res = _trayManager.ProcessWindowMessage(hwnd, msg, wParam, lParam, ref handled);
+                if (handled) return res;
+            }
+            if (_hotkeyManager != null)
+            {
+                if (_hotkeyManager.ProcessMessage(msg, wParam, lParam))
+                {
+                    handled = true;
+                    return IntPtr.Zero;
+                }
             }
             return IntPtr.Zero;
         }
@@ -88,7 +135,7 @@ namespace MindFlow.Desktop
         {
             var menu = new ContextMenu();
 
-            var openItem = new MenuItem { Header = "✦ Open Focus HUD" };
+            var openItem = new MenuItem { Header = "✦ Open Focus HUD (Win+Alt+D)" };
             openItem.Click += (s, e) =>
             {
                 RestoreAndActivate();
@@ -96,7 +143,7 @@ namespace MindFlow.Desktop
             };
             menu.Items.Add(openItem);
 
-            var zenItem = new MenuItem { Header = "🧘 Zen Space (4-7-8)" };
+            var zenItem = new MenuItem { Header = "🧘 Zen Sanctuary (Win+Alt+Z)" };
             zenItem.Click += (s, e) =>
             {
                 RestoreAndActivate();
@@ -104,7 +151,7 @@ namespace MindFlow.Desktop
             };
             menu.Items.Add(zenItem);
 
-            var analyticsItem = new MenuItem { Header = "📊 App Usage" };
+            var analyticsItem = new MenuItem { Header = "📊 App Usage Analytics" };
             analyticsItem.Click += (s, e) =>
             {
                 RestoreAndActivate();
@@ -114,9 +161,9 @@ namespace MindFlow.Desktop
 
             menu.Items.Add(new Separator());
 
-            var workItem = new MenuItem { Header = "⚡ Extend Sprint (+30m)" };
-            workItem.Click += (s, e) => (DataContext as MainViewModel)?.ExtendSprint("30");
-            menu.Items.Add(workItem);
+            var sprintItem = new MenuItem { Header = "⚡ Toggle Focus Sprint (Win+Alt+F)" };
+            sprintItem.Click += (s, e) => (DataContext as MainViewModel)?.ToggleTimer();
+            menu.Items.Add(sprintItem);
 
             var breakItem = new MenuItem { Header = "☕ Rest Break" };
             breakItem.Click += (s, e) => (DataContext as MainViewModel)?.TakeBreak();
@@ -160,11 +207,12 @@ namespace MindFlow.Desktop
                 if (_firstMinimizeNotice)
                 {
                     _firstMinimizeNotice = false;
-                    _trayManager?.ShowNotification("MIND-FLOW Active", "Running in the system tray to monitor cognitive stamina.");
+                    _trayManager?.ShowNotification("MIND-FLOW Active", "Running in the system tray. Use Win+Alt+F to toggle focus sprint, Win+Alt+D to open.");
                 }
                 return;
             }
 
+            _hotkeyManager?.Dispose();
             _trayManager?.Dispose();
             base.OnClosing(e);
 

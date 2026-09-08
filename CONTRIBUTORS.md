@@ -26,10 +26,11 @@
 | `src/app/components/*` | ChaChan26 | Dashboard, Analytics, FocusTimer, ZenSpace, Achievements, Preferences, BreakOverlay |
 | `src/app/types/*` | ChaChan26 | Type contracts, design system themes, Recharts definitions |
 | `native/src/MindFlow.Core/*` | ChaChan26 | Native C# domain engine: Cognitive Battery, 3-tier classifier, CRDT, Mode engine, Focus sprint timer, Context switch telemetry |
-| `native/src/MindFlow.Win32/*` | ChaChan26 | Native C# Win32 OS telemetry: WinEvent hooks, GetLastInputInfo, Core Audio COM, EcoQoS, Shell_NotifyIcon tray, Autostart manager |
-| `native/src/MindFlow.Data/*` | ChaChan26 | Native C# SQLite WAL persistence engine with serialized retry queue, flush semantics, and time-series aggregation |
-| `native/src/MindFlow.Desktop/*` | ChaChan26 | Native WPF MVVM desktop UI adhering to Silent Moon design system tokens with multi-screen view triggers and tray minimize |
-| `native/tests/*` | ChaChan26 | Native xUnit test suite validating engine math, classification, CRDTs, focus sprint state machine, switching friction, and WAL persistence |
+| `native/src/MindFlow.Win32/*` | ChaChan26 | Native C# Win32 OS telemetry: WinEvent hooks, GetLastInputInfo, Core Audio COM, EcoQoS, Shell_NotifyIcon tray, Autostart manager, Win32 global hotkeys |
+| `native/src/MindFlow.Data/*` | ChaChan26 | Native C# SQLite WAL persistence engine with serialized retry queue, flush semantics, time-series aggregation, and full schema parity |
+| `native/src/MindFlow.Desktop/*` | ChaChan26 | Native WPF MVVM desktop UI adhering to Silent Moon design system tokens with multi-screen view triggers, tray minimize, and hotkey listeners |
+| `native/installer/*` | ChaChan26 | Native Windows Inno Setup installer script and portable distribution packager |
+| `native/tests/*` | ChaChan26 | Native xUnit test suite (29 tests) validating engine math, classification, CRDTs, focus sprint state machine, switching friction, hotkeys, and WAL persistence |
 | `tests/*` | ChaChan26 | Hermetic unit & integration test suites with BaseMindFlowTestCase |
 
 ---

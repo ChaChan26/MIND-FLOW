@@ -318,6 +318,7 @@ namespace MindFlow.Desktop.ViewModels
             if (e.SessionType == FocusSessionType.Sprint)
             {
                 StatusMessage = $"Sprint finished ({e.TotalMinutes}m). Take a restorative break!";
+                _ = _db.LogFocusSessionAsync(e.TotalMinutes, "Focus Sprint", true, _battery.Capacity, Math.Min(100.0, _battery.Capacity + 10.0));
                 TakeBreak();
             }
             else
@@ -359,10 +360,14 @@ namespace MindFlow.Desktop.ViewModels
                 _focusTimer.Pause();
                 StatusMessage = "Focus timer paused";
             }
-            else
+            else if (_focusTimer.State == FocusTimerState.Paused)
             {
                 _focusTimer.Resume();
                 StatusMessage = "Focus timer resumed";
+            }
+            else
+            {
+                StartSprint("25");
             }
         }
 
