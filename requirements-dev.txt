@@ -1,0 +1,4 @@
+﻿# Development and Build Dependencies for MIND-FLOW
+-r requirements.txt
+pytest==9.1.1
+pyinstaller==6.20.0
