@@ -11,6 +11,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace MindFlow.Win32.Hooks
 {
@@ -21,6 +22,7 @@ namespace MindFlow.Win32.Hooks
         private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
         private const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
         private const uint GA_ROOT = 2;
+        private const uint WM_QUIT = 0x0012;
 
         private delegate void WinEventDelegate(
             IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild,
@@ -42,6 +44,12 @@ namespace MindFlow.Win32.Hooks
 
         [DllImport("user32.dll")]
         private static extern IntPtr DispatchMessage([In] ref MSG lpmsg);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostThreadMessage(uint idThread, uint msg, UIntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
 
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
@@ -77,6 +85,7 @@ namespace MindFlow.Win32.Hooks
         }
 
         private Thread? _staThread;
+        private uint _staThreadId;
         private WinEventDelegate? _winEventProc;
         private IntPtr _hookForeground = IntPtr.Zero;
         private IntPtr _hookNameChange = IntPtr.Zero;
@@ -103,6 +112,7 @@ namespace MindFlow.Win32.Hooks
 
         private void RunMessagePump()
         {
+            _staThreadId = GetCurrentThreadId();
             _winEventProc = new WinEventDelegate(OnWinEventCallback);
 
             _hookForeground = SetWinEventHook(
@@ -117,8 +127,10 @@ namespace MindFlow.Win32.Hooks
 
             _startedEvent.Set();
 
-            while (!_cts.IsCancellationRequested && GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+            while (!_cts.IsCancellationRequested)
             {
+                int bRet = GetMessage(out var msg, IntPtr.Zero, 0, 0);
+                if (bRet <= 0) break; // 0 = WM_QUIT, -1 = error
                 TranslateMessage(ref msg);
                 DispatchMessage(ref msg);
             }
@@ -142,7 +154,21 @@ namespace MindFlow.Win32.Hooks
                 if (details != null && (CurrentWindow == null || CurrentWindow.Hwnd != details.Hwnd || CurrentWindow.Title != details.Title))
                 {
                     CurrentWindow = details;
-                    ActiveWindowChanged?.Invoke(this, details);
+                    var handler = ActiveWindowChanged;
+                    if (handler != null)
+                    {
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                handler.Invoke(this, details);
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"Error invoking ActiveWindowChanged handler: {ex.Message}");
+                            }
+                        });
+                    }
                 }
             }
             catch
@@ -223,6 +249,16 @@ namespace MindFlow.Win32.Hooks
         public void Dispose()
         {
             _cts.Cancel();
+            if (_staThreadId != 0)
+            {
+                PostThreadMessage(_staThreadId, WM_QUIT, UIntPtr.Zero, IntPtr.Zero);
+            }
+
+            if (_staThread != null && _staThread.IsAlive)
+            {
+                _staThread.Join(2000);
+            }
+
             _startedEvent.Dispose();
         }
     }

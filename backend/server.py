@@ -19,6 +19,8 @@ from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request, send_from_directory, make_response, redirect
+import logging
+logger = logging.getLogger('server')
 
 try:
     import psutil
@@ -386,7 +388,7 @@ def get_status():
         today_bypasses=today_bypasses,
         high_stress_alert=high_stress_alert,
         latest_mood=latest_mood,
-        current_energy=current_energy,
+        current_energy=battery_cap,
         cur_mode=cur_mode
     )
 
@@ -744,12 +746,10 @@ def manage_reflections():
 def get_analytics():
     global _analytics_cache, _analytics_cache_date
     # Parse range and week offset
-    range_val = request.args.get("range", "weekly")
-    week_offset = 0
-    try:
-        week_offset = int(request.args.get("week_offset", 0))
-    except (ValueError, TypeError):
-        pass
+    week_offset = max(0, min(520, int(request.args.get('week_offset', 0))))
+    range_val = request.args.get('range', 'weekly')
+    if range_val not in {'weekly', 'monthly', 'quarterly'}:
+        range_val = 'weekly'
         
     from datetime import date, timedelta, datetime
     today = date.today()
@@ -1839,7 +1839,8 @@ def sync_calendar():
                 import urllib.request
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req, timeout=5) as response:
-                    ical_data = response.read().decode('utf-8', errors='ignore')
+                    MAX_ICAL_BYTES = 2 * 1024 * 1024
+                    ical_data = response.read(MAX_ICAL_BYTES).decode('utf-8', errors='ignore')
                     
                 events = []
                 matches = re.findall(r"BEGIN:VEVENT.*?END:VEVENT", ical_data, re.DOTALL)
@@ -1888,11 +1889,11 @@ def sync_calendar():
 @require_api_token
 def log_focus_session_endpoint():
     data = request.get_json(force=True, silent=True) or {}
-    duration = data.get("duration_minutes", 25)
-    task_label = data.get("task_label", "")
-    completed = data.get("completed", 1)
-    stamina_start = data.get("stamina_start", 100.0)
-    stamina_end = data.get("stamina_end", 100.0)
+    duration = max(1, min(720, int(data.get("duration_minutes", 25))))
+    task_label = str(data.get("task_label", "")).strip()[:200]
+    completed = 1 if data.get("completed", 1) else 0
+    stamina_start = max(0.0, min(100.0, float(data.get("stamina_start", 100.0))))
+    stamina_end = max(0.0, min(100.0, float(data.get("stamina_end", 100.0))))
 
     db.log_focus_session(
         duration_minutes=duration,

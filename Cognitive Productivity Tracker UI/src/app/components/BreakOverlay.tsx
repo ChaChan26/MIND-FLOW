@@ -78,10 +78,10 @@ export function BreakOverlay({ onDismiss, isRestMode }: Props) {
 
   // Auto-dismiss when rest timer completes
   useEffect(() => {
-    if (isRestMode && restSecondsRemaining === 0) {
+    if (isRestMode && restSecondsMax > 0 && restSecondsRemaining === 0) {
       onDismiss();
     }
-  }, [isRestMode, restSecondsRemaining, onDismiss]);
+  }, [isRestMode, restSecondsMax, restSecondsRemaining, onDismiss]);
 
   return (
     <div

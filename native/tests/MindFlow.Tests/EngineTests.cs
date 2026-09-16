@@ -105,6 +105,21 @@ namespace MindFlow.Tests
         }
 
         [Fact]
+        public void ModeEngine_ManualOverride_PreemptsIdleTimeout()
+        {
+            var engine = new ModeEngine(ActivityMode.Work)
+            {
+                IdleTimeoutSeconds = 60.0
+            };
+            engine.SetManualMode(ActivityMode.Work, overrideDurationSeconds: 120);
+
+            // Even with idleSeconds exceeding timeout, user manual focus sprint is preserved
+            engine.EvaluateTick(classifiedMode: ActivityMode.Work, idleSeconds: 90.0, deltaSeconds: 1.0);
+
+            Assert.Equal(ActivityMode.Work, engine.CurrentMode);
+        }
+
+        [Fact]
         public void HLC_OrdersDeterministically()
         {
             var clockA = new HybridLogicalClock("nodeA");

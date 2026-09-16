@@ -176,10 +176,29 @@ class WorkspaceManager:
                     with open(self.manifest_path, "r", encoding="utf-8") as f:
                         file_moves = json.load(f)
                     if isinstance(file_moves, list):
+                        # Define allowed directory roots for path traversal protection
+                        allowed_roots = [
+                            os.path.realpath(self.profiles_dir),
+                            os.path.realpath(self.desktop_dir),
+                            os.path.realpath(self.data_dir),
+                        ]
                         for move in file_moves:
                             src = move.get("src")
                             dst = move.get("dst")
                             if src and dst and os.path.exists(src):
+                                # Path traversal guard: both src and dst must be under allowed roots
+                                real_src = os.path.realpath(src)
+                                real_dst = os.path.realpath(dst)
+                                is_safe = any(
+                                    real_src.startswith(root + os.sep) or real_src == root
+                                    for root in allowed_roots
+                                ) and any(
+                                    real_dst.startswith(root + os.sep) or real_dst == root
+                                    for root in allowed_roots
+                                )
+                                if not is_safe:
+                                    print(f"[WorkspaceManager] Security: Skipping manifest entry with path outside allowed directories: {src} -> {dst}")
+                                    continue
                                 try:
                                     self._safe_move(src, dst)
                                     print(f"[WorkspaceManager] Recovered: {os.path.basename(src)} -> {dst}")
@@ -441,11 +460,19 @@ class WorkspaceManager:
         backup_time = None
         if ".bak." in name:
             parts = name.rsplit(".bak.", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                try:
-                    backup_time = float(parts[1])
-                except ValueError:
-                    pass
+            if len(parts) == 2:
+                # Handle format: {timestamp}_{uuid} — extract timestamp part
+                ts_part = parts[1].split("_")[0]
+                if ts_part.isdigit():
+                    try:
+                        raw_ts = float(ts_part)
+                        # Auto-detect millisecond vs second timestamps
+                        if raw_ts > 1e12:  # milliseconds
+                            backup_time = raw_ts / 1000.0
+                        else:
+                            backup_time = raw_ts
+                    except ValueError:
+                        pass
 
         if backup_time is None:
             try:

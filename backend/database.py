@@ -388,7 +388,6 @@ class MindFlowDB:
                     except Exception as fe:
                         logger.warning(f"[DB_WORKER] Failed to set future exception: {fe}")
                 finally:
-                    self.close_thread_connection()
                     self._thread_local.is_worker = True
                     self._write_queue.task_done()
             except Exception as e:
@@ -464,17 +463,6 @@ class MindFlowDB:
                 self._thread_local.conn = None
             raise
 
-    def close_thread_connection(self):
-        """Close the thread-local SQLite connection, allowing WAL checkpoint and freeing resources."""
-        conn = getattr(self._thread_local, "conn", None)
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            finally:
-                self._thread_local.conn = None
-
     def close(self):
         if hasattr(self, "columnar_engine") and self.columnar_engine is not None:
             try:
@@ -542,6 +530,7 @@ class MindFlowDB:
                 pass
 
     def close_thread_connection(self):
+        """Close the thread-local SQLite connection, allowing WAL checkpoint and freeing resources."""
         if True:  # self.lock removed for WAL concurrency
             if hasattr(self._thread_local, "conn") and self._thread_local.conn is not None:
                 try:
@@ -627,6 +616,9 @@ class MindFlowDB:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_app_usage_date ON app_usage(date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_app_usage_analytics ON app_usage(date, process, duration)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_mode_start ON sessions(mode, start)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_date_start ON sessions(date(start))")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_reflections_date_ts ON reflections(date(timestamp))")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_app_usage_date ON app_usage(date)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS battery_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -695,6 +687,8 @@ class MindFlowDB:
                     end_time TEXT
                 )
             """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_completed_id ON tasks(completed, id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time)")
             
             # Alter sessions table to add flow fields if not present
             info = conn.execute("PRAGMA table_info(sessions)").fetchall()
@@ -1339,8 +1333,7 @@ class MindFlowDB:
                     })
             return sessions
 
-    @queued_write
-    def log_app_usage(self, process, title, duration, category=None):
+    def log_app_usage(self, process, title, duration, category=None, **kwargs):
         if not process or process == "None":
             return
         with self.buffer_lock:
@@ -1410,7 +1403,10 @@ class MindFlowDB:
                     for (process, title), duration in self.app_usage_buffer.items():
                         row = conn.execute("SELECT titles, duration FROM app_usage WHERE date = ? AND process = ?", (today_str, process)).fetchone()
                         if row:
-                            titles = json.loads(row["titles"]) if row["titles"] else {}
+                            try:
+                                titles = json.loads(row["titles"]) if row["titles"] else {}
+                            except (json.JSONDecodeError, TypeError):
+                                titles = {}
                             new_duration = row["duration"] + duration
                             if title and title != "None":
                                 titles[title] = titles.get(title, 0) + duration
@@ -1445,11 +1441,15 @@ class MindFlowDB:
             query += " ORDER BY date ASC, rowid ASC"
             with self.connection() as conn:
                 for row in conn.execute(query, params):
+                    try:
+                        titles = json.loads(row["titles"]) if row["titles"] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        titles = {}
                     usage.append({
                         "date": row["date"],
                         "process": row["process"],
                         "title": row["title"],
-                        "titles": json.loads(row["titles"]) if row["titles"] else {},
+                        "titles": titles,
                         "duration": row["duration"]
                     })
             return usage
@@ -1681,7 +1681,8 @@ class MindFlowDB:
         if (cache["result"] is not None and
             cache["last_settings"] == settings and
             cache["last_write_counter"] == write_cnt and
-            cache["last_checked_date"] == today_date):
+            cache["last_checked_date"] == today_date and
+            (now_time - cache.get("last_check_time", 0.0)) < 60.0):
             return cache["result"]
         zen_lvl = settings.get("zen_level", "balanced")
         if zen_lvl == "tranquil":
@@ -1837,7 +1838,8 @@ class MindFlowDB:
         write_cnt = self.analytics_write_counter
         if (cache["result"] is not None and
             cache["last_write_counter"] == write_cnt and
-            cache["last_checked_date"] == today_date):
+            cache["last_checked_date"] == today_date and
+            (now_time - cache.get("last_check_time", 0.0)) < 60.0):
             return cache["result"]
 
         with self.connection() as conn:
@@ -2192,19 +2194,14 @@ class MindFlowDB:
         if has_perfect_week:
             self.award_achievement("Zero Bypass Week", "Complete a 7-day focus streak without skipping any breaks.", wait=False)
 
-        ref_dates = []
-        for ts in ref_timestamps:
-            try:
-                ref_dates.append(datetime.fromisoformat(ts))
-            except Exception:
-                pass
-
+        # Fix: sort ascending for correct sliding window
+        ref_dates_sorted = sorted([datetime.fromisoformat(r) for r in ref_timestamps])
         has_mindful = False
-        j = 0
-        for i in range(len(ref_dates)):
-            while j < len(ref_dates) and ref_dates[i] - ref_dates[j] <= timedelta(days=7):
-                j += 1
-            if (j - i) >= 5:
+        start_idx = 0
+        for end_idx in range(len(ref_dates_sorted)):
+            while ref_dates_sorted[end_idx] - ref_dates_sorted[start_idx] > timedelta(days=7):
+                start_idx += 1
+            if (end_idx - start_idx + 1) >= 5:
                 has_mindful = True
                 break
         if has_mindful:

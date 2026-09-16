@@ -83,6 +83,11 @@ class CognitiveNudgeEngine:
             new_nudge = None
             sound_type = "asterisk"
 
+            # Reset eye-care and hydration accumulators when not actively working
+            if current_mode != "work":
+                self.nudge_state["active_work_seconds"] = 0
+                self.nudge_state["active_hydration_seconds"] = 0
+
             # --- Priority 1: Critical Stamina Depletion (<15%) ---
             if battery_cap <= 15.0 and current_mode == "work":
                 if now_sec - last_nudges.get("critical_battery", 0) >= 300.0:
@@ -142,7 +147,7 @@ class CognitiveNudgeEngine:
                     last_nudges["low_battery"] = now_sec
 
             # --- Priority 4: Distraction Drift (with Dwell Grace Period) ---
-            if not new_nudge and settings.get("enable_distraction_nudges", True) and current_mode == "work" and target_mode == "recharge":
+            if not new_nudge and settings.get("enable_distraction_nudges", True) and current_mode == "work" and target_mode in ("recharge", "rest"):
                 dwell_start = self.nudge_state.get("distraction_dwell_start")
                 if dwell_start is None:
                     self.nudge_state["distraction_dwell_start"] = now_sec
@@ -161,7 +166,7 @@ class CognitiveNudgeEngine:
                         }
                         sound_type = "exclamation"
                         last_nudges["distraction_drift"] = now_sec
-            elif target_mode == "work":
+            elif target_mode not in ("recharge", "rest"):
                 self.nudge_state["distraction_dwell_start"] = None
 
             # --- Priority 5: Context Switch Thrashing ---

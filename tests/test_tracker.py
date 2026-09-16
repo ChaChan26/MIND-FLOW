@@ -64,8 +64,11 @@ class TestTracker(unittest.TestCase):
     def test_is_audio_playing_cooldown_fast_path(self, mock_win_audio):
         """Verify R3: Fast-path skips expensive audio checks within 5s cooldown."""
         import backend.tracker as tracker_module
+        now = time.time()
         with tracker_module._audio_time_lock:
-            tracker_module._last_audio_active_time = time.time()
+            tracker_module._last_audio_active_time = now
+            tracker_module._last_audio_check_time = now
+            tracker_module._last_audio_result = True
         
         mock_win_audio.return_value = True
         mock_win_audio.reset_mock()
@@ -77,6 +80,8 @@ class TestTracker(unittest.TestCase):
         # Force expire cooldown (> 5s ago)
         with tracker_module._audio_time_lock:
             tracker_module._last_audio_active_time = time.time() - 10.0
+            tracker_module._last_audio_check_time = time.time() - 10.0
+            tracker_module._last_audio_result = False
             
         mock_win_audio.return_value = False
         self.assertFalse(tracker_module.is_audio_playing())

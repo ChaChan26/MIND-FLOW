@@ -16,9 +16,17 @@ def generate_companion_message(
     high_stress_alert: bool,
     latest_mood: Optional[str],
     current_energy: float,
-    cur_mode: str
+    cur_mode: str,
+    is_legacy_scale: bool = False
 ) -> str:
-    """Generate dynamic companion advice with CBT mental health interventions."""
+    """Generate dynamic companion advice with CBT mental health interventions.
+
+    Args:
+        current_energy: Battery capacity on 0-100 scale.
+        is_legacy_scale: If True, explicitly scale legacy 1-5 value to 0-100.
+    """
+    if is_legacy_scale:
+        current_energy = max(0.0, min(100.0, current_energy * 20.0))
     if not tracking_active:
         return "Companion is paused. Take care of yourself out there!"
     if today_bypasses > 1:
@@ -37,9 +45,9 @@ def generate_companion_message(
             return "😤 Frustration is just a signal to pause. A short walk or water break often unlocks the solution."
         elif mood_lower == "exhausted":
             return "😴 Exhaustion detected. Give yourself permission to log off early or start a rest block."
-    if current_energy <= 2:
+    if current_energy <= 40:
         return "🔋 Battery critical! Focus blocks are blocked. Rest more, start your rest cycle, and let your mind drift in Zen Space."
-    if current_energy <= 3:
+    if current_energy <= 60:
         return "🌿 Medium energy. Rest more before you reach exhaustion. Pace yourself and take a deep, mindful breath."
     if cur_mode == "work":
         return "💻 Focus session active. Remember: to sustain this, plan to rest more during upcoming recharge blocks!"
@@ -68,5 +76,5 @@ def calculate_battery_forecast(
     else:
         base_forecast = "Forecast: Stamina optimal. Pace your sprints to sustain focus."
         
-    return base_forecast + (base_alert_message or "")
+    return f"{base_forecast} {base_alert_message}".strip() if base_alert_message else base_forecast
 

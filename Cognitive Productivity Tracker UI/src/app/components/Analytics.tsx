@@ -555,9 +555,9 @@ function FlowAnalyzer({ reflections }: { reflections: ReflectionEntry[] }) {
 
 // ─── Wellbeing Insights ────────────────────────────────────────────────────────
 function WellbeingInsights({ reflections, appTally }: { reflections: ReflectionEntry[]; appTally: AppTally }) {
-  const avgEnergy = reflections.reduce((s, r) => s + r.energy, 0) / reflections.length;
-  const avgFriction = reflections.reduce((s, r) => s + r.friction, 0) / reflections.length;
-  const avgSleep  = (reflections.reduce((s, r) => s + r.sleepHours, 0) / reflections.length).toFixed(1);
+  const avgEnergy = reflections.length > 0 ? reflections.reduce((s, r) => s + r.energy, 0) / reflections.length : 3;
+  const avgFriction = reflections.length > 0 ? reflections.reduce((s, r) => s + r.friction, 0) / reflections.length : 3;
+  const avgSleep  = reflections.length > 0 ? (reflections.reduce((s, r) => s + r.sleepHours, 0) / reflections.length).toFixed(1) : "7.0";
 
   const burnoutScore = (5 - avgEnergy) + avgFriction;
   const burnoutRisk  = burnoutScore < 3 ? "Low" : burnoutScore < 5 ? "Moderate" : "High";
@@ -571,7 +571,7 @@ function WellbeingInsights({ reflections, appTally }: { reflections: ReflectionE
   const narrative = burnoutRisk === "High"
     ? `Your focus-to-rest ratio is elevated this week, with friction averaging ${avgFriction.toFixed(1)}/5. Protect your sleep windows and honour scheduled breaks — your cognitive battery needs longer recovery arcs.`
     : burnoutRisk === "Moderate"
-    ? `Mid-week shows a friction cluster tied to lower sleep nights. Thursday's peak (${reflections.find(r => r.energy === Math.max(...reflections.map(x => x.energy)))?.date ?? "—"}) confirms the sleep→flow link. Aim for one deep-work morning block per day.`
+    ? `Mid-week shows a friction cluster tied to lower sleep nights. Thursday's peak (${reflections.length > 0 ? reflections.find(r => r.energy === Math.max(...reflections.map(x => x.energy)))?.date ?? "—" : "—"}) confirms the sleep→flow link. Aim for one deep-work morning block per day.`
     : `Solid week. Energy stayed above the optimal threshold on most days. Your sleep consistency is driving this — keep protecting your morning ritual and consider a light walk on lower-energy afternoons.`;
 
   const METRICS = [

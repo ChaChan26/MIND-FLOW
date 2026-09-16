@@ -21,18 +21,16 @@ interface CompanionMiniHudProps {
 }
 
 export function CompanionMiniHud({ isOpen, onToggle, onExpand }: CompanionMiniHudProps) {
-  const {
-    battery,
-    mode,
-    activeApp,
-    classifiedApp,
-    timerSeconds,
-    activeNudge,
-    handleNudgeAction,
-    dismissNudge,
-    setMode,
-    companionMessage,
-  } = useStaminaStore();
+  const battery = useStaminaStore(s => s.battery);
+  const mode = useStaminaStore(s => s.mode);
+  const activeApp = useStaminaStore(s => s.activeApp);
+  const classifiedApp = useStaminaStore(s => s.classifiedApp);
+  const timerSeconds = useStaminaStore(s => s.timerSeconds);
+  const activeNudge = useStaminaStore(s => s.activeNudge);
+  const handleNudgeAction = useStaminaStore(s => s.handleNudgeAction);
+  const dismissNudge = useStaminaStore(s => s.dismissNudge);
+  const setMode = useStaminaStore(s => s.setMode);
+  const companionMessage = useStaminaStore(s => s.companionMessage);
 
   const [minimized, setMinimized] = useState(false);
 

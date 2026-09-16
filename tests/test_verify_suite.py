@@ -1872,17 +1872,26 @@ class TestCognitiveBattery(unittest.TestCase):
         
         # Mock check_windows_audio_active
         with patch('backend.tracker.check_windows_audio_active') as mock_audio:
+            from backend import tracker
+            
+            # Reset cache state for clean test
+            with tracker._audio_time_lock:
+                tracker._last_audio_active_time = 0.0
+                tracker._last_audio_check_time = 0.0
+                tracker._last_audio_result = False
+            
             # 1. Audio active -> returns True
             mock_audio.return_value = True
             self.assertTrue(is_audio_playing())
             
-            # 2. Audio goes silent -> still returns True due to 5s hangover
+            # 2. Audio goes silent -> still returns True due to 5s hangover (cached positive result)
             mock_audio.return_value = False
             self.assertTrue(is_audio_playing())
             
             # 3. Simulate passage of time beyond hangover threshold (e.g. 6 seconds ago)
-            from backend import tracker
-            tracker._last_audio_active_time = time.time() - 6.0
+            with tracker._audio_time_lock:
+                tracker._last_audio_active_time = time.time() - 6.0
+                tracker._last_audio_check_time = time.time() - 6.0
             self.assertFalse(is_audio_playing())
 
     def test_context_aware_activity_classification(self):

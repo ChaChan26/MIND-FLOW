@@ -18,24 +18,9 @@ namespace MindFlow.Core.Classification
         private readonly ConcurrentDictionary<string, ActivityMode> _lruCache = new();
         private const int MaxCacheSize = 1000;
 
-        private readonly List<string> _workKeywords = new()
-        {
-            "code", "visual studio", "cursor", "pycharm", "intellij", "terminal",
-            "powershell", "cmd.exe", "github", "gitlab", "stackoverflow", "jira",
-            "notion", "slack", "teams", "word", "excel", "docs.google", "sheets.google",
-            "sublime", "neovim", "docker", "postman", "figma"
-        };
-
-        private readonly List<string> _rechargeKeywords = new()
-        {
-            "youtube", "netflix", "spotify", "reddit", "twitter", "x.com", "twitch",
-            "facebook", "instagram", "tiktok", "steam", "discord", "prime video", "disney"
-        };
-
-        private readonly List<string> _neutralKeywords = new()
-        {
-            "explorer", "settings", "calculator", "taskmgr", "searchapp", "picker", "shellexperiencehost"
-        };
+        private readonly Regex _workPattern;
+        private readonly Regex _rechargePattern;
+        private readonly Regex _neutralPattern;
 
         private readonly ConcurrentDictionary<string, Regex?> _compiledRegexCache = new();
         private readonly List<(Regex Pattern, ActivityMode Mode)> _userRules = new();
@@ -43,6 +28,33 @@ namespace MindFlow.Core.Classification
 
         public TaskClassifier()
         {
+            // Pre-compile unified keyword patterns for O(1) matching on hot path
+            var workKeywords = new[]
+            {
+                "code", "visual studio", "cursor", "pycharm", "intellij", "terminal",
+                "powershell", "cmd.exe", "github", "gitlab", "stackoverflow", "jira",
+                "notion", "slack", "teams", "word", "excel", "docs.google", "sheets.google",
+                "sublime", "neovim", "docker", "postman", "figma"
+            };
+            var rechargeKeywords = new[]
+            {
+                "youtube", "netflix", "spotify", "reddit", "twitter", "x.com", "twitch",
+                "facebook", "instagram", "tiktok", "steam", "discord", "prime video", "disney"
+            };
+            var neutralKeywords = new[]
+            {
+                "explorer", "settings", "calculator", "taskmgr", "searchapp", "picker", "shellexperiencehost"
+            };
+
+            _workPattern = new Regex(
+                string.Join("|", workKeywords.Select(Regex.Escape)),
+                RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
+            _rechargePattern = new Regex(
+                string.Join("|", rechargeKeywords.Select(Regex.Escape)),
+                RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
+            _neutralPattern = new Regex(
+                string.Join("|", neutralKeywords.Select(Regex.Escape)),
+                RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
         }
 
         public void AddCustomRule(string pattern, ActivityMode mode)
@@ -79,6 +91,7 @@ namespace MindFlow.Core.Classification
             string cleanProcess = (processName ?? string.Empty).ToLowerInvariant().Trim();
             string cleanTitle = (windowTitle ?? string.Empty).ToLowerInvariant().Trim();
             string cacheKey = $"{cleanProcess}|{cleanTitle}";
+            string combined = $"{cleanProcess} {cleanTitle}";
 
             // Tier 1: O(1) LRU Exact Cache
             if (_lruCache.TryGetValue(cacheKey, out var cachedMode))
@@ -91,7 +104,7 @@ namespace MindFlow.Core.Classification
                 {
                     try
                     {
-                        if (pattern.IsMatch(cleanProcess) || pattern.IsMatch(cleanTitle))
+                        if (pattern.IsMatch(combined))
                         {
                             CacheResult(cacheKey, mode);
                             return mode;
@@ -104,26 +117,38 @@ namespace MindFlow.Core.Classification
                 }
             }
 
-            // Tier 2B: Neutral Match
-            if (_neutralKeywords.Any(k => cleanProcess.Contains(k) || cleanTitle.Contains(k)))
+            // Tier 2B: Compiled Neutral Regex
+            try
             {
-                CacheResult(cacheKey, ActivityMode.Neutral);
-                return ActivityMode.Neutral;
+                if (_neutralPattern.IsMatch(combined))
+                {
+                    CacheResult(cacheKey, ActivityMode.Neutral);
+                    return ActivityMode.Neutral;
+                }
             }
+            catch (RegexMatchTimeoutException) { }
 
-            // Tier 2C: Recharge Match
-            if (_rechargeKeywords.Any(k => cleanProcess.Contains(k) || cleanTitle.Contains(k)))
+            // Tier 2C: Compiled Recharge Regex
+            try
             {
-                CacheResult(cacheKey, ActivityMode.Recharge);
-                return ActivityMode.Recharge;
+                if (_rechargePattern.IsMatch(combined))
+                {
+                    CacheResult(cacheKey, ActivityMode.Recharge);
+                    return ActivityMode.Recharge;
+                }
             }
+            catch (RegexMatchTimeoutException) { }
 
-            // Tier 2D: Work Match
-            if (_workKeywords.Any(k => cleanProcess.Contains(k) || cleanTitle.Contains(k)))
+            // Tier 2D: Compiled Work Regex
+            try
             {
-                CacheResult(cacheKey, ActivityMode.Work);
-                return ActivityMode.Work;
+                if (_workPattern.IsMatch(combined))
+                {
+                    CacheResult(cacheKey, ActivityMode.Work);
+                    return ActivityMode.Work;
+                }
             }
+            catch (RegexMatchTimeoutException) { }
 
             // Tier 3: Default fallback
             var defaultMode = ActivityMode.Neutral;

@@ -341,6 +341,7 @@ _event_tracker_thread = None
 _event_tracker_lock = threading.RLock()
 _cached_event_details = ("None", "None")
 _event_listener_active = False
+_active_winevent_proc = None
 
 class WinEventTrackerThread(threading.Thread):
     def __init__(self):
@@ -359,6 +360,13 @@ class WinEventTrackerThread(threading.Thread):
         self.thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
 
         def win_event_proc(hWinEventHook, event, hwnd, idObject, idChild, dwEventThread, dwmsEventTime):
+            if event == 0x800C:  # EVENT_OBJECT_NAMECHANGE
+                fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+                if hwnd != fg_hwnd:
+                    root = _resolve_root_hwnd(hwnd) if hwnd else None
+                    if root != fg_hwnd:
+                        return  # Drop non-foreground name change events
+            
             global _cached_event_details
             try:
                 if event == 0x0003 or (event == 0x800C and idObject == 0):  # EVENT_SYSTEM_FOREGROUND or EVENT_OBJECT_NAMECHANGE for OBJID_WINDOW
@@ -374,6 +382,8 @@ class WinEventTrackerThread(threading.Thread):
                 logger.debug("[WinEventTracker] Callback exception: %s", e)
 
         self._proc = WINEVENTPROC(win_event_proc)
+        global _active_winevent_proc
+        _active_winevent_proc = self._proc
         # Hook events from EVENT_SYSTEM_FOREGROUND (0x0003) to EVENT_OBJECT_NAMECHANGE (0x800C)
         self.hook = ctypes.windll.user32.SetWinEventHook(
             0x0003, 0x800C, None, self._proc, 0, 0, 0x0000
@@ -414,6 +424,8 @@ class WinEventTrackerThread(threading.Thread):
         if self.thread_id and self.is_alive():
             ctypes.windll.user32.PostThreadMessageW(self.thread_id, 0x0012, 0, 0)
             self.join(timeout=2.0)
+        global _active_winevent_proc
+        _active_winevent_proc = None
 
 def start_event_listener():
     global _event_tracker_thread, _event_listener_active
@@ -609,18 +621,18 @@ if sys.platform == "win32":
     _p_enumerator = None
     _p_device = None
     _p_meter = None
-    _com_initialized = False
     import threading
+    _com_thread_local = threading.local()
     _audio_com_lock = threading.RLock()
 
     def check_windows_audio_active():
-        global _p_enumerator, _p_device, _p_meter, _com_initialized
+        global _p_enumerator, _p_device, _p_meter, _com_thread_local
         with _audio_com_lock:
             try:
-                if not _com_initialized:
+                if not getattr(_com_thread_local, 'initialized', False):
                     try:
                         ctypes.windll.ole32.CoInitializeEx(None, 2)  # COINIT_MULTITHREADED
-                        _com_initialized = True
+                        _com_thread_local.initialized = True
                     except Exception as e:
                         logger.debug("CoInitializeEx audio COM initialization: %s", e)
                 if not _p_meter:
@@ -694,18 +706,27 @@ else:
         return False
 
 _last_audio_active_time = 0.0
+_last_audio_check_time = 0.0
+_last_audio_result = False
 import threading
 _audio_time_lock = threading.RLock()
 
 def is_audio_playing():
-    """Check if audio playback is currently active in the OS (to prevent false-positive idle states)."""
-    global _last_audio_active_time
+    """Check if audio playback is currently active in the OS (to prevent false-positive idle states).
+    
+    Uses both positive and negative caching to throttle expensive OS-level audio checks
+    (COM calls on Windows, subprocess on macOS/Linux) to a maximum of once every 5 seconds.
+    """
+    global _last_audio_active_time, _last_audio_check_time, _last_audio_result
     current_time = time.time()
 
-    # Fast path: Evaluate cooldown BEFORE executing expensive OS / shell commands
     with _audio_time_lock:
-        if (current_time - _last_audio_active_time) < 5.0:
-            return True
+        # Fast path: If last audio check was recent (< 5s ago), return cached result
+        if (current_time - _last_audio_check_time) < 5.0:
+            if _last_audio_result:
+                return True
+            # Negative cache: audio was not playing last time we checked, and check is still fresh
+            return (current_time - _last_audio_active_time) < 5.0
 
     active = False
     if sys.platform == "win32":
@@ -728,6 +749,8 @@ def is_audio_playing():
             pass
 
     with _audio_time_lock:
+        _last_audio_check_time = current_time
+        _last_audio_result = active
         if active:
             _last_audio_active_time = current_time
             return True

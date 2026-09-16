@@ -70,10 +70,18 @@ namespace MindFlow.Core.State
         {
             DateTime now = DateTime.UtcNow;
 
-            // 1. Idle Detection Trigger
+            // 1. Manual Override Guard (User Intent Preempts Automated Polling)
+            if (ManualOverrideUntil.HasValue && now < ManualOverrideUntil.Value)
+            {
+                // Locked under user manual sprint/cooldown - maintain mode and update flow
+                UpdateFlowState(deltaSeconds, idleSeconds);
+                return;
+            }
+
+            // 2. Idle Detection Trigger
             if (idleSeconds >= IdleTimeoutSeconds && CurrentMode != ActivityMode.Rest)
             {
-                // When idle timeout reached, transition to Rest regardless of manual locks
+                // When idle timeout reached without manual lock, transition to Rest
                 TransitionTo(ActivityMode.Rest, isManual: false);
                 return;
             }
@@ -82,14 +90,6 @@ namespace MindFlow.Core.State
             if (CurrentMode == ActivityMode.Rest && idleSeconds < 2.0)
             {
                 TransitionTo(classifiedMode == ActivityMode.Rest ? ActivityMode.Neutral : classifiedMode, isManual: false);
-                return;
-            }
-
-            // 2. Manual Override Guard
-            if (ManualOverrideUntil.HasValue && now < ManualOverrideUntil.Value)
-            {
-                // Locked under user manual sprint/cooldown
-                UpdateFlowState(deltaSeconds, idleSeconds);
                 return;
             }
 

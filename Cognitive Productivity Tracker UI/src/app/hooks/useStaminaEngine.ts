@@ -208,7 +208,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
           set({ appRules: data.rules });
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   fetchRunningApps: async () => {
@@ -221,7 +223,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
           set({ runningApps: data.running_apps });
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   fetchRecentApps: async () => {
@@ -234,7 +238,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
           set({ recentApps: data.recent_apps });
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   recategorizeApp: async (appName: string, category: "work" | "recharge" | "neutral") => {
@@ -254,7 +260,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
         get().fetchAppRules();
         get().fetchStatus();
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   deleteAppRule: async (appName: string) => {
@@ -274,7 +282,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
         get().fetchAppRules();
         get().fetchStatus();
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   updateSettings: async (newSettings: Partial<SystemSettings>) => {
@@ -289,7 +299,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
         get().fetchSettings();
         get().fetchStatus();
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   fetchSettings: async () => {
@@ -311,7 +323,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
         if (Array.isArray(s?.recharge_keywords)) set({ rechargeKw: s.recharge_keywords.join("\n") });
         else if (typeof s?.recharge_keywords === "string") set({ rechargeKw: s.recharge_keywords });
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
 
   fetchStatus: async (signal?: AbortSignal) => {
@@ -440,7 +454,9 @@ export const useStaminaStore = create<StaminaState>((set, get) => ({
         body: JSON.stringify({ mode: m })
       });
       get().fetchStatus();
-    } catch (e) {}
+    } catch (e) {
+      console.error('MIND-FLOW API error:', e);
+    }
   },
   
   setAutopilot: async (v: boolean) => get().updateSettings({ adaptive_timers_enabled: v }),

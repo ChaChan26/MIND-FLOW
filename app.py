@@ -585,6 +585,15 @@ def main_state_machine(gui_process=None):
                 except Exception:
                     pass
                 try:
+                    db.close()
+                except Exception:
+                    pass
+                try:
+                    from backend.thread_pools import shutdown_all
+                    shutdown_all(wait=True)
+                except Exception:
+                    pass
+                try:
                     from backend import tracker
                     tracker.stop_event_listener()
                 except Exception:

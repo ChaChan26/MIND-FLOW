@@ -264,8 +264,8 @@ namespace MindFlow.Data.Database
                     VALUES (@mode, @start, @end, @duration, @is_flow, @flow_dur);
                 ";
                 cmd.Parameters.AddWithValue("@mode", mode);
-                cmd.Parameters.AddWithValue("@start", start.ToString("yyyy-MM-dd HH:mm:ss"));
-                cmd.Parameters.AddWithValue("@end", end.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@start", start.ToString("o"));
+                cmd.Parameters.AddWithValue("@end", end.ToString("o"));
                 cmd.Parameters.AddWithValue("@duration", durationSeconds);
                 cmd.Parameters.AddWithValue("@is_flow", isFlow ? 1 : 0);
                 cmd.Parameters.AddWithValue("@flow_dur", isFlow ? durationSeconds : 0.0);
@@ -355,7 +355,7 @@ namespace MindFlow.Data.Database
                     INSERT INTO context_switches (timestamp, from_process, to_process)
                     VALUES (@ts, @from, @to);
                 ";
-                cmd.Parameters.AddWithValue("@ts", ts.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@ts", ts.ToString("o"));
                 cmd.Parameters.AddWithValue("@from", fromProcess);
                 cmd.Parameters.AddWithValue("@to", toProcess);
                 await cmd.ExecuteNonQueryAsync();
@@ -422,7 +422,7 @@ namespace MindFlow.Data.Database
                     INSERT INTO focus_sessions (timestamp, duration_minutes, task_label, completed, stamina_start, stamina_end)
                     VALUES (@ts, @dur, @task, @comp, @start, @end);
                 ";
-                cmd.Parameters.AddWithValue("@ts", ts.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@ts", ts.ToString("o"));
                 cmd.Parameters.AddWithValue("@dur", durationMinutes);
                 cmd.Parameters.AddWithValue("@task", taskLabel);
                 cmd.Parameters.AddWithValue("@comp", completed ? 1 : 0);

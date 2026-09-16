@@ -99,6 +99,11 @@ class ColumnarAnalyticsEngine:
                         duration DOUBLE
                     )
                 """)
+                # Add index for timestamp-based range queries
+                try:
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_window_logs_ts ON active_window_logs (timestamp)")
+                except Exception:
+                    pass  # DuckDB may not support all index types; non-critical
         except Exception as e:
             logger.warning(f"[DUCKDB_INIT_WARN] Could not initialize DuckDB at {self.db_path}: {e}")
 
@@ -243,7 +248,9 @@ class ColumnarAnalyticsEngine:
         self.flush()
         now_ts = time.time()
         cutoff_ts = now_ts - (days * 86400)
-        conn = self._get_connection(read_only=True if not self.is_memory else False)
+        with self._write_lock:
+            conn = self._get_connection(read_only=True if not self.is_memory else False)
+            cursor = conn.cursor()
 
         query = """
             SELECT 
@@ -255,7 +262,8 @@ class ColumnarAnalyticsEngine:
             GROUP BY log_date, category
             ORDER BY log_date ASC
         """
-        rows = conn.execute(query, [cutoff_ts]).fetchall()
+        rows = cursor.execute(query, [cutoff_ts]).fetchall()
+        cursor.close()
 
         daily_data: Dict[str, Dict[str, float]] = {}
         today = datetime.now().date()
@@ -376,13 +384,16 @@ class ColumnarAnalyticsEngine:
 
     def _get_category_breakdown_duckdb(self, start_ts: float, end_ts: float) -> Dict[str, float]:
         self.flush()
-        conn = self._get_connection(read_only=True if not self.is_memory else False)
-        rows = conn.execute("""
+        with self._write_lock:
+            conn = self._get_connection(read_only=True if not self.is_memory else False)
+            cursor = conn.cursor()
+        rows = cursor.execute("""
             SELECT category, SUM(duration) as total_dur
             FROM active_window_logs
             WHERE timestamp >= ? AND timestamp <= ?
             GROUP BY category
         """, [start_ts, end_ts]).fetchall()
+        cursor.close()
 
         breakdown = {"work": 0.0, "rest": 0.0, "recharge": 0.0, "neutral": 0.0}
         for cat, dur in rows:
@@ -439,9 +450,11 @@ class ColumnarAnalyticsEngine:
         self.flush()
         now_ts = time.time()
         cutoff_ts = now_ts - (days * 86400)
-        conn = self._get_connection(read_only=True if not self.is_memory else False)
+        with self._write_lock:
+            conn = self._get_connection(read_only=True if not self.is_memory else False)
+            cursor = conn.cursor()
 
-        totals_row = conn.execute("""
+        totals_row = cursor.execute("""
             SELECT 
                 SUM(CASE WHEN lower(category) = 'work' THEN duration ELSE 0 END) as total_work,
                 SUM(CASE WHEN lower(category) IN ('rest', 'recharge') THEN duration ELSE 0 END) as total_rest,
@@ -454,7 +467,7 @@ class ColumnarAnalyticsEngine:
         total_rest = float(totals_row[1] or 0.0)
         active_days = max(1, int(totals_row[2] or 1))
 
-        hourly_rows = conn.execute("""
+        hourly_rows = cursor.execute("""
             SELECT 
                 CAST(strftime(epoch_ms(CAST(timestamp * 1000 AS BIGINT)), '%H') AS INT) as hr,
                 SUM(CASE WHEN lower(category) = 'work' THEN duration ELSE 0 END) as work_dur
@@ -468,12 +481,13 @@ class ColumnarAnalyticsEngine:
             if hr is not None and 0 <= hr < 24:
                 hourly_distribution[hr] = round(float(dur or 0.0), 2)
 
-        logs = conn.execute("""
+        logs = cursor.execute("""
             SELECT timestamp, duration, category
             FROM active_window_logs
             WHERE timestamp >= ?
             ORDER BY timestamp ASC
         """, [cutoff_ts]).fetchall()
+        cursor.close()
 
         current_work_block = 0.0
         max_work_block = 0.0
@@ -568,8 +582,9 @@ class ColumnarAnalyticsEngine:
         return result
 
     def close(self):
-        """Cleanly shuts down the batch worker and closes the DuckDB connection."""
+        """Cleanly shuts down the batch worker, flushes pending writes, and closes the DuckDB connection."""
         self._shutdown_event.set()
+        self.flush()
         if hasattr(self, '_worker_thread') and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=2.0)
         with self._lock:
