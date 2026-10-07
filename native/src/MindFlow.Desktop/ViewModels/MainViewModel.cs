@@ -8,15 +8,20 @@ Copyright (c) 2026 ChaChan26. All rights reserved.
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MindFlow.Core.Battery;
 using MindFlow.Core.Classification;
+using MindFlow.Core.Companion;
 using MindFlow.Core.Focus;
+using MindFlow.Core.Nudges;
 using MindFlow.Core.State;
 using MindFlow.Core.Telemetry;
+using MindFlow.Core.Workspace;
 using MindFlow.Data.Database;
 using MindFlow.Data.Models;
 using MindFlow.Win32.Audio;
@@ -36,8 +41,13 @@ namespace MindFlow.Desktop.ViewModels
         private readonly MindFlowDb _db;
         private readonly ContextSwitchTracker _switchTracker;
         private readonly FocusTimerEngine _focusTimer;
+        private readonly WorkspaceManager _workspaceMgr;
+        private readonly CognitiveNudgeEngine _nudgeEngine;
+        private readonly NudgeSettings _nudgeSettings = new();
         private readonly DispatcherTimer _tickTimer;
         private readonly DispatcherTimer _zenTimer;
+
+        public event Action<NudgeNotification>? NudgeTriggered;
 
         private DateTime _lastTickTime = DateTime.UtcNow;
         private int _dbFlushCounter = 0;
@@ -103,58 +113,85 @@ namespace MindFlow.Desktop.ViewModels
         [ObservableProperty]
         private double _switchRatePerMin = 0.0;
 
+        [ObservableProperty]
+        private string _companionAdvice = "🌳 Energy optimal. Maintain your stamina by remembering to stretch and hydrate.";
+
+        [ObservableProperty]
+        private string _batteryForecast = "Forecast: Stamina optimal. Pace your sprints to sustain focus.";
+
+        [ObservableProperty]
+        private string _activeNudgeTitle = string.Empty;
+
+        [ObservableProperty]
+        private string _activeNudgeMessage = string.Empty;
+
+        [ObservableProperty]
+        private bool _hasActiveNudge = false;
+
         public ObservableCollection<AppUsageRecord> RecentUsage { get; } = new();
         public ObservableCollection<HourlyProductivityRecord> HourlyTrends { get; } = new();
 
         public MainViewModel()
         {
-            // 1. Initialize Core Engines
-            _battery = new CognitiveBattery();
-            _classifier = new TaskClassifier();
-            _modeEngine = new ModeEngine();
-            _audioMeter = new ComAudioMeter();
-            _winTracker = new WinEventTracker();
-            _db = new MindFlowDb();
-            _switchTracker = new ContextSwitchTracker();
-            _focusTimer = new FocusTimerEngine();
-
-            _focusTimer.SessionCompleted += OnFocusTimerCompleted;
-            _focusTimer.TickUpdated += (s, e) =>
+            try
             {
-                TimerFormatted = _focusTimer.FormattedTime;
-                TimerProgress = _focusTimer.Progress;
-                IsTimerRunning = _focusTimer.IsRunning;
-                TimerSessionLabel = _focusTimer.IsSprint ? "Sprint" : "Break";
-            };
+                // 1. Initialize Core Engines
+                _battery = new CognitiveBattery();
+                _classifier = new TaskClassifier();
+                _modeEngine = new ModeEngine();
+                _audioMeter = new ComAudioMeter();
+                _winTracker = new WinEventTracker();
+                _db = new MindFlowDb();
+                _switchTracker = new ContextSwitchTracker();
+                _focusTimer = new FocusTimerEngine();
+                _nudgeEngine = new CognitiveNudgeEngine();
 
-            // 2. Disable Windows 11 EcoQoS Power Throttling
-            EcoQosManager.DisableEcoQosForCurrentProcess();
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                _workspaceMgr = new WorkspaceManager(Path.Combine(appData, "MIND"));
 
-            // 3. Bind WinEvent Listeners
-            _winTracker.ActiveWindowChanged += OnActiveWindowChanged;
-            _winTracker.Start();
+                _focusTimer.SessionCompleted += OnFocusTimerCompleted;
+                _focusTimer.TickUpdated += (s, e) =>
+                {
+                    TimerFormatted = _focusTimer.FormattedTime;
+                    TimerProgress = _focusTimer.Progress;
+                    IsTimerRunning = _focusTimer.IsRunning;
+                    TimerSessionLabel = _focusTimer.IsSprint ? "Sprint" : "Break";
+                };
 
-            // 4. Hook Mode Transition Events
-            _modeEngine.ModeChanged += OnModeEngineChanged;
+                // 2. Disable Windows 11 EcoQoS Power Throttling
+                EcoQosManager.DisableEcoQosForCurrentProcess();
 
-            // 5. Setup 1-Second Telemetry & Battery Tick Loop
-            _tickTimer = new DispatcherTimer(DispatcherPriority.Background)
+                // 3. Bind WinEvent Listeners
+                _winTracker.ActiveWindowChanged += OnActiveWindowChanged;
+                _winTracker.Start();
+
+                // 4. Hook Mode Transition Events
+                _modeEngine.ModeChanged += OnModeEngineChanged;
+
+                // 5. Setup 1-Second Telemetry & Battery Tick Loop
+                _tickTimer = new DispatcherTimer(DispatcherPriority.Background)
+                {
+                    Interval = TimeSpan.FromSeconds(1)
+                };
+                _tickTimer.Tick += async (s, e) => await ProcessStateTickAsync();
+                _tickTimer.Start();
+
+                // 6. Setup Zen Breathing Loop (4-7-8)
+                _zenTimer = new DispatcherTimer(DispatcherPriority.Normal)
+                {
+                    Interval = TimeSpan.FromSeconds(1)
+                };
+                _zenTimer.Tick += OnZenTick;
+                _zenTimer.Start();
+
+                // Load initial persisted data
+                _ = LoadInitialDataAsync();
+            }
+            catch (Exception ex)
             {
-                Interval = TimeSpan.FromSeconds(1)
-            };
-            _tickTimer.Tick += async (s, e) => await ProcessStateTickAsync();
-            _tickTimer.Start();
-
-            // 6. Setup Zen Breathing Loop (4-7-8)
-            _zenTimer = new DispatcherTimer(DispatcherPriority.Normal)
-            {
-                Interval = TimeSpan.FromSeconds(1)
-            };
-            _zenTimer.Tick += OnZenTick;
-            _zenTimer.Start();
-
-            // Load initial persisted data
-            _ = LoadInitialDataAsync();
+                Debug.WriteLine($"[MainViewModel] Fatal initialization error: {ex}");
+                throw;
+            }
         }
 
         private async Task LoadInitialDataAsync()
@@ -183,26 +220,46 @@ namespace MindFlow.Desktop.ViewModels
 
         private void OnActiveWindowChanged(object? sender, WindowDetails details)
         {
-            string oldProc = ActiveProcessName;
-            ActiveProcessName = details.ProcessName;
-            ActiveWindowTitle = string.IsNullOrWhiteSpace(details.Title) ? details.ProcessName : details.Title;
-
-            if (!string.IsNullOrWhiteSpace(oldProc) && oldProc != "Desktop" && oldProc != "Unknown")
+            Application.Current?.Dispatcher?.InvokeAsync(() =>
             {
-                if (_switchTracker.RecordSwitch(oldProc, ActiveProcessName))
+                try
                 {
-                    _ = _db.LogContextSwitchAsync(oldProc, ActiveProcessName, DateTime.UtcNow);
-                    TotalContextSwitches = _switchTracker.TotalSwitchesToday;
-                    SwitchFrictionText = _switchTracker.FrictionLevelFormatted;
-                    SwitchRatePerMin = Math.Round(_switchTracker.SwitchesPerMinute, 2);
+                    string oldProc = ActiveProcessName;
+                    ActiveProcessName = details.ProcessName;
+                    ActiveWindowTitle = string.IsNullOrWhiteSpace(details.Title) ? details.ProcessName : details.Title;
+
+                    if (!string.IsNullOrWhiteSpace(oldProc) && oldProc != "Desktop" && oldProc != "Unknown")
+                    {
+                        if (_switchTracker.RecordSwitch(oldProc, ActiveProcessName))
+                        {
+                            _ = _db.LogContextSwitchAsync(oldProc, ActiveProcessName, DateTime.UtcNow);
+                            TotalContextSwitches = _switchTracker.TotalSwitchesToday;
+                            SwitchFrictionText = _switchTracker.FrictionLevelFormatted;
+                            SwitchRatePerMin = Math.Round(_switchTracker.SwitchesPerMinute, 2);
+                        }
+                    }
                 }
-            }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error in OnActiveWindowChanged: {ex}");
+                }
+            });
         }
 
         private void OnModeEngineChanged(object? sender, ModeChangedEventArgs e)
         {
-            CurrentModeName = e.NewMode.ToString();
-            IsFlowActive = e.WasFlow;
+            Application.Current?.Dispatcher?.InvokeAsync(() =>
+            {
+                try
+                {
+                    CurrentModeName = e.NewMode.ToString();
+                    IsFlowActive = e.WasFlow;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error in OnModeEngineChanged: {ex}");
+                }
+            });
 
             // Asynchronously log the ended session to SQLite WAL
             _ = _db.LogSessionAsync(
@@ -211,56 +268,110 @@ namespace MindFlow.Desktop.ViewModels
                 e.Timestamp,
                 e.DurationSeconds,
                 e.WasFlow);
+
+            // Asynchronously transition workspace profile shortcuts
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    _workspaceMgr.TransitionWorkspace(e.OldMode.ToString(), e.NewMode.ToString());
+                }
+                catch { }
+            });
         }
 
         private async Task ProcessStateTickAsync()
         {
-            DateTime now = DateTime.UtcNow;
-            double deltaSeconds = (now - _lastTickTime).TotalSeconds;
-            _lastTickTime = now;
-            if (deltaSeconds <= 0) deltaSeconds = 1.0;
-
-            double elapsedMinutes = deltaSeconds / 60.0;
-
-            // 1. Advance Focus Timer Engine
-            _focusTimer.ProcessTick(deltaSeconds);
-
-            // 2. Read Hardware Idle
-            double rawIdle = IdleTracker.GetIdleSeconds();
-            bool audioPlaying = _audioMeter.IsAudioPlaying(threshold: 0.015f);
-            IsAudioActive = audioPlaying;
-
-            // If audio is actively playing in media/meeting, suppress idle
-            double effectiveIdle = audioPlaying ? 0.0 : rawIdle;
-            IdleSeconds = Math.Round(effectiveIdle, 1);
-
-            // 3. Classify Current Active Window
-            var classifiedMode = _classifier.Classify(ActiveProcessName, ActiveWindowTitle);
-
-            // 4. Advance Mode State Engine
-            _modeEngine.EvaluateTick(classifiedMode, effectiveIdle, deltaSeconds);
-            CurrentModeName = _modeEngine.CurrentMode.ToString();
-            IsFlowActive = _modeEngine.IsCurrentFlowSession;
-
-            // 5. Advance Cognitive Battery Math (with context switch penalty)
-            var (cap, workMins) = _battery.ProcessTick(_modeEngine.CurrentMode, elapsedMinutes, _switchTracker.SwitchesPerMinute);
-            BatteryCapacity = Math.Round(cap, 1);
-            BatteryCapacityFormatted = $"{Math.Round(cap)}%";
-            ConsecutiveWorkFormatted = $"{Math.Round(workMins)}m";
-
-            // 6. Aggregate App Usage
-            if (!string.IsNullOrWhiteSpace(ActiveProcessName) && ActiveProcessName != "Unknown")
+            try
             {
-                _ = _db.LogAppUsageAsync(ActiveProcessName, ActiveWindowTitle, deltaSeconds);
+                DateTime now = DateTime.UtcNow;
+                double deltaSeconds = (now - _lastTickTime).TotalSeconds;
+                _lastTickTime = now;
+                if (deltaSeconds <= 0) deltaSeconds = 1.0;
+
+                double elapsedMinutes = deltaSeconds / 60.0;
+
+                // 1. Advance Focus Timer Engine
+                _focusTimer.ProcessTick(deltaSeconds);
+
+                // 2. Read Hardware Idle
+                double rawIdle = IdleTracker.GetIdleSeconds();
+                bool audioPlaying = _audioMeter.IsAudioPlaying(threshold: 0.015f);
+                IsAudioActive = audioPlaying;
+
+                // If audio is actively playing in media/meeting, suppress idle
+                double effectiveIdle = audioPlaying ? 0.0 : rawIdle;
+                IdleSeconds = Math.Round(effectiveIdle, 1);
+
+                // 3. Classify Current Active Window
+                var classifiedMode = _classifier.Classify(ActiveProcessName, ActiveWindowTitle);
+
+                // 4. Advance Mode State Engine
+                _modeEngine.EvaluateTick(classifiedMode, effectiveIdle, deltaSeconds);
+                CurrentModeName = _modeEngine.CurrentMode.ToString();
+                IsFlowActive = _modeEngine.IsCurrentFlowSession;
+
+                // 5. Advance Cognitive Battery Math (with context switch penalty)
+                var (cap, workMins) = _battery.ProcessTick(_modeEngine.CurrentMode, elapsedMinutes, _switchTracker.SwitchesPerMinute);
+                BatteryCapacity = Math.Round(cap, 1);
+                BatteryCapacityFormatted = $"{Math.Round(cap)}%";
+                ConsecutiveWorkFormatted = $"{Math.Round(workMins)}m";
+
+                // 6. Aggregate App Usage
+                if (!string.IsNullOrWhiteSpace(ActiveProcessName) && ActiveProcessName != "Unknown")
+                {
+                    _ = _db.LogAppUsageAsync(ActiveProcessName, ActiveWindowTitle, deltaSeconds);
+                }
+
+                // 7. Periodic Battery Flush to SQLite (every 30 ticks = 30s)
+                _dbFlushCounter++;
+                if (_dbFlushCounter >= 30)
+                {
+                    _dbFlushCounter = 0;
+                    await _db.SaveBatteryStateAsync(BatteryCapacity, workMins);
+                    await RefreshRecentUsageAsync();
+                }
+
+                // 8. Proactive Nudge Evaluation
+                double timerElapsed = Math.Max(0.0, _focusTimer.TotalDurationSeconds - _focusTimer.RemainingSeconds);
+                var nudge = _nudgeEngine.EvaluateProactiveNudges(
+                    _modeEngine.CurrentMode,
+                    classifiedMode,
+                    ActiveProcessName,
+                    ActiveWindowTitle,
+                    timerElapsed,
+                    _focusTimer.TotalDurationSeconds,
+                    BatteryCapacity,
+                    IsFlowActive,
+                    effectiveIdle,
+                    _nudgeSettings,
+                    _switchTracker.GetRecentSwitchEpochSeconds());
+
+                if (nudge != null)
+                {
+                    ActiveNudgeTitle = nudge.Title;
+                    ActiveNudgeMessage = nudge.Message;
+                    HasActiveNudge = true;
+                    NudgeTriggered?.Invoke(nudge);
+                }
+
+                // 9. Dynamic CBT Companion Advice & Depletion Forecast
+                CompanionAdvice = CompanionService.GenerateCompanionMessage(
+                    trackingActive: true,
+                    todayBypasses: 0,
+                    highStressAlert: SwitchFrictionText.Contains("High"),
+                    latestMood: null,
+                    currentEnergy: BatteryCapacity,
+                    curMode: CurrentModeName);
+
+                BatteryForecast = CompanionService.CalculateBatteryForecast(
+                    CurrentModeName,
+                    BatteryCapacity,
+                    adaptiveRestLimitSeconds: 300);
             }
-
-            // 7. Periodic Battery Flush to SQLite (every 30 ticks = 30s)
-            _dbFlushCounter++;
-            if (_dbFlushCounter >= 30)
+            catch (Exception ex)
             {
-                _dbFlushCounter = 0;
-                await _db.SaveBatteryStateAsync(BatteryCapacity, workMins);
-                await RefreshRecentUsageAsync();
+                Debug.WriteLine($"Error in ProcessStateTickAsync: {ex}");
             }
         }
 
@@ -269,18 +380,21 @@ namespace MindFlow.Desktop.ViewModels
             try
             {
                 var usage = await _db.GetTodayAppUsageAsync();
-                RecentUsage.Clear();
-                foreach (var item in usage)
-                {
-                    RecentUsage.Add(item);
-                }
-
                 var hourly = await _db.GetTodayHourlyProductivityAsync();
-                HourlyTrends.Clear();
-                foreach (var item in hourly)
+                Application.Current?.Dispatcher?.Invoke(() =>
                 {
-                    HourlyTrends.Add(item);
-                }
+                    RecentUsage.Clear();
+                    foreach (var item in usage)
+                    {
+                        RecentUsage.Add(item);
+                    }
+
+                    HourlyTrends.Clear();
+                    foreach (var item in hourly)
+                    {
+                        HourlyTrends.Add(item);
+                    }
+                });
             }
             catch { }
         }
@@ -412,6 +526,34 @@ namespace MindFlow.Desktop.ViewModels
                 CurrentModeName = "Work";
                 StatusMessage = $"Sprint extended by {minutes} minutes";
             }
+        }
+
+        [RelayCommand]
+        public void DismissNudge()
+        {
+            _nudgeEngine.DismissActiveNudge();
+            HasActiveNudge = false;
+        }
+
+        [RelayCommand]
+        public void SnoozeNudge()
+        {
+            _nudgeEngine.Snooze();
+            HasActiveNudge = false;
+        }
+
+        [RelayCommand]
+        public void SweepWorkspace()
+        {
+            _ = _workspaceMgr.SweepBackAllAsync();
+            StatusMessage = "Workspace swept back to profile folders";
+        }
+
+        [RelayCommand]
+        public void SwitchWorkspaceProfile(string? profile)
+        {
+            _ = Task.Run(() => _workspaceMgr.TransitionWorkspace(string.Empty, profile));
+            StatusMessage = $"Switched to {profile} profile";
         }
 
         public void Dispose()

@@ -1,32 +1,53 @@
 # MIND-FLOW (Cognitive Productivity Tracker)
 
-MIND-FLOW is a desktop application that acts as your digital sanctuary, tracking your cognitive load and reminding you to take restorative breaks before you burn out.
+MIND-FLOW is a high-performance native Windows desktop application (.NET 8 WPF) designed as a cognitive sanctuary. It tracks active cognitive load in real-time, protects flow state, models energy depletion, provides proactive CBT nudges, and helps you take restorative breaks before burnout occurs.
+
+---
 
 ## 🚀 How to Launch the App
 
-To run the application, simply double-click the **`Launch MIND-FLOW.bat`** file located in this folder.
+### Option 1: Quick Launcher (Recommended)
+Double-click **`Launch MIND-FLOW.bat`** in this root directory. It automatically runs the packaged standalone executable, existing Release build, or falls back to `dotnet run`.
 
-Alternatively, you can run it from PowerShell:
+### Option 2: Command Line (.NET SDK)
+Run from PowerShell or Command Prompt:
 ```powershell
-.\.venv\Scripts\python.exe app.py
+dotnet run --project native\src\MindFlow.Desktop\MindFlow.Desktop.csproj -c Release
 ```
 
-## 🛠️ How to Develop & Build the UI
+---
 
-The user interface is a React/Vite application located in the `Cognitive Productivity Tracker UI` folder. 
-If you make changes to the React code, you **must build it** so the Python backend can serve the new files.
+## 🏗️ Architecture
 
-1. Open PowerShell and navigate to the UI folder:
-   ```powershell
-   cd "Cognitive Productivity Tracker UI"
-   ```
-2. Build the project:
-   ```powershell
-   npm run build
-   ```
-   *(The `postbuild` script will automatically copy the generated files to the `static` and `templates` folders where the Flask backend expects them).*
+MIND-FLOW is structured as a modular .NET 8 solution (`native/MindFlow.sln`):
 
-To run a live development server for the UI only:
+| Project | Description |
+|---|---|
+| **`MindFlow.Core`** | Pure domain logic: Cognitive battery depletion model, `CognitiveNudgeEngine`, `CompanionService`, task classification, Pomodoro/Flow timer engine, CRDT sync engine (`LWWElementSet`), RFC-5545 `CalendarSyncEngine`, and `WorkspaceManager`. |
+| **`MindFlow.Data`** | Local high-throughput data store using SQLite in WAL mode (`PRAGMA journal_mode=WAL;`), schema migrations, 30-day productivity trends, category breakdowns, and fatigue duration analytics. |
+| **`MindFlow.Win32`** | Low-level Win32 P/Invoke integrations: `SetWinEventHook` foreground tracking, global hotkeys (`RegisterHotKey`), `GetLastInputInfo` idle detection, system tray lifecycle, and power state telemetry. |
+| **`MindFlow.Desktop`** | WPF MVVM user interface, system tray companion menu, HUD stats, and settings overlay. |
+| **`MindFlow.Tests`** | Comprehensive xUnit test suite validating all core engines, databases, CRDT sets, nudges, and workspace security. |
+
+---
+
+## 📦 Packaging Standalone Executables
+
+To build a zero-dependency, self-contained single-file binary for distribution:
+
 ```powershell
-npm run dev
+.\native\package_native.ps1
 ```
+
+The resulting standalone executable will be generated at:
+`dist\MIND-FLOW-Native\MIND-FLOW.exe`
+
+---
+
+## 🧪 Running Automated Tests
+
+Run the full xUnit test suite from the repository root:
+```powershell
+dotnet test native/MindFlow.sln
+```
+All unit and integration tests run in-memory or on isolated temporary databases with zero side effects.

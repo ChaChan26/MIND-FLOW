@@ -6,8 +6,10 @@ Copyright (c) 2026 ChaChan26. All rights reserved.
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace MindFlow.Win32.Hotkeys
 {
@@ -33,7 +35,7 @@ namespace MindFlow.Win32.Hotkeys
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         private readonly IntPtr _hWnd;
-        private readonly Dictionary<int, Action> _registeredActions = new();
+        private readonly ConcurrentDictionary<int, Action> _registeredActions = new();
         private int _currentId = 9000;
         private bool _disposed = false;
 
@@ -46,7 +48,7 @@ namespace MindFlow.Win32.Hotkeys
         {
             if (_hWnd == IntPtr.Zero || callback == null) return -1;
 
-            int id = ++_currentId;
+            int id = Interlocked.Increment(ref _currentId);
             bool success = RegisterHotKey(_hWnd, id, (uint)modifiers, virtualKey);
             if (success)
             {
@@ -58,11 +60,9 @@ namespace MindFlow.Win32.Hotkeys
 
         public bool Unregister(int id)
         {
-            if (_registeredActions.ContainsKey(id))
+            if (_registeredActions.TryRemove(id, out _))
             {
-                bool success = UnregisterHotKey(_hWnd, id);
-                _registeredActions.Remove(id);
-                return success;
+                return UnregisterHotKey(_hWnd, id);
             }
             return false;
         }

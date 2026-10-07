@@ -79,6 +79,14 @@ namespace MindFlow.Desktop
 
             if (DataContext is MainViewModel vm)
             {
+                vm.NudgeTriggered += nudge =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        _trayManager?.ShowNotification(nudge.Title, nudge.Message);
+                    });
+                };
+
                 vm.PropertyChanged += (s, args) =>
                 {
                     if (args.PropertyName == nameof(MainViewModel.BatteryCapacityFormatted) ||
@@ -168,6 +176,20 @@ namespace MindFlow.Desktop
             var breakItem = new MenuItem { Header = "☕ Rest Break" };
             breakItem.Click += (s, e) => (DataContext as MainViewModel)?.TakeBreak();
             menu.Items.Add(breakItem);
+
+            menu.Items.Add(new Separator());
+
+            var workProfileItem = new MenuItem { Header = "💼 Switch to Work Workspace" };
+            workProfileItem.Click += (s, e) => (DataContext as MainViewModel)?.SwitchWorkspaceProfile("Work");
+            menu.Items.Add(workProfileItem);
+
+            var rechargeProfileItem = new MenuItem { Header = "🎮 Switch to Recharge Workspace" };
+            rechargeProfileItem.Click += (s, e) => (DataContext as MainViewModel)?.SwitchWorkspaceProfile("Recharge");
+            menu.Items.Add(rechargeProfileItem);
+
+            var sweepItem = new MenuItem { Header = "🧹 Sweep Workspace Back to Profiles" };
+            sweepItem.Click += (s, e) => (DataContext as MainViewModel)?.SweepWorkspace();
+            menu.Items.Add(sweepItem);
 
             menu.Items.Add(new Separator());
 

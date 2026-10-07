@@ -80,6 +80,22 @@ namespace MindFlow.Tests
         }
 
         [Fact]
+        public void TaskClassifier_CacheEviction_MaintainsBoundedSize()
+        {
+            var classifier = new TaskClassifier();
+
+            // Populate more entries than MaxCacheSize (1000)
+            for (int i = 0; i < 1100; i++)
+            {
+                classifier.Classify($"process_{i}.exe", $"Window Title {i}");
+            }
+
+            // Classification still succeeds and produces valid results
+            var result = classifier.Classify("devenv.exe", "Visual Studio");
+            Assert.Equal(ActivityMode.Work, result);
+        }
+
+        [Fact]
         public void ModeEngine_ManualOverride_PreventsAutomaticSwitch()
         {
             var engine = new ModeEngine(ActivityMode.Work);

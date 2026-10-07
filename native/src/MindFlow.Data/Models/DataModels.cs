@@ -63,4 +63,41 @@ namespace MindFlow.Data.Models
         public double StaminaStart { get; set; } = 100.0;
         public double StaminaEnd { get; set; } = 100.0;
     }
+
+    public class DailyProductivityTrendRecord
+    {
+        public string Date { get; set; } = string.Empty;
+        public double WorkMinutes { get; set; }
+        public double RechargeMinutes { get; set; }
+        public double RestMinutes { get; set; }
+        public double FlowMinutes { get; set; }
+    }
+
+    public class CategoryBreakdownRecord
+    {
+        public double WorkSeconds { get; set; }
+        public double RestSeconds { get; set; }
+        public double RechargeSeconds { get; set; }
+        public double NeutralSeconds { get; set; }
+    }
+
+    public class FatigueDurationAnalytics
+    {
+        public double TotalWorkSeconds { get; set; }
+        public double TotalRestSeconds { get; set; }
+        public double AvgDailyWorkSeconds { get; set; }
+        public double LongestContinuousWorkSeconds { get; set; }
+        public double FatigueRiskScore { get; set; }
+        public List<double> HourlyDistribution { get; set; } = new();
+        public int AnalysisPeriodDays { get; set; }
+    }
+
+    public class CalendarEventRecord
+    {
+        public long Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
+    }
 }
+

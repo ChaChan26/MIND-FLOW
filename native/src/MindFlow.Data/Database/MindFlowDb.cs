@@ -172,39 +172,46 @@ namespace MindFlow.Data.Database
 
         private async Task ProcessWriteQueueAsync()
         {
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync(_cts.Token);
-
             var reader = _writeChannel.Reader;
-            while (await reader.WaitToReadAsync(_cts.Token))
+            try
             {
-                while (reader.TryRead(out var writeOp))
+                while (await reader.WaitToReadAsync(_cts.Token))
                 {
-                    int retries = 3;
-                    int delayMs = 25;
+                    using var conn = new SqliteConnection(_connectionString);
+                    await conn.OpenAsync(_cts.Token);
 
-                    while (retries > 0)
+                    while (reader.TryRead(out var writeOp))
                     {
-                        try
-                        {
-                            await writeOp(conn);
-                            break;
-                        }
-                        catch (SqliteException ex) when (ex.SqliteErrorCode == 5 /* SQLITE_BUSY */ || ex.SqliteErrorCode == 6 /* SQLITE_LOCKED */)
-                        {
-                            retries--;
-                            if (retries == 0)
-                                break;
+                        int retries = 3;
+                        int delayMs = 25;
 
-                            await Task.Delay(delayMs, _cts.Token);
-                            delayMs *= 2;
-                        }
-                        catch
+                        while (retries > 0)
                         {
-                            break;
+                            try
+                            {
+                                await writeOp(conn);
+                                break;
+                            }
+                            catch (SqliteException ex) when (ex.SqliteErrorCode == 5 /* SQLITE_BUSY */ || ex.SqliteErrorCode == 6 /* SQLITE_LOCKED */)
+                            {
+                                retries--;
+                                if (retries == 0)
+                                    break;
+
+                                await Task.Delay(delayMs, _cts.Token);
+                                delayMs *= 2;
+                            }
+                            catch
+                            {
+                                break;
+                            }
                         }
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                // Clean shutdown
             }
         }
 
@@ -478,6 +485,239 @@ namespace MindFlow.Data.Database
             cmd.Parameters.AddWithValue("@today", today);
             var result = await cmd.ExecuteScalarAsync();
             return result != null && result != DBNull.Value ? Convert.ToInt32(result) : 0;
+        }
+
+        public async Task<List<DailyProductivityTrendRecord>> GetDailyProductivityTrendsAsync(int days = 7)
+        {
+            var results = new List<DailyProductivityTrendRecord>();
+            string cutoffDate = DateTime.UtcNow.Date.AddDays(-(days - 1)).ToString("yyyy-MM-dd");
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT 
+                    DATE(start) as log_date,
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'work' THEN duration ELSE 0 END) / 60.0, 1) as work_mins,
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'recharge' THEN duration ELSE 0 END) / 60.0, 1) as recharge_mins,
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'rest' THEN duration ELSE 0 END) / 60.0, 1) as rest_mins,
+                    ROUND(SUM(flow_duration) / 60.0, 1) as flow_mins
+                FROM sessions
+                WHERE DATE(start) >= @cutoff
+                GROUP BY log_date
+                ORDER BY log_date ASC;
+            ";
+            cmd.Parameters.AddWithValue("@cutoff", cutoffDate);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new DailyProductivityTrendRecord
+                {
+                    Date = reader.GetString(0),
+                    WorkMinutes = reader.GetDouble(1),
+                    RechargeMinutes = reader.GetDouble(2),
+                    RestMinutes = reader.GetDouble(3),
+                    FlowMinutes = reader.GetDouble(4)
+                });
+            }
+
+            return results;
+        }
+
+        public async Task<CategoryBreakdownRecord> GetCategoryBreakdownAsync(DateTime start, DateTime end)
+        {
+            var result = new CategoryBreakdownRecord();
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT 
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'work' THEN duration ELSE 0 END), 2),
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'rest' THEN duration ELSE 0 END), 2),
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'recharge' THEN duration ELSE 0 END), 2),
+                    ROUND(SUM(CASE WHEN LOWER(mode) = 'neutral' THEN duration ELSE 0 END), 2)
+                FROM sessions
+                WHERE start >= @start AND start <= @end;
+            ";
+            cmd.Parameters.AddWithValue("@start", start.ToString("o"));
+            cmd.Parameters.AddWithValue("@end", end.ToString("o"));
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                result.WorkSeconds = reader.IsDBNull(0) ? 0.0 : reader.GetDouble(0);
+                result.RestSeconds = reader.IsDBNull(1) ? 0.0 : reader.GetDouble(1);
+                result.RechargeSeconds = reader.IsDBNull(2) ? 0.0 : reader.GetDouble(2);
+                result.NeutralSeconds = reader.IsDBNull(3) ? 0.0 : reader.GetDouble(3);
+            }
+
+            return result;
+        }
+
+        public async Task<FatigueDurationAnalytics> GetFatigueDurationAnalyticsAsync(int days = 30)
+        {
+            var result = new FatigueDurationAnalytics
+            {
+                AnalysisPeriodDays = days,
+                HourlyDistribution = Enumerable.Repeat(0.0, 24).ToList()
+            };
+
+            string cutoffDate = DateTime.UtcNow.Date.AddDays(-(days - 1)).ToString("yyyy-MM-dd");
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            // 1. Totals & Active Days
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    SELECT 
+                        ROUND(SUM(CASE WHEN LOWER(mode) = 'work' THEN duration ELSE 0 END), 2) as total_work,
+                        ROUND(SUM(CASE WHEN LOWER(mode) IN ('rest', 'recharge') THEN duration ELSE 0 END), 2) as total_rest,
+                        COUNT(DISTINCT DATE(start)) as active_days
+                    FROM sessions
+                    WHERE DATE(start) >= @cutoff;
+                ";
+                cmd.Parameters.AddWithValue("@cutoff", cutoffDate);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    result.TotalWorkSeconds = reader.IsDBNull(0) ? 0.0 : reader.GetDouble(0);
+                    result.TotalRestSeconds = reader.IsDBNull(1) ? 0.0 : reader.GetDouble(1);
+                    int activeDays = reader.IsDBNull(2) ? 1 : Math.Max(1, reader.GetInt32(2));
+                    result.AvgDailyWorkSeconds = Math.Round(result.TotalWorkSeconds / activeDays, 2);
+                }
+            }
+
+            // 2. Hourly Work Distribution
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    SELECT 
+                        CAST(strftime('%H', start) AS INTEGER) as hr,
+                        ROUND(SUM(CASE WHEN LOWER(mode) = 'work' THEN duration ELSE 0 END), 2) as work_dur
+                    FROM sessions
+                    WHERE DATE(start) >= @cutoff
+                    GROUP BY hr;
+                ";
+                cmd.Parameters.AddWithValue("@cutoff", cutoffDate);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    int hr = reader.GetInt32(0);
+                    double dur = reader.GetDouble(1);
+                    if (hr >= 0 && hr < 24)
+                    {
+                        result.HourlyDistribution[hr] = dur;
+                    }
+                }
+            }
+
+            // 3. Continuous Work Blocks & Fatigue Score Calculation
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    SELECT mode, duration
+                    FROM sessions
+                    WHERE DATE(start) >= @cutoff
+                    ORDER BY start ASC;
+                ";
+                cmd.Parameters.AddWithValue("@cutoff", cutoffDate);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                double currentBlock = 0.0;
+                double maxBlock = 0.0;
+                var workBlocks = new List<double>();
+
+                while (await reader.ReadAsync())
+                {
+                    string mode = (reader.GetString(0) ?? "").ToLowerInvariant().Trim();
+                    double dur = reader.GetDouble(1);
+
+                    if (mode == "work")
+                    {
+                        currentBlock += dur;
+                        if (currentBlock > maxBlock) maxBlock = currentBlock;
+                    }
+                    else
+                    {
+                        if (currentBlock > 0)
+                        {
+                            workBlocks.Add(currentBlock);
+                            currentBlock = 0.0;
+                        }
+                    }
+                }
+
+                if (currentBlock > 0) workBlocks.Add(currentBlock);
+
+                result.LongestContinuousWorkSeconds = Math.Round(maxBlock, 2);
+                int fatigueOverThreshold = workBlocks.Count(b => b >= 2700.0); // 45+ minutes
+                double workRestRatio = result.TotalWorkSeconds / (result.TotalRestSeconds + 1.0);
+                result.FatigueRiskScore = Math.Min(100.0, Math.Round(fatigueOverThreshold * 15.0 + workRestRatio * 10.0, 1));
+            }
+
+            return result;
+        }
+
+        public async Task SaveCalendarEventsAsync(IReadOnlyList<(string Title, string StartTime, string EndTime)> events)
+        {
+            if (events == null || events.Count == 0) return;
+
+            await QueueWriteAsync(async conn =>
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "INSERT INTO calendar_events (title, start_time, end_time) VALUES (@title, @start, @end);";
+
+                var pTitle = cmd.Parameters.Add("@title", SqliteType.Text);
+                var pStart = cmd.Parameters.Add("@start", SqliteType.Text);
+                var pEnd = cmd.Parameters.Add("@end", SqliteType.Text);
+
+                foreach (var ev in events)
+                {
+                    pTitle.Value = ev.Title;
+                    pStart.Value = ev.StartTime;
+                    pEnd.Value = ev.EndTime;
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            });
+        }
+
+        public async Task<List<CalendarEventRecord>> GetCalendarEventsAsync(string? date = null)
+        {
+            var results = new List<CalendarEventRecord>();
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            if (!string.IsNullOrWhiteSpace(date))
+            {
+                cmd.CommandText = "SELECT id, title, start_time, end_time FROM calendar_events WHERE DATE(start_time) = @date ORDER BY start_time ASC;";
+                cmd.Parameters.AddWithValue("@date", date);
+            }
+            else
+            {
+                cmd.CommandText = "SELECT id, title, start_time, end_time FROM calendar_events ORDER BY start_time ASC;";
+            }
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new CalendarEventRecord
+                {
+                    Id = reader.GetInt64(0),
+                    Title = reader.GetString(1),
+                    StartTime = reader.GetString(2),
+                    EndTime = reader.GetString(3)
+                });
+            }
+
+            return results;
         }
 
         public async Task FlushAsync()

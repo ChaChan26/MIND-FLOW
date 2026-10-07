@@ -2,27 +2,23 @@
 setlocal
 cd /d "%~dp0"
 echo ========================================
-echo       Starting MIND-FLOW Companion
+echo       Starting MIND-FLOW (.NET 8 WPF)
 echo ========================================
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [Setup] Virtual environment not found. Initializing .venv...
-    where python >nul 2>nul
-    if %errorlevel% neq 0 (
-        echo [Error] Python is not installed or not in PATH. Please install Python 3.10+ from python.org.
-        pause
-        exit /b 1
-    )
-    python -m venv .venv
-    echo [Setup] Installing production dependencies...
-    .\.venv\Scripts\pip.exe install -r requirements.txt
+if exist "dist\MIND-FLOW-Native\MIND-FLOW.exe" (
+    start "" "dist\MIND-FLOW-Native\MIND-FLOW.exe"
+    exit /b 0
 )
 
-echo [Launch] Starting core application...
-.\.venv\Scripts\python.exe app.py
-if %errorlevel% neq 0 (
-    echo.
-    echo [Error] Application exited with code %errorlevel%.
-    pause
+if exist "build_native\MindFlow.Desktop.exe" (
+    start "" "build_native\MindFlow.Desktop.exe"
+    exit /b 0
 )
 
+if exist "native\src\MindFlow.Desktop\bin\Release\net8.0-windows\MindFlow.Desktop.exe" (
+    start "" "native\src\MindFlow.Desktop\bin\Release\net8.0-windows\MindFlow.Desktop.exe"
+    exit /b 0
+)
+
+echo [Info] Running with dotnet...
+dotnet run --project "native\src\MindFlow.Desktop\MindFlow.Desktop.csproj" -c Release

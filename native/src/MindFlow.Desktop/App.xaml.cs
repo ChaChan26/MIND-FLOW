@@ -19,7 +19,11 @@ namespace MindFlow.Desktop
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            string logPath = @"C:\MIND\native_startup.log";
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string mindDir = Path.Combine(appData, "MIND");
+            Directory.CreateDirectory(mindDir);
+            string logPath = Path.Combine(mindDir, "native_startup.log");
+
             try
             {
                 File.WriteAllText(logPath, $"[Startup] Started at {DateTime.Now}\n");
@@ -45,6 +49,16 @@ namespace MindFlow.Desktop
                     File.AppendAllText(logPath, $"[AppDomainException] {args.ExceptionObject}\n");
                 }
                 catch { }
+            };
+
+            TaskScheduler.UnobservedTaskException += (sender, args) =>
+            {
+                try
+                {
+                    File.AppendAllText(logPath, $"[UnobservedTaskException] {args.Exception}\n");
+                }
+                catch { }
+                args.SetObserved();
             };
 
             _singleInstanceMutex = new SingleInstanceMutex("Local\\MIND_FLOW_SINGLE_INSTANCE_MUTEX");

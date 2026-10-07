@@ -16,13 +16,12 @@ namespace MindFlow.Core.Classification
     public class TaskClassifier
     {
         private readonly ConcurrentDictionary<string, ActivityMode> _lruCache = new();
+        private readonly ConcurrentQueue<string> _keyQueue = new();
         private const int MaxCacheSize = 1000;
 
         private readonly Regex _workPattern;
         private readonly Regex _rechargePattern;
         private readonly Regex _neutralPattern;
-
-        private readonly ConcurrentDictionary<string, Regex?> _compiledRegexCache = new();
         private readonly List<(Regex Pattern, ActivityMode Mode)> _userRules = new();
         private readonly object _rulesLock = new();
 
@@ -69,6 +68,7 @@ namespace MindFlow.Core.Classification
                 {
                     _userRules.Add((rx, mode));
                     _lruCache.Clear();
+                    _keyQueue.Clear();
                 }
             }
             catch
@@ -83,6 +83,7 @@ namespace MindFlow.Core.Classification
             {
                 _userRules.Clear();
                 _lruCache.Clear();
+                _keyQueue.Clear();
             }
         }
 
@@ -158,10 +159,18 @@ namespace MindFlow.Core.Classification
 
         private void CacheResult(string key, ActivityMode mode)
         {
-            if (_lruCache.Count >= MaxCacheSize)
-                _lruCache.Clear();
-
-            _lruCache[key] = mode;
+            if (_lruCache.TryAdd(key, mode))
+            {
+                _keyQueue.Enqueue(key);
+                while (_lruCache.Count > MaxCacheSize && _keyQueue.TryDequeue(out var oldestKey))
+                {
+                    _lruCache.TryRemove(oldestKey, out _);
+                }
+            }
+            else
+            {
+                _lruCache[key] = mode;
+            }
         }
 
         public static bool IsSafeRegex(string pattern)

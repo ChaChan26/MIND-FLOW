@@ -44,5 +44,21 @@ namespace MindFlow.Tests
             bool handled = manager.ProcessMessage(HotkeyManager.WM_HOTKEY, (IntPtr)9999, IntPtr.Zero);
             Assert.False(handled);
         }
+
+        [Fact]
+        public void HotkeyManager_Unregister_MissingId_ReturnsFalse()
+        {
+            using var manager = new HotkeyManager(IntPtr.Zero);
+            bool success = manager.Unregister(9999);
+            Assert.False(success);
+        }
+
+        [Fact]
+        public void HotkeyManager_Dispose_CanBeCalledMultipleTimes()
+        {
+            var manager = new HotkeyManager(IntPtr.Zero);
+            manager.Dispose();
+            manager.Dispose(); // Verify idempotent cleanup
+        }
     }
 }

@@ -38,6 +38,21 @@ namespace MindFlow.Core.Telemetry
             }
         }
 
+        public IReadOnlyList<double> GetRecentSwitchEpochSeconds(DateTime? now = null)
+        {
+            DateTime current = now ?? DateTime.UtcNow;
+            lock (_lock)
+            {
+                PruneOldSwitches(current);
+                var list = new List<double>(_recentSwitches.Count);
+                foreach (var dt in _recentSwitches)
+                {
+                    list.Add(new DateTimeOffset(dt).ToUnixTimeSeconds());
+                }
+                return list;
+            }
+        }
+
         public double SwitchesPerMinute
         {
             get

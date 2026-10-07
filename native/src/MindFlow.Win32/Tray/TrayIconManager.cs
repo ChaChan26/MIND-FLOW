@@ -65,6 +65,7 @@ namespace MindFlow.Win32.Tray
 
         private IntPtr _hwnd;
         private IntPtr _hIcon;
+        private bool _ownsCustomIcon = false;
         private bool _isCreated = false;
         private readonly int _uID = 1001;
         private readonly object _lock = new();
@@ -74,13 +75,14 @@ namespace MindFlow.Win32.Tray
 
         public bool IsInitialized => _isCreated;
 
-        public bool Initialize(IntPtr hwnd, string initialTip = "MIND-FLOW // Cognitive Companion", IntPtr customIcon = default)
+        public bool Initialize(IntPtr hwnd, string initialTip = "MIND-FLOW // Cognitive Companion", IntPtr customIcon = default, bool ownsCustomIcon = false)
         {
             lock (_lock)
             {
                 if (_isCreated) return true;
 
                 _hwnd = hwnd;
+                _ownsCustomIcon = ownsCustomIcon;
                 if (customIcon != IntPtr.Zero)
                 {
                     _hIcon = customIcon;
@@ -88,6 +90,7 @@ namespace MindFlow.Win32.Tray
                 else
                 {
                     _hIcon = LoadIcon(IntPtr.Zero, (IntPtr)IDI_APPLICATION);
+                    _ownsCustomIcon = false;
                 }
 
                 NOTIFYICONDATA nid = new NOTIFYICONDATA
@@ -188,6 +191,11 @@ namespace MindFlow.Win32.Tray
         public void Dispose()
         {
             Remove();
+            if (_ownsCustomIcon && _hIcon != IntPtr.Zero)
+            {
+                try { DestroyIcon(_hIcon); } catch { }
+                _hIcon = IntPtr.Zero;
+            }
             GC.SuppressFinalize(this);
         }
 

@@ -1,46 +1,36 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# PyInstaller / Packaging / Build outputs
-build/
-dist/
-*.spec
-
 # .NET / Visual Studio build outputs
 [Bb]in/
 [Oo]bj/
 .vs/
 *.user
+*.suo
+*.userosscache
+*.sln.docstates
 
-# Local log files
-*.log
-app_stderr.log
-app_stdout.log
+# Distribution & native build outputs
+build/
+dist/
+build_native/
 
-# Temporary REPL/Step files
-app_repl_*.txt
-app_step_*.py
-tmp*.json
-
-# Data/Config files
-mind_flow_data.json
-Workspace_Profiles/
-node_modules/
-chrome_user_data_temp/
+# Local database and WAL files
 mind_flow_data.db
+mind_flow_data.db-shm
+mind_flow_data.db-wal
+mind_flow_data.json
 mind_flow_data.json.bak
-scratch/
-templates/index.html.bak
+Workspace_Profiles/
 
-# Workspace developer rules & agent metadata
+# Log and temporary files
+*.log
+*.tmp
+backups/
+scratch/
+
+# Agent metadata and tracking
 .agents/
 .serena/
 .gemini/
 .claude/
 .cursor/
 skill-observations/
-.venv/
 *.zip
-backups/
