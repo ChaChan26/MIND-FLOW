@@ -6,15 +6,18 @@ Copyright (c) 2026 ChaChan26. All rights reserved.
 */
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MindFlow.Core.Battery;
+using MindFlow.Core.Calendar;
 using MindFlow.Core.Classification;
 using MindFlow.Core.Companion;
 using MindFlow.Core.Focus;
@@ -128,8 +131,52 @@ namespace MindFlow.Desktop.ViewModels
         [ObservableProperty]
         private bool _hasActiveNudge = false;
 
+        [ObservableProperty]
+        private string _currentWorkspaceProfile = "Work";
+
+        [ObservableProperty]
+        private bool _flowShieldEnabled = true;
+
+        [ObservableProperty]
+        private bool _eyeCare202020Enabled = true;
+
+        [ObservableProperty]
+        private bool _hydrationReminderEnabled = true;
+
+        [ObservableProperty]
+        private string _calendarUrl = string.Empty;
+
+        [ObservableProperty]
+        private string _calendarSyncStatus = "No calendar connected";
+
+        [ObservableProperty]
+        private double _totalWorkHours30d = 0.0;
+
+        [ObservableProperty]
+        private double _totalRestHours30d = 0.0;
+
+        [ObservableProperty]
+        private double _longestContinuousWorkMins = 0.0;
+
+        [ObservableProperty]
+        private double _fatigueRiskScore = 0.0;
+
+        [ObservableProperty]
+        private string _fatigueRiskLevel = "Optimal";
+
+        [ObservableProperty]
+        private double _todayWorkMins = 0.0;
+
+        [ObservableProperty]
+        private double _todayRechargeMins = 0.0;
+
+        [ObservableProperty]
+        private double _todayRestMins = 0.0;
+
         public ObservableCollection<AppUsageRecord> RecentUsage { get; } = new();
         public ObservableCollection<HourlyProductivityRecord> HourlyTrends { get; } = new();
+        public ObservableCollection<DailyProductivityTrendRecord> DailyTrends { get; } = new();
+        public ObservableCollection<CalendarEventRecord> UpcomingCalendarEvents { get; } = new();
 
         public MainViewModel()
         {
@@ -211,6 +258,8 @@ namespace MindFlow.Desktop.ViewModels
                 SwitchRatePerMin = Math.Round(_switchTracker.SwitchesPerMinute, 2);
 
                 await RefreshRecentUsageAsync();
+                await RefreshAnalyticsAsync();
+                await LoadCalendarEventsAsync();
             }
             catch (Exception ex)
             {
@@ -330,9 +379,14 @@ namespace MindFlow.Desktop.ViewModels
                     _dbFlushCounter = 0;
                     await _db.SaveBatteryStateAsync(BatteryCapacity, workMins);
                     await RefreshRecentUsageAsync();
+                    await RefreshAnalyticsAsync();
                 }
 
                 // 8. Proactive Nudge Evaluation
+                _nudgeSettings.EnableDistractionNudges = FlowShieldEnabled;
+                _nudgeSettings.EnableEyeCareNudges = EyeCare202020Enabled;
+                _nudgeSettings.EnableHydrationNudges = HydrationReminderEnabled;
+
                 double timerElapsed = Math.Max(0.0, _focusTimer.TotalDurationSeconds - _focusTimer.RemainingSeconds);
                 var nudge = _nudgeEngine.EvaluateProactiveNudges(
                     _modeEngine.CurrentMode,
@@ -552,8 +606,97 @@ namespace MindFlow.Desktop.ViewModels
         [RelayCommand]
         public void SwitchWorkspaceProfile(string? profile)
         {
-            _ = Task.Run(() => _workspaceMgr.TransitionWorkspace(string.Empty, profile));
-            StatusMessage = $"Switched to {profile} profile";
+            string target = string.IsNullOrWhiteSpace(profile)
+                ? (CurrentWorkspaceProfile == "Work" ? "Recharge" : "Work")
+                : profile;
+            CurrentWorkspaceProfile = target;
+            _ = Task.Run(() => _workspaceMgr.TransitionWorkspace(string.Empty, target));
+            StatusMessage = $"Switched to {target} workspace profile";
+        }
+
+        [RelayCommand]
+        public async Task SyncCalendarAsync()
+        {
+            if (string.IsNullOrWhiteSpace(CalendarUrl))
+            {
+                CalendarSyncStatus = "Please enter an iCal feed URL.";
+                return;
+            }
+
+            try
+            {
+                CalendarSyncStatus = "Connecting & validating URL...";
+                var events = await CalendarSyncEngine.FetchAndParseCalendarAsync(CalendarUrl);
+                var tuples = new List<(string Title, string StartTime, string EndTime)>();
+                foreach (var ev in events)
+                {
+                    tuples.Add((ev.Title, ev.StartTime.ToString("o"), ev.EndTime.ToString("o")));
+                }
+
+                await _db.SaveCalendarEventsAsync(tuples);
+                await LoadCalendarEventsAsync();
+                CalendarSyncStatus = $"Synced {events.Count} events successfully.";
+            }
+            catch (Exception ex)
+            {
+                CalendarSyncStatus = $"Sync error: {ex.Message}";
+            }
+        }
+
+        private async Task LoadCalendarEventsAsync()
+        {
+            try
+            {
+                var events = await _db.GetCalendarEventsAsync(null);
+                Application.Current?.Dispatcher?.Invoke(() =>
+                {
+                    UpcomingCalendarEvents.Clear();
+                    foreach (var ev in events)
+                    {
+                        UpcomingCalendarEvents.Add(ev);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error loading calendar events: {ex.Message}");
+            }
+        }
+
+        private async Task RefreshAnalyticsAsync()
+        {
+            try
+            {
+                var trends = await _db.GetDailyProductivityTrendsAsync(14);
+                var fatigue = await _db.GetFatigueDurationAnalyticsAsync(30);
+                var todayBreakdown = await _db.GetCategoryBreakdownAsync(DateTime.UtcNow.Date, DateTime.UtcNow.Date.AddDays(1));
+
+                Application.Current?.Dispatcher?.Invoke(() =>
+                {
+                    DailyTrends.Clear();
+                    foreach (var t in trends)
+                    {
+                        DailyTrends.Add(t);
+                    }
+
+                    TotalWorkHours30d = Math.Round(fatigue.TotalWorkSeconds / 3600.0, 1);
+                    TotalRestHours30d = Math.Round(fatigue.TotalRestSeconds / 3600.0, 1);
+                    LongestContinuousWorkMins = Math.Round(fatigue.LongestContinuousWorkSeconds / 60.0, 1);
+                    FatigueRiskScore = fatigue.FatigueRiskScore;
+
+                    if (FatigueRiskScore >= 70.0) FatigueRiskLevel = "High Strain";
+                    else if (FatigueRiskScore >= 40.0) FatigueRiskLevel = "Moderate";
+                    else FatigueRiskLevel = "Optimal";
+
+                    TodayWorkMins = Math.Round(todayBreakdown.WorkSeconds / 60.0, 1);
+                    TodayRechargeMins = Math.Round(todayBreakdown.RechargeSeconds / 60.0, 1);
+                    TodayRestMins = Math.Round(todayBreakdown.RestSeconds / 60.0, 1);
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error refreshing analytics: {ex.Message}");
+            }
         }
 
         public void Dispose()
