@@ -1,0 +1,38 @@
+name: Build, Test & Package MIND-FLOW
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8 SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore Dependencies
+      run: dotnet restore native/MindFlow.sln
+
+    - name: Run xUnit Tests
+      run: dotnet test native/MindFlow.sln --no-restore --verbosity normal
+
+    - name: Package Standalone Single-File Binary
+      shell: pwsh
+      run: |
+        .\native\package_native.ps1 -Configuration Release -Runtime win-x64 -OutputDir dist/MIND-FLOW-Native
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MIND-FLOW-Windows-x64
+        path: dist/MIND-FLOW-Native/MIND-FLOW.exe
